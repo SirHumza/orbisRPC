@@ -102,7 +102,9 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
     int on = 1;
     sceNetSetsockopt(fd, SOL_SOCKET, SO_NBIO, &on, sizeof on);
     w->fd = fd; w->sock = fd; w->connected = 1; w->nb = 1;
-    /* TLS via LibreSSL */
+    /* TLS via LibreSSL. The socket is ALREADY non-blocking, so SSL_connect
+     * returns WANT_READ/WANT_WRITE instead of completing in one call: poll
+     * with a deadline until the handshake finishes or times out. */
     SSL_CTX *ctx = SSL_CTX_new(SSLv23_client_method());
     if(!ctx){ log_msg("SSL_CTX_new fail"); goto fail; }
     SSL *ssl = SSL_new(ctx);
@@ -112,7 +114,17 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
      *   TLSEXT_NAMETYPE_host_name(0), hostname). Discord TLS needs the host. */
     if(SSL_ctrl(ssl, 55, 0, (void *)host) != 1){ log_msg("SNI warn"); }
     SSL_set_connect_state(ssl);
-    if(SSL_connect(ssl) != 1){ log_msg("SSL_connect fail"); SSL_free(ssl); SSL_CTX_free(ctx); goto fail; }
+    int cr=-1; int64_t t0=time(NULL);
+    for(;;){
+        cr = SSL_connect(ssl);
+        if(cr==1) break;
+        int e = SSL_get_error(ssl, cr);
+        if(e==SSL_ERROR_WANT_READ || e==SSL_ERROR_WANT_WRITE){
+            if(time(NULL)-t0 > 5){ log_msg("SSL_connect timeout"); goto fail; }
+            usleep(20000); continue;
+        }
+        log_msg("SSL_connect fail err=%d", e); goto fail;
+    }
     w->ssl_ctx = (int32_t)(intptr_t)ctx;   /* stash for teardown */
     w->ssl     = (int32_t)(intptr_t)ssl;
     /* HTTP Upgrade handshake */
@@ -121,22 +133,22 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
         "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nOrigin: https://discord.com\r\n\r\n",
         resource?resource:"/", host, port, key);
     if(SSL_write(ssl, req, n) <= 0){ log_msg("SSL_write hs fail"); goto fail; }
-    /* read handshake response (blocking here is fine: server responds immediately).
-     * Socket is non-blocking, so handle WANT_READ with a deadline instead of
-     * busy-waiting forever if the server never answers. */
-    char hdr[512]; int hlen=0, rd; int64_t t0=time(NULL);
-    while(hlen<(int)sizeof hdr-4){
-        rd = SSL_read(ssl, hdr+hlen, 1);
-        if(rd==0 || rd<0){
-            int e = SSL_get_error(ssl, rd);
-            if(e==SSL_ERROR_WANT_READ || e==SSL_ERROR_WANT_WRITE){
-                if(time(NULL)-t0 > 5){ log_msg("hs timeout"); goto fail; }
-                usleep(20000); continue;
-            }
-            goto fail; /* EOF or real error before 101 */
+    /* read handshake response in chunks (socket is non-blocking: handle
+     * WANT_READ with a deadline instead of busy-waiting forever). */
+    char hdr[512]; int hlen=0, rd; t0=time(NULL);
+    while(hlen<(int)sizeof hdr-1){
+        rd = SSL_read(ssl, hdr+hlen, (int)(sizeof hdr-1-hlen));
+        if(rd>0){
+            hlen+=rd; hdr[hlen]=0;
+            if(hlen>=4 && memcmp(hdr+hlen-4,"\r\n\r\n",4)==0) break;
+            continue;
         }
-        hlen++; hdr[hlen]=0;
-        if(hlen>=4 && memcmp(hdr+hlen-4,"\r\n\r\n",4)==0) break;
+        int e = SSL_get_error(ssl, rd);
+        if(e==SSL_ERROR_WANT_READ || e==SSL_ERROR_WANT_WRITE){
+            if(time(NULL)-t0 > 5){ log_msg("hs timeout"); goto fail; }
+            usleep(20000); continue;
+        }
+        goto fail; /* EOF or real error before 101 */
     }
     if(hlen<12 || !strstr(hdr,"101")){ log_msg("no 101: %.40s", hdr); goto fail; }
     log_msg("ws: connected (handshake ok)");
@@ -152,8 +164,8 @@ fail:
 /* --- send ----------------------------------------------------------- */
 int ws_send_text(ws_t *w, const char *msg, size_t len){
     if(!w->connected) return -1;
+    if(len > 4080){ log_msg("ws frame too big (%zu); refusing", len); return -1; }
     unsigned char frame[4096]; size_t f=0;
-    if(len > 4080) len = 4080;
     frame[f++]=0x81;
     if(len<126){ frame[f++]=(unsigned char)(0x80|len); }
     else if(len<65536){ frame[f++]=0x80|126; frame[f++]=(len>>8)&0xff; frame[f++]=len&0xff; }
@@ -174,6 +186,13 @@ int ws_send_text(ws_t *w, const char *msg, size_t len){
 int ws_send_ping(ws_t *w){
     if(!w->connected) return -1;
     unsigned char p[2]={0x89,0x00};
+    return SSL_write((SSL*)(intptr_t)w->ssl, p, 2);
+}
+
+/* RFC 6455: pong frames must be sent in reply to server pings. */
+int ws_send_pong(ws_t *w){
+    if(!w->connected) return -1;
+    unsigned char p[2]={0x8A,0x00};
     return SSL_write((SSL*)(intptr_t)w->ssl, p, 2);
 }
 

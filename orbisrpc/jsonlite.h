@@ -16,8 +16,10 @@ typedef struct jl_val {
 typedef struct { const char *cur; const char *end; int err; } jl_parse_t;
 jl_val_t *jl_parse(const char *s, size_t len);
 void jl_free(jl_val_t *v);
-const jl_val_t *jl_obj_get(const jl_val_t *obj, const char *key);
-const jl_val_t *jl_arr_at(const jl_val_t *arr, size_t i);
+/* NOTE: the tree is mutable; getters return non-const so results can be
+ * passed to jl_obj_set / jl_arr_push without const-dropping warnings. */
+jl_val_t *jl_obj_get(jl_val_t *obj, const char *key);
+jl_val_t *jl_arr_at(jl_val_t *arr, size_t i);
 char *jl_stringify(const jl_val_t *v);
 jl_val_t *jl_new_string(const char *s);
 jl_val_t *jl_new_number(double n);

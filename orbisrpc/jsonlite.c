@@ -147,7 +147,7 @@ void jl_free(jl_val_t *v){
     free(v);
 }
 
-const jl_val_t *jl_obj_get(const jl_val_t *obj, const char *key){
+jl_val_t *jl_obj_get(jl_val_t *obj, const char *key){
     if(!obj||obj->type!=JL_OBJECT)return NULL;
     jl_val_t *p=obj->child;
     while(p){
@@ -160,7 +160,7 @@ const jl_val_t *jl_obj_get(const jl_val_t *obj, const char *key){
     return NULL;
 }
 
-const jl_val_t *jl_arr_at(const jl_val_t *arr, size_t i){
+jl_val_t *jl_arr_at(jl_val_t *arr, size_t i){
     if(!arr||arr->type!=JL_ARRAY)return NULL;
     jl_val_t *e=arr->child;
     while(e&&i--){ e=e->next; }
@@ -209,11 +209,8 @@ static void emit(jl_val_t *v, char **out, size_t *cap, size_t *len){
                 first=0;
                 escstr(p->str,out,cap,len);
                 size_t l3=*len+1; if(l3>*cap){*cap=l3*2;*out=realloc(*out,*cap);} (*out)[(*len)++]=':';
-                /* value is the pair's child OR the pair holds value via child */
-                if(p->child) emit(p->child,out,cap,len); else {
-                    size_t lz=*len+1; if(lz>*cap){*cap=lz*2;*out=realloc(*out,*cap);} (*out)[(*len)++]='n';
-                }
-                /* for non-pair objects where a STRING key sits directly: handled above via child */
+                if(p->child){ emit(p->child,out,cap,len); }
+                else { size_t lz=*len+4; if(lz>*cap){*cap=lz*2;*out=realloc(*out,*cap);} memcpy(*out+*len,"null",4);*len+=4; }
                 } p=p->next; }
             l=*len+1; if(l>*cap){*cap=l*2;*out=realloc(*out,*cap);} (*out)[(*len)++]='}'; return; }
     }
@@ -226,9 +223,9 @@ char *jl_stringify(const jl_val_t *v){
     char *out=(char*)malloc(256); if(!out) return NULL;
     size_t cap=256,len=0;
     emit((jl_val_t*)v,&out,&cap,&len);
-    if(!out){ out=(char*)malloc(1); out[0]=0; }
-    else { char *t=(char*)realloc(out,len+1); t[len]=0; out=t; }
-    return out;
+    char *t=(char*)realloc(out,len+1);
+    if(t){ t[len]=0; return t; }
+    out[len]=0; return out; /* realloc failed: still return what we have */
 }
 
 jl_val_t *jl_new_string(const char *s){ jl_val_t *v=newval(JL_STRING); v->str=strdup(s?s:""); v->strlen=strlen(v->str); return v; }

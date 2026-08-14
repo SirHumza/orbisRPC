@@ -107,9 +107,11 @@ static int appxml_title(const char *titleId, char *out, size_t cap){
     p = strchr(p, '>');
     if(!p) return -1;
     p++;
+    while(*p==' '||*p=='\t'||*p=='\r'||*p=='\n') p++; /* trim leading ws */
     size_t i=0;
     while(*p && *p!='<' && *p!='\n' && *p!='\r' && i<cap-1){ out[i++]=*p++; }
     out[i]=0;
+    while(i>0 && (out[i-1]==' '||out[i-1]=='\t')) out[--i]=0; /* trim trailing */
     return (i>0)?0:-1;
 }
 
@@ -152,6 +154,5 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
         strncpy(out_name, "(unknown game)", cap-1); out_name[cap-1]=0;
     }
     if(out_path){ snprintf(out_path, p_cap, "/data/orbisRPC/.lastgame/%s", titleId[0]?titleId:"unknown"); }
-    log_msg("detect: active name=%s tid=%s", out_name, titleId);
     return 0;
 }

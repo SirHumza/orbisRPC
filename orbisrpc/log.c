@@ -1,13 +1,18 @@
-/* log.c */
+/* log.c - file logger: rotating (512 KB cap), timestamped, falls back to stderr. */
 #include "log.h"
 #include <stdarg.h>
 #include <time.h>
 #include <string.h>
+#include <sys/stat.h>
+
+#define LOG_CAP (512 * 1024)
 
 static FILE *g_log = NULL;
 
 void log_init(const char *path) {
     if (g_log) return;
+    struct stat st;
+    if (stat(path, &st) == 0 && st.st_size > LOG_CAP) remove(path); /* rotate */
     g_log = fopen(path, "ab");
     if (g_log) setvbuf(g_log, NULL, _IONBF, 0);
 }
@@ -19,7 +24,7 @@ void log_msg(const char *fmt, ...) {
     time_t t = time(NULL);
     struct tm *tm = localtime(&t);
     char ts[20];
-    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M", tm);
+    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", tm);
     fprintf(g_log, "[%s] ", ts);
     vfprintf(g_log, fmt, ap);
     fprintf(g_log, "\n");

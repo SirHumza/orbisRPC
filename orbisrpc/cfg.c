@@ -11,9 +11,15 @@ cfg_t g_cfg;
 void cfg_defaults(cfg_t *c) {
     memset(c, 0, sizeof(*c));
     c->enabled = 1;
-    c->poll_interval_s = 15;
+    c->poll_interval_s = 12;
     strncpy(c->client_id, "SET_ME", sizeof(c->client_id)-1);
-    strncpy(c->presence_state, "Playing", sizeof(c->presence_state)-1);
+    strncpy(c->presence_state, "On PS4", sizeof(c->presence_state)-1);
+}
+
+/* keep the daemon sane if the user puts junk in config */
+static void clamp_cfg(cfg_t *c){
+    if(c->poll_interval_s < 5)  c->poll_interval_s = 5;
+    if(c->poll_interval_s > 300) c->poll_interval_s = 300;
 }
 
 int cfg_load(const char *path, cfg_t *c) {
@@ -42,6 +48,7 @@ int cfg_load(const char *path, cfg_t *c) {
     o = jl_obj_get(root, "enabled");         if (o && o->type == JL_BOOL)   c->enabled = (int)o->num;
     o = jl_obj_get(root, "poll_interval_s"); if (o && o->type == JL_NUMBER) c->poll_interval_s = (int)o->num;
     jl_free(root);
+    clamp_cfg(c);
     return 0;
 }
 
@@ -57,7 +64,11 @@ void cfg_save(const char *path, const cfg_t *c) {
     jl_obj_set(r, "poll_interval_s",  jl_new_number((double)c->poll_interval_s));
     jl_obj_set(r, "presence_state",   jl_new_string(c->presence_state));
     char *s = jl_stringify(r);
-    FILE *f = fopen(path, "wb");
-    if (f) { fputs(s, f); fclose(f); }
+    /* write tmp + rename so a power loss can't corrupt the config */
+    char tmp[160];
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *f = fopen(tmp, "wb");
+    if (f) { fputs(s, f); fclose(f); rename(tmp, path); }
+    else { log_msg("cfg_save: cannot write %s", tmp); }
     free(s); jl_free(r);
 }

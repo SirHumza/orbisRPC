@@ -9,6 +9,7 @@
 #include "b64.h"
 #include <orbis/UserService.h>
 #include <orbis/libkernel.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <string.h>
@@ -41,17 +42,18 @@ static int ensure_token(void){
 static void set_game_presence(discord_t *d, const char *name){
     if(!name||!*name){ discord_clear_presence(d); return; }
     discord_set_presence(d,
-        "On PS4",                 /* state */
+        g_cfg.presence_state[0]?g_cfg.presence_state:"On PS4", /* state */
         name,                     /* details = game name */
         1, 1,                     /* party */
-        "orbisrpc:playing",          /* large_image key (asset) */
+        "orbisrpc:playing",       /* large_image key (asset) */
         name);                    /* large_text */
     log_msg("presence: %s", name);
 }
 
 int main(int argc, char **argv){
     (void)argc;(void)argv;
-    /* GoldHEN payloads: write to /data/orbisRPC */
+    mkdir(DATA_DIR, 0777);          /* payloads may create their own dir */
+    log_init(LOG_PATH);
     cfg_load(CFG_PATH, &g_cfg);
     if(!g_cfg.enabled){ log_msg("disabled in config; exiting"); return 0; }
     if(!g_cfg.client_id[0] || strcmp(g_cfg.client_id,"SET_ME")==0){
@@ -61,20 +63,20 @@ int main(int argc, char **argv){
     discord_t dc;
     /* keep the daemon alive: transient OAuth/gateway failures retry instead
      * of exiting (a GoldHEN payload only runs once per boot) */
-    for(;;){
+    for(;;){ /* outer: token refresh + fresh connect */
         if(ensure_token()!=0){
             log_msg("no valid token; retry in %ds", g_cfg.poll_interval_s);
             sleep((unsigned)g_cfg.poll_interval_s);
             continue;
         }
-        if(discord_connect(&dc, g_cfg.access_token, NULL)!=0){
+        if(discord_connect(&dc, g_cfg.access_token, 0)!=0){
             log_msg("gateway connect failed; retry in %ds", g_cfg.poll_interval_s);
             sleep((unsigned)g_cfg.poll_interval_s);
             continue;
         }
         char last_name[128]="";
         int64_t last_change = 0;
-        while(1){
+        while(1){ /* inner: live session */
             char name[128]=""; char path[128]="";
             int active = detect_foreground_active();
             if(active && detect_current_game(name,sizeof name,path,sizeof path)==0 && name[0]){
@@ -92,8 +94,11 @@ int main(int argc, char **argv){
             }
             if(discord_tick(&dc) != 0){
                 log_msg("gateway dropped; reconnecting...");
-                ws_close(&dc.ws);
-                break;
+                if(discord_reconnect(&dc)!=0){
+                    ws_close(&dc.ws);
+                    break; /* outer loop: full retry (token + connect) */
+                }
+                last_name[0]=0; /* force re-push of the current game */
             }
             usleep((useconds_t)(g_cfg.poll_interval_s * 1000000));
         }
