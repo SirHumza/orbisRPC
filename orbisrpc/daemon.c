@@ -28,6 +28,10 @@ void daemon_request_stop(void){ s_stop = 1; }
 void daemon_clear_stop(void){ s_stop = 0; }
 
 static int ensure_token(void){
+    /* Re-read config each attempt: the operator edits auth_code/refresh_token
+     * on the console (FTP) while the daemon runs, and cfg_save() persists new
+     * tokens after refresh — the disk file is the source of truth. */
+    cfg_load(CFG_PATH, &g_cfg);
     int64_t now=time(NULL);
     if(g_cfg.access_token[0] && now < g_cfg.token_expires_at - 120) return 0; /* fresh */
     char at[256]="", rt[256]=""; int64_t exp=0;
