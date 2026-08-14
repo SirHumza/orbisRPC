@@ -120,27 +120,32 @@ jl_val_t *jl_parse(const char *s, size_t len){
     return v;
 }
 
+/* Nodes: an OBJECT node is either a pair (str=key, child=value) when it is a
+ * child of an object, or an object value (str=NULL, child=pair list) when it is
+ * a child of an array or a pair's value. Distinguish via str to free everything. */
 void jl_free(jl_val_t *v){
     if(!v)return;
+    if(v->type==JL_STRING){ if(v->str)free(v->str); free(v); return; }
     jl_val_t *c=v->child;
-    if(v->type==JL_STRING){free(v->str);} /* object pair key stored in pair->str */
     while(c){
         jl_val_t *n=c->next;
-        if(c->type==JL_OBJECT){ /* pair: child=val owns, str=key */
-            if(c->child)jl_free(c->child);
-            free(c->str);
+        if(c->type==JL_OBJECT){
+            if(c->str){ /* pair: child=value owns, str=key */
+                if(c->child)jl_free(c->child);
+                free(c->str);
+                free(c);
+            } else {    /* object value: owns its whole pair list */
+                jl_free(c);
+            }
         } else {
             if(c->str)free(c->str);
-            if(c->child)jl_free(c->child); /* shouldn't happen for arrays of scalars */
+            if(c->child)jl_free(c->child);
+            free(c);
         }
-        free(c);
         c=n;
     }
     free(v);
 }
-/* Note: jl_free handles OBJECT as pair list (child=val, str=key) and STRING.
-   Top-level object free: free child pairs properly. */
-/* fix: the walk above frees pair->str and pair->child(val). Good. For ARRAY the child items are standalone (type may be OBJECT-as-pair? no), handle generically above. */
 
 const jl_val_t *jl_obj_get(const jl_val_t *obj, const char *key){
     if(!obj||obj->type!=JL_OBJECT)return NULL;

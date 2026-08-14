@@ -11,5 +11,6 @@ size_t b64_encode(const unsigned char *in, size_t len, char *out){
         out[o++]=i+1<len?b64t[(v>>6)&0x3f]:'=';
         out[o++]=i+2<len?b64t[v&0x3f]:'=';
     }
+    out[o]=0; /* NUL-terminate so callers can use it as a C string */
     return o;
 }

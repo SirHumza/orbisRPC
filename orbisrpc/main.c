@@ -59,38 +59,44 @@ int main(int argc, char **argv){
         return 1;
     }
     discord_t dc;
-    /* token first */
-    if(ensure_token()!=0){
-        log_msg("no valid token; cannot connect gateway");
-        return 2;
-    }
-    if(discord_connect(&dc, g_cfg.access_token, NULL)!=0){
-        log_msg("gateway connect failed");
-        return 3;
-    }
-    char last_name[128]="";
-    int64_t last_change = 0;
+    /* keep the daemon alive: transient OAuth/gateway failures retry instead
+     * of exiting (a GoldHEN payload only runs once per boot) */
     for(;;){
-        char name[128]=""; char path[128]="";
-        int active = detect_foreground_active();
-        if(active && detect_current_game(name,sizeof name,path,sizeof path)==0 && name[0]){
-            int64_t now=time(NULL);
-            if(strcmp(name,last_name)!=0 || now-last_change > 300){
-                set_game_presence(&dc, name);
-                strncpy(last_name, name, sizeof last_name-1);
-                last_change = now;
-            }
-        } else {
-            if(last_name[0] || !active){
-                set_game_presence(&dc, NULL); /* clear when nothing foreground */
-                last_name[0]=0; last_change=time(NULL);
-            }
+        if(ensure_token()!=0){
+            log_msg("no valid token; retry in %ds", g_cfg.poll_interval_s);
+            sleep((unsigned)g_cfg.poll_interval_s);
+            continue;
         }
-        if(discord_tick(&dc) != 0){
-            log_msg("gateway dropped; reconnecting...");
-            discord_reconnect(&dc);
+        if(discord_connect(&dc, g_cfg.access_token, NULL)!=0){
+            log_msg("gateway connect failed; retry in %ds", g_cfg.poll_interval_s);
+            sleep((unsigned)g_cfg.poll_interval_s);
+            continue;
         }
-        usleep((useconds_t)(g_cfg.poll_interval_s * 1000000));
+        char last_name[128]="";
+        int64_t last_change = 0;
+        while(1){
+            char name[128]=""; char path[128]="";
+            int active = detect_foreground_active();
+            if(active && detect_current_game(name,sizeof name,path,sizeof path)==0 && name[0]){
+                int64_t now=time(NULL);
+                if(strcmp(name,last_name)!=0 || now-last_change > 300){
+                    set_game_presence(&dc, name);
+                    strncpy(last_name, name, sizeof last_name-1);
+                    last_change = now;
+                }
+            } else {
+                if(last_name[0] || !active){
+                    set_game_presence(&dc, NULL); /* clear when nothing foreground */
+                    last_name[0]=0; last_change=time(NULL);
+                }
+            }
+            if(discord_tick(&dc) != 0){
+                log_msg("gateway dropped; reconnecting...");
+                ws_close(&dc.ws);
+                break;
+            }
+            usleep((useconds_t)(g_cfg.poll_interval_s * 1000000));
+        }
     }
     discord_clear_presence(&dc);
     ws_close(&dc.ws);

@@ -18,6 +18,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <time.h>
 
 /* OpenSSL-style SSL objects (opaque). We only use pointers + the exported API. */
 typedef struct ssl_ctx_st SSL_CTX;
@@ -120,14 +121,20 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
         "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nOrigin: https://discord.com\r\n\r\n",
         resource?resource:"/", host, port, key);
     if(SSL_write(ssl, req, n) <= 0){ log_msg("SSL_write hs fail"); goto fail; }
-    /* read handshake response (blocking here is fine: server responds immediately) */
-    char hdr[512]; int hlen=0, rd;
+    /* read handshake response (blocking here is fine: server responds immediately).
+     * Socket is non-blocking, so handle WANT_READ with a deadline instead of
+     * busy-waiting forever if the server never answers. */
+    char hdr[512]; int hlen=0, rd; int64_t t0=time(NULL);
     while(hlen<(int)sizeof hdr-4){
         rd = SSL_read(ssl, hdr+hlen, 1);
-        if(rd==0){ /* non-blocking; busy-wait a short window for the response */
-            usleep(20000); continue;
+        if(rd==0 || rd<0){
+            int e = SSL_get_error(ssl, rd);
+            if(e==SSL_ERROR_WANT_READ || e==SSL_ERROR_WANT_WRITE){
+                if(time(NULL)-t0 > 5){ log_msg("hs timeout"); goto fail; }
+                usleep(20000); continue;
+            }
+            goto fail; /* EOF or real error before 101 */
         }
-        if(rd<0){ break; }
         hlen++; hdr[hlen]=0;
         if(hlen>=4 && memcmp(hdr+hlen-4,"\r\n\r\n",4)==0) break;
     }
@@ -151,7 +158,13 @@ int ws_send_text(ws_t *w, const char *msg, size_t len){
     if(len<126){ frame[f++]=(unsigned char)(0x80|len); }
     else if(len<65536){ frame[f++]=0x80|126; frame[f++]=(len>>8)&0xff; frame[f++]=len&0xff; }
     else { frame[f++]=0x80|127; for(int i=7;i>=0;i--)frame[f++]=(len>>(i*8))&0xff; }
-    unsigned char mk[4]={0x12,0x34,0x56,0x78};
+    /* RFC 6455 5.3: a fresh random mask per frame. Cheap LCG seeded per socket. */
+    static uint32_t mk_seed;
+    if(!mk_seed) mk_seed = (uint32_t)time(NULL) ^ (uint32_t)(uintptr_t)w ^ 0x9e3779b9u;
+    mk_seed = mk_seed*1664525u + 1013904223u;
+    unsigned char mk[4];
+    mk[0]=(unsigned char)(mk_seed&0xff); mk[1]=(unsigned char)((mk_seed>>8)&0xff);
+    mk[2]=(unsigned char)((mk_seed>>16)&0xff); mk[3]=(unsigned char)((mk_seed>>24)&0xff);
     memcpy(frame+f, mk, 4); f+=4;
     for(size_t i=0;i<len;i++) frame[f+i]=(msg[i]^mk[i%4]);
     f+=len;
@@ -167,7 +180,8 @@ int ws_send_ping(ws_t *w){
 /* --- recv (non-blocking, buffered) ---------------------------------- */
 /* Try to parse one complete server frame starting at rbuf[rpos].
  * On success fills *fin and *opcode, copies payload into buf (truncated to cap),
- * advances rpos past the frame, and returns the full payload length.
+ * advances rpos past the frame, and returns the number of bytes copied into buf
+ * (may be less than the full payload length for oversized frames).
  * Returns 0 if an incomplete frame is pending. */
 static int try_parse_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out){
     const unsigned char *b = w->rbuf + w->rpos;
@@ -192,7 +206,7 @@ static int try_parse_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int 
     w->rpos += consumed;
     if(w->rpos >= w->rlen){ w->rpos = 0; w->rlen = 0; }
     if(opcode_out)*opcode_out=op; if(fin_out)*fin_out=fin;
-    return (int)plen;
+    return (int)copy; /* only what actually landed in buf */
 }
 
 int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out){

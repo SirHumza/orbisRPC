@@ -58,13 +58,17 @@ int discord_connect(discord_t *d, const char *token, const char *intent){
         jl_free(h);
     }
     if(!d->hb_interval_ms) d->hb_interval_ms=45000;
-    /* IDENTIFY */
+    /* IDENTIFY. User OAuth2 connection: no intents (bot-only field), but the
+     * gateway REQUIRES connection properties os/browser/device. */
     jl_val_t *root=jl_new_object();
     jl_obj_set(root,"op",jl_new_number(2));
     jl_val_t *dd=jl_new_object();
     jl_obj_set(dd,"token",jl_new_string(token));
-    jl_obj_set(dd,"intents",jl_new_number(513));
-    jl_obj_set(dd,"properties",jl_new_object());
+    jl_val_t *pp=jl_new_object();
+    jl_obj_set(pp,"os",jl_new_string("PS4"));
+    jl_obj_set(pp,"browser",jl_new_string("orbisRPC"));
+    jl_obj_set(pp,"device",jl_new_string("orbisRPC"));
+    jl_obj_set(dd,"properties",pp);
     jl_obj_set(root,"d",dd);
     char *s=jl_stringify(root); jl_free(root);
     ws_send_text(&d->ws,s,strlen(s)); free(s);
