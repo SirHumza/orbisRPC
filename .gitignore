@@ -1,5 +1,4 @@
-PS4RP/x64/
-PS4RP/*.oelf
-*.pkg
-pkg.gp4
-eboot.bin
+build/
+*.o
+*.err
+/tmp/
