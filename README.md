@@ -54,7 +54,7 @@ Everything stays on the PS4. Your Mac only touches this repo to *build* it.
 | M5 — GoldHEN autoload + package + install | pending (needs on-console test) |
 | On-console validation (M1's TLS + detection against live FW) | pending |
 
-`build/orbisrpc.elf` (186 KB) and `build/orbisrpc.fself` (192 KB) link successfully
+`build/orbisrpc.elf` (182 KiB) and `build/orbisrpc.fself` (188 KiB) link successfully
 against OpenOrbis v0.5.4; the TLS layer uses `libSceLibreSSL`'s OpenSSL-ABI
 exports (`SSL_CTX_new` / `SSL_connect` / `SSL_write` / `SSL_read`).
 

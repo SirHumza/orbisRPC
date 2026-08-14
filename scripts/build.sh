@@ -6,7 +6,7 @@ SDK="${OO_PS4_TOOLCHAIN:-/Users/mac/PS4Toolchain/OpenOrbis/PS4Toolchain}"
 LLVM_BIN="${LLVM_HOME:-/usr/local/opt/llvm}/bin"
 export PATH="$LLVM_BIN:$SDK/bin/macos:$PATH"
 CC="$LLVM_BIN/clang"
-LD="${LLD:-/usr/local/opt/lld@21/bin/ld.lld}"
+LD="${LLD:-/Users/mac/lldbuild/build/bin/ld.lld}"
 TARGET="x86_64-pc-freebsd12-elf"
 CFLAGS="--target=$TARGET -fPIC -std=gnu11 -Wall -Wno-unused \
         -Wno-int-conversion -Wno-incompatible-pointer-types \
