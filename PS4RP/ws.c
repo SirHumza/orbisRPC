@@ -32,7 +32,7 @@ extern int      SSL_read(SSL *s, void *buf, int num);
 extern int      SSL_shutdown(SSL *s);
 extern int      SSL_get_error(SSL *s, int ret);
 extern const void *SSLv23_client_method(void);
-extern int      SSL_set_tls_host(SSL *s, const char *hostname); /* if exported */
+extern int      SSL_ctrl(SSL *s, int cmd, long larg, void *parg);
 
 /* net pool id (keep once) */
 static int s_net_ready = 0;
@@ -90,6 +90,9 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
     SSL *ssl = SSL_new(ctx);
     if(!ssl){ log_msg("SSL_new fail"); SSL_CTX_free(ctx); goto fail; }
     if(SSL_set_fd(ssl, (int)fd) != 1){ log_msg("SSL_set_fd fail"); SSL_free(ssl); SSL_CTX_free(ctx); goto fail; }
+    /* SNI: SSL_set_tlsext_host_name = SSL_ctrl(s, SSL_CTRL_SET_TLSEXT_HOSTNAME(55),
+     *   TLSEXT_NAMETYPE_host_name(0), hostname). Discord TLS needs the host. */
+    if(SSL_ctrl(ssl, 55, 0, (void *)host) != 1){ log_msg("SNI warn"); }
     SSL_set_connect_state(ssl);
     if(SSL_connect(ssl) != 1){ log_msg("SSL_connect fail"); SSL_free(ssl); SSL_CTX_free(ctx); goto fail; }
     w->ssl_ctx = (int32_t)(intptr_t)ctx;   /* stash for teardown */
