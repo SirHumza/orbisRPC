@@ -118,10 +118,11 @@ int discord_tick(discord_t *d){
         ws_send_text(&d->ws,hb,strlen(hb));
         d->last_heartbeat=now;
     }
-    /* read any pending server frame */
+    /* read any pending server frame (non-blocking) */
     char buf[1024]; int op=0,fin=0;
     int nr=ws_recv_frame(&d->ws,buf,sizeof buf,&op,&fin);
-    if(nr<=0){ return -1; }
+    if(nr<0){ return -1; }
+    if(nr==0){ return 0; } /* no complete frame yet — not an error */
     if(op==0){ /* DISPATCH */
         const char *p=strstr(buf,"\"seq\":");
         if(p){ p+=6; d->seq=(int)strtol(p,NULL,10); }
