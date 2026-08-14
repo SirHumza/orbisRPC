@@ -46,33 +46,44 @@ Everything stays on the PS4. Your Mac only touches this repo to *build* it.
 
 | Milestone | Progress |
 |---|---|
-| Toolchain / build (OpenOrbis, macOS native) | planned |
-| M0 — scaffolding on console (hello payload) | pending |
-| M1 — network + SSL (SceNet / SceNetSsl) | pending |
-| M2 — Discord OAuth2 token flow + refresh | pending |
-| M3 — gateway: connect / heartbeat / presence | pending |
-| M4 — game detection (process → CUSA → title) | pending |
-| M5 — GoldHEN autoload + package + install | pending |
+| Toolchain / build (OpenOrbis, macOS native, LLVM 21 + lld) | **done** |
+| M1 — network + TLS (SceNet + LibreSSL/OpenSSL-ABI) | **done (compiles + links)** |
+| M2 — Discord OAuth2 token flow + refresh | **done (compiles + links)** |
+| M3 — gateway: connect / heartbeat / presence | **done (compiles + links)** |
+| M4 — game detection (foreground user → CUSA → title) | **done (compiles + links)** |
+| M5 — GoldHEN autoload + package + install | pending (needs on-console test) |
+| On-console validation (M1's TLS + detection against live FW) | pending |
+
+`build/ps4rp.elf` (169 KB) and `build/ps4rp.fself` (175 KB) link successfully
+against OpenOrbis v0.5.4; the TLS layer uses `libSceLibreSSL`'s OpenSSL-ABI
+exports (`SSL_CTX_new` / `SSL_connect` / `SSL_write` / `SSL_read`).
 
 ---
 
-## Building (Mac, one-time toolchain install)
+## Building (macOS, native — no Docker needed)
 
-Needs the **OpenOrbis PS4 Toolchain** (this repo ships the toolchain docker image;
-on macOS you can use the docker image or the native macOS toolchain build):
+Verified path on this Mac (LLVM 21 via brew + OpenOrbis toolchain v0.5.4):
 
 ```bash
-cd PS4RP
-# via Docker (recommended)
-docker run --rm -v "$PWD:/src" ghcr.io/openorbis/openorbis-toolchain:latest \
-  bash -c "cd /src && make"
-# produces: PS4RP/x64/Debug/ps4rp.elf, ps4rp.pkg
+# 1. one-time toolchain (OpenOrbis v0.5.4, ~160 MB)
+mkdir -p ~/PS4Toolchain && cd ~/PS4Toolchain
+curl -L -o toolchain-llvm-18.tar.gz \
+  https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/download/v0.5.4/toolchain-llvm-18.tar.gz
+tar -xzf toolchain-llvm-18.tar.gz     # -> ~/PS4Toolchain/OpenOrbis/PS4Toolchain
+
+# 2. one-time toolchain deps
+brew install llvm          # clang 21
+# lld 21 (linker) — built from source or brew lld@21, see scripts/build.sh
+
+# 3. build
+OO_PS4_TOOLCHAIN=~/PS4Toolchain/OpenOrbis/PS4Toolchain \
+  LLD=/Users/mac/lldbuild/build/bin/ld.lld \
+  ./scripts/build.sh
+# -> build/ps4rp.elf, build/ps4rp.fself, build/eboot.bin
 ```
 
-The `OpenOrbis/openorbis-toolchain` image is the canonical OpenOrbis toolchain. If the
-above image tag drifts, see `scripts/build.sh` (it pins the working release).
-
-No toolchain = no build. The runtime artifact (`ps4rp.elf`) is what you drop on the PS4.
+The runtime artifact is `build/ps4rp.fself` (GoldHEN payload) or
+`build/eboot.bin` (PKG route). No toolchain = no build.
 
 ---
 
@@ -80,7 +91,7 @@ No toolchain = no build. The runtime artifact (`ps4rp.elf`) is what you drop on 
 
 1. Build `ps4rp.pkg` (or grab the `.elf` payload) on any Mac/computer.
 2. Transfer to the PS4 over FTP, or on a USB stick.
-3. **Daemon route (recommended):** put `ps4rp.elf` in
+3. **Daemon route (recommended):** put `ps4rp.fself` in
    `/data/GoldHEN/payloads/` — it auto-loads on every boot and runs in the
    background while you game. (GoldHEN 2.2.)
 4. Or install `ps4rp.pkg` like any homebrew app if you prefer a foreground

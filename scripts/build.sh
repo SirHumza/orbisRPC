@@ -11,11 +11,12 @@ TARGET="x86_64-pc-freebsd12-elf"
 CFLAGS="--target=$TARGET -fPIC -std=gnu11 -Wall -Wno-unused \
         -Wno-int-conversion -Wno-incompatible-pointer-types \
         -isystem $SDK/include"
-LIBS="-lc -lkernel -lSceNet -lSceNetCtl -lSceSsl -lSceHttp -lSceSysmodule \
+LIBS="-lc -lkernel -lSceNet -lSceNetCtl -lSceLibreSSL -lSceSsl -lSceHttp -lSceSysmodule \
       -lSceUserService -lSceAppInstUtil -lSceAppContent"
 LDFLAGS="-m elf_x86_64 -pie --eh-frame-hdr -L$SDK/lib $LIBS $SDK/lib/crt1.o --script $SDK/link.x"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+export OO_PS4_TOOLCHAIN="$SDK"
 OUT="$ROOT/build"; mkdir -p "$OUT"
 echo "=== compiling ==="
 for f in log cfg jsonlite b64 http ws detect discord main; do
