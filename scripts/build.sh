@@ -28,7 +28,8 @@ echo "ELF -> $OUT/orbisrpc.elf"
 MODE="${1:-all}"
 if [ "$MODE" = "fself" ] || [ "$MODE" = "all" ]; then
   "$SDK/bin/macos/create-fself-macos" -in="$OUT/orbisrpc.elf" \
-      -out="$OUT/orbisrpc.fself" --eboot "$OUT/orbisrpc.bin" --paid 0x3800000000000011
+      -out="$OUT/orbisrpc.fself" --eboot "$OUT/orbisrpc-eboot.bin" --paid 0x3800000000000011
   echo "FSELF -> $OUT/orbisrpc.fself"
+  echo "  (GoldHEN payload to deploy is $OUT/orbisrpc.elf -> /data/GoldHEN/payloads/orbisrpc.bin)"
 fi
 echo "done."

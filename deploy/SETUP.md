@@ -4,10 +4,12 @@ Target: GoldHEN 2.2 jailbroken PS4 (FW 9.00), daemon route.
 
 ## 1. Copy the payload to the console
 
-Via FTP (the console must be awake and online):
+Via FTP (the console must be awake and online). GoldHEN's `/data/GoldHEN/payloads/`
+auto-loader takes a **raw ELF** payload named `.bin`, so deploy `orbisrpc.elf`
+(the real ELF — `build/orbisrpc.bin` is the fself tool's eboot output, not this):
 
 ```
-put build/orbisrpc.fself -> /data/GoldHEN/payloads/orbisrpc.fself
+put build/orbisrpc.elf -> /data/GoldHEN/payloads/orbisrpc.bin
 ```
 
 GoldHEN auto-loads payloads from `/data/GoldHEN/payloads/` at boot and keeps

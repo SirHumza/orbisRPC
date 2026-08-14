@@ -79,11 +79,13 @@ brew install llvm          # clang 21
 OO_PS4_TOOLCHAIN=~/PS4Toolchain/OpenOrbis/PS4Toolchain \
   LLD=/Users/mac/lldbuild/build/bin/ld.lld \
   ./scripts/build.sh
-# -> build/orbisrpc.elf, build/orbisrpc.fself, build/orbisrpc.bin
+# -> build/orbisrpc.elf (raw payload), build/orbisrpc.fself, build/orbisrpc-eboot.bin
 ```
 
-The runtime artifact is `build/orbisrpc.fself` (GoldHEN payload) or
-`build/orbisrpc.bin` (PKG route). No toolchain = no build.
+The GoldHEN payload to deploy is the **raw ELF**, `build/orbisrpc.elf`,
+uploaded as `orbisrpc.bin` (the `orbisrpc.fself`/`orbisrpc-eboot.bin` outputs
+are for the PKG/fself route, not GoldHEN's auto-payload loader). No toolchain
+= no build.
 
 ---
 
@@ -91,9 +93,9 @@ The runtime artifact is `build/orbisrpc.fself` (GoldHEN payload) or
 
 1. Build `orbisrpc.pkg` (or grab the `.elf` payload) on any Mac/computer.
 2. Transfer to the PS4 over FTP, or on a USB stick.
-3. **Daemon route (recommended):** put `orbisrpc.fself` in
-   `/data/GoldHEN/payloads/` — it auto-loads on every boot and runs in the
-   background while you game. (GoldHEN 2.2.)
+3. **Daemon route (recommended):** put `orbisrpc.elf` in
+   `/data/GoldHEN/payloads/` (named `orbisrpc.bin`) — it auto-loads on every
+   boot and runs in the background while you game. (GoldHEN 2.2.)
 4. Or install `orbisrpc.pkg` like any homebrew app if you prefer a foreground
    launcher (note: it suspends once a game opens, so the daemon route is what
    powers presence-during-play).
