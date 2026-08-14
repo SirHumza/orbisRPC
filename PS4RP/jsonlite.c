@@ -205,7 +205,9 @@ static void emit(jl_val_t *v, char **out, size_t *cap, size_t *len){
                 escstr(p->str,out,cap,len);
                 size_t l3=*len+1; if(l3>*cap){*cap=l3*2;*out=realloc(*out,*cap);} (*out)[(*len)++]=':';
                 /* value is the pair's child OR the pair holds value via child */
-                if(p->child) emit(p->child,out,cap,len); else { *out[*len]='n'; /* shouldn't happen */ }
+                if(p->child) emit(p->child,out,cap,len); else {
+                    size_t lz=*len+1; if(lz>*cap){*cap=lz*2;*out=realloc(*out,*cap);} (*out)[(*len)++]='n';
+                }
                 /* for non-pair objects where a STRING key sits directly: handled above via child */
                 } p=p->next; }
             l=*len+1; if(l>*cap){*cap=l*2;*out=realloc(*out,*cap);} (*out)[(*len)++]='}'; return; }
@@ -216,7 +218,8 @@ static void emit(jl_val_t *v, char **out, size_t *cap, size_t *len){
 }
 
 char *jl_stringify(const jl_val_t *v){
-    char *out=NULL; size_t cap=256,len=0;
+    char *out=(char*)malloc(256); if(!out) return NULL;
+    size_t cap=256,len=0;
     emit((jl_val_t*)v,&out,&cap,&len);
     if(!out){ out=(char*)malloc(1); out[0]=0; }
     else { char *t=(char*)realloc(out,len+1); t[len]=0; out=t; }

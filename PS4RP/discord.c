@@ -87,7 +87,7 @@ int discord_set_presence(discord_t *d, const char *state, const char *details,
     jl_obj_set(act,"assets",assets);
     jl_obj_set(dd,"activities",jl_new_array());
     jl_arr_push(jl_obj_get(dd,"activities"), act);
-    jl_obj_set(dd,"status","online");
+    jl_obj_set(dd,"status",jl_new_string("online"));
     jl_obj_set(dd,"since",jl_new_number((double)time(NULL)));
     jl_obj_set(dd,"afk",jl_new_bool(0));
     jl_val_t *root=jl_new_object();
@@ -101,7 +101,7 @@ int discord_set_presence(discord_t *d, const char *state, const char *details,
 int discord_clear_presence(discord_t *d){
     jl_val_t *dd=jl_new_object();
     jl_obj_set(dd,"activities",jl_new_array());
-    jl_obj_set(dd,"status","invisible");
+    jl_obj_set(dd,"status",jl_new_string("invisible"));
     jl_val_t *root=jl_new_object();
     jl_obj_set(root,"op",jl_new_number(3));
     jl_obj_set(root,"d",dd);
