@@ -58,7 +58,7 @@ static int net_ensure(void){
     uint32_t ur = sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NET);
     if((int)ur < 0){ log_msg("load NET fail %d", (int)ur); return -1; }
     if(sceNetInit() < 0){ log_msg("sceNetInit fail"); return -2; }
-    s_net_mem = (int)sceNetPoolCreate("ps4rpNet", 128*1024, 0);
+    s_net_mem = (int)sceNetPoolCreate("orbisrpcNet", 128*1024, 0);
     if(s_net_mem < 0){ log_msg("net pool fail %d", s_net_mem); return -3; }
     s_net_ready = 1;
     return 0;
@@ -68,7 +68,7 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
     memset(w,0,sizeof(*w));
     if(net_ensure()<0) return -1;
     /* resolve host */
-    int32_t rid = sceNetResolverCreate("ps4rpR", 0, 0);
+    int32_t rid = sceNetResolverCreate("orbisrpcR", 0, 0);
     OrbisNetInAddr in; memset(&in,0,sizeof in);
     int resolved = 0;
     if(rid >= 0){
@@ -82,7 +82,7 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
         in.s_addr = ia.s_addr;
     }
     /* TCP socket */
-    int32_t fd = sceNetSocket("ps4rpWs", ORBIS_NET_AF_INET, ORBIS_NET_SOCK_STREAM, 0);
+    int32_t fd = sceNetSocket("orbisrpcWs", ORBIS_NET_AF_INET, ORBIS_NET_SOCK_STREAM, 0);
     if(fd < 0){ log_msg("socket fail %d",fd); return -5; }
     OrbisNetSockaddr sa; memset(&sa,0,sizeof sa);
     sa.len = (uint8_t)sizeof(sa);

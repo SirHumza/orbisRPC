@@ -1,4 +1,4 @@
-# PS4RP — Discord Rich Presence for the PS4
+# orbisRPC — Discord Rich Presence for the PS4
 
 A background daemon that runs **entirely on your jailbroken PS4** and posts what you're
 playing to your Discord profile as Rich Presence — "Playing *Call of Duty: Black
@@ -14,17 +14,17 @@ It's Discord's "now-playing" integration, the way the PS5 does it — but for a
 
 The PS4 only runs one foreground app at a time, so a normal homebrew app gets
 suspended the moment you launch a game and can't report your activity while you
-play. PS4RP avoids that by running as a **GoldHEN payload daemon**: it loads at
+play. orbisRPC avoids that by running as a **GoldHEN payload daemon**: it loads at
 boot (from `GoldHEN/payloads/`) and keeps running in the background while games
 launch in the foreground.
 
 ```
             +--------------------------+      HTTPS/WebSocket        +-------------------+
-            |   PS4RP (payload daemon) |  wss://gateway.discord.gg  |   Discord         |
+            |   orbisRPC (payload daemon) |  wss://gateway.discord.gg  |   Discord         |
             |  on your PS4 @ 192.168.1.136  |  <-- presence -->      |   (your profile)  |
             +-------------+--------------+                              +-----------------+
                           |
-       detects running game (process list + app.db) | config + token (/data/PS4RP)
+       detects running game (process list + app.db) | config + token (/data/orbisRPC)
                           v
             +--------------------------+
             |  /user/app/CUSAxxxx      |
@@ -54,7 +54,7 @@ Everything stays on the PS4. Your Mac only touches this repo to *build* it.
 | M5 — GoldHEN autoload + package + install | pending (needs on-console test) |
 | On-console validation (M1's TLS + detection against live FW) | pending |
 
-`build/ps4rp.elf` (169 KB) and `build/ps4rp.fself` (175 KB) link successfully
+`build/orbisrpc.elf` (169 KB) and `build/orbisrpc.fself` (175 KB) link successfully
 against OpenOrbis v0.5.4; the TLS layer uses `libSceLibreSSL`'s OpenSSL-ABI
 exports (`SSL_CTX_new` / `SSL_connect` / `SSL_write` / `SSL_read`).
 
@@ -79,27 +79,27 @@ brew install llvm          # clang 21
 OO_PS4_TOOLCHAIN=~/PS4Toolchain/OpenOrbis/PS4Toolchain \
   LLD=/Users/mac/lldbuild/build/bin/ld.lld \
   ./scripts/build.sh
-# -> build/ps4rp.elf, build/ps4rp.fself, build/eboot.bin
+# -> build/orbisrpc.elf, build/orbisrpc.fself, build/eboot.bin
 ```
 
-The runtime artifact is `build/ps4rp.fself` (GoldHEN payload) or
+The runtime artifact is `build/orbisrpc.fself` (GoldHEN payload) or
 `build/eboot.bin` (PKG route). No toolchain = no build.
 
 ---
 
 ## Installing on the PS4 (no PC after first build)
 
-1. Build `ps4rp.pkg` (or grab the `.elf` payload) on any Mac/computer.
+1. Build `orbisrpc.pkg` (or grab the `.elf` payload) on any Mac/computer.
 2. Transfer to the PS4 over FTP, or on a USB stick.
-3. **Daemon route (recommended):** put `ps4rp.fself` in
+3. **Daemon route (recommended):** put `orbisrpc.fself` in
    `/data/GoldHEN/payloads/` — it auto-loads on every boot and runs in the
    background while you game. (GoldHEN 2.2.)
-4. Or install `ps4rp.pkg` like any homebrew app if you prefer a foreground
+4. Or install `orbisrpc.pkg` like any homebrew app if you prefer a foreground
    launcher (note: it suspends once a game opens, so the daemon route is what
    powers presence-during-play).
 
-Config lives at `/data/PS4RP/config.json` — edit it over FTP or on a USB stick.
-Logs go to `/data/PS4RP/log.txt`.
+Config lives at `/data/orbisRPC/config.json` — edit it over FTP or on a USB stick.
+Logs go to `/data/orbisRPC/log.txt`.
 
 ---
 
@@ -111,9 +111,9 @@ account automating itself (which Discord bans on the user account — see notes 
 repo). Steps:
 
 1. Open https://discord.com/developers/applications → **New Application** → name it
-   `PS4RP` (or whatever) → **Create**.
+   `orbisRPC` (or whatever) → **Create**.
 2. Copy the **Application ID** (Client ID) and **Client Secret** into
-   `/data/PS4RP/config.json` (`client_id`, `client_secret`).
+   `/data/orbisRPC/config.json` (`client_id`, `client_secret`).
 3. In the app → **OAuth2 → Redirects**, add:
    `https://example.com/callback`
 4. In the app → **OAuth2 → Scopes**, add `rpc.activities.write` (and `identify`).
@@ -133,7 +133,7 @@ After that it just runs. No PC needed at runtime.
   A registered application acting on your permission is the supported integration path.
 - Discord may require your application to be verified to use `rpc.activities.write`.
   For a personal, low-traffic app it usually works unverified; worst case it labels
-  the activity "via PS4RP".
+  the activity "via orbisRPC".
 
 ---
 

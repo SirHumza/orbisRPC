@@ -1,10 +1,10 @@
-/* cfg.h - /data/PS4RP/config.json load/save */
+/* cfg.h - /data/orbisRPC/config.json load/save */
 #ifndef CFG_H
 #define CFG_H
 #include <stdint.h>
-#define CFG_PATH "/data/PS4RP/config.json"
-#define LOG_PATH "/data/PS4RP/log.txt"
-#define DATA_DIR "/data/PS4RP"
+#define CFG_PATH "/data/orbisRPC/config.json"
+#define LOG_PATH "/data/orbisRPC/log.txt"
+#define DATA_DIR "/data/orbisRPC"
 typedef struct {
     char client_id[64];        /* Discord application client id */
     char client_secret[128];   /* only needed to exchange code / refresh */

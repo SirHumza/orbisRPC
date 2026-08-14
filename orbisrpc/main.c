@@ -1,4 +1,4 @@
-/* main.c - PS4RP daemon: detect game -> Discord presence. Runs as GoldHEN payload. */
+/* main.c - orbisRPC daemon: detect game -> Discord presence. Runs as GoldHEN payload. */
 #include "cfg.h"
 #include "log.h"
 #include "http.h"
@@ -44,14 +44,14 @@ static void set_game_presence(discord_t *d, const char *name){
         "On PS4",                 /* state */
         name,                     /* details = game name */
         1, 1,                     /* party */
-        "ps4rp:playing",          /* large_image key (asset) */
+        "orbisrpc:playing",          /* large_image key (asset) */
         name);                    /* large_text */
     log_msg("presence: %s", name);
 }
 
 int main(int argc, char **argv){
     (void)argc;(void)argv;
-    /* GoldHEN payloads: write to /data/PS4RP */
+    /* GoldHEN payloads: write to /data/orbisRPC */
     cfg_load(CFG_PATH, &g_cfg);
     if(!g_cfg.enabled){ log_msg("disabled in config; exiting"); return 0; }
     if(!g_cfg.client_id[0] || strcmp(g_cfg.client_id,"SET_ME")==0){

@@ -1,5 +1,5 @@
 #!/bin/bash
-# build.sh - PS4RP: compile payload ELF + fself for PS4.
+# build.sh - orbisRPC: compile payload ELF + fself for PS4.
 # Usage: ./scripts/build.sh [elf|fself|all]   default: all
 set -euo pipefail
 SDK="${OO_PS4_TOOLCHAIN:-/Users/mac/PS4Toolchain/OpenOrbis/PS4Toolchain}"
@@ -20,15 +20,15 @@ export OO_PS4_TOOLCHAIN="$SDK"
 OUT="$ROOT/build"; mkdir -p "$OUT"
 echo "=== compiling ==="
 for f in log cfg jsonlite b64 http ws detect discord main; do
-  "$CC" $CFLAGS -c -o "$OUT/$f.o" "PS4RP/$f.c" || { echo "compile $f FAILED"; exit 1; }
+  "$CC" $CFLAGS -c -o "$OUT/$f.o" "orbisrpc/$f.c" || { echo "compile $f FAILED"; exit 1; }
 done
 echo "=== linking ($LD) ==="
-"$LD" $OUT/*.o -o "$OUT/ps4rp.elf" $LDFLAGS || { echo "link FAILED"; exit 1; }
-echo "ELF -> $OUT/ps4rp.elf"
+"$LD" $OUT/*.o -o "$OUT/orbisrpc.elf" $LDFLAGS || { echo "link FAILED"; exit 1; }
+echo "ELF -> $OUT/orbisrpc.elf"
 MODE="${1:-all}"
 if [ "$MODE" = "fself" ] || [ "$MODE" = "all" ]; then
-  "$SDK/bin/macos/create-fself-macos" -in="$OUT/ps4rp.elf" \
-      -out="$OUT/ps4rp.fself" --eboot "$OUT/ps4rp.bin" --paid 0x3800000000000011
-  echo "FSELF -> $OUT/ps4rp.fself"
+  "$SDK/bin/macos/create-fself-macos" -in="$OUT/orbisrpc.elf" \
+      -out="$OUT/orbisrpc.fself" --eboot "$OUT/orbisrpc.bin" --paid 0x3800000000000011
+  echo "FSELF -> $OUT/orbisrpc.fself"
 fi
 echo "done."

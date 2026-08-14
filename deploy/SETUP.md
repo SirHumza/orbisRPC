@@ -1,4 +1,4 @@
-# PS4RP — Deploy + setup guide
+# orbisRPC — Deploy + setup guide
 
 Target: GoldHEN 2.2 jailbroken PS4 (FW 9.00), daemon route.
 
@@ -7,7 +7,7 @@ Target: GoldHEN 2.2 jailbroken PS4 (FW 9.00), daemon route.
 Via FTP (the console must be awake and online):
 
 ```
-put build/ps4rp.fself -> /data/GoldHEN/payloads/ps4rp.fself
+put build/orbisrpc.fself -> /data/GoldHEN/payloads/orbisrpc.fself
 ```
 
 GoldHEN auto-loads payloads from `/data/GoldHEN/payloads/` at boot and keeps
@@ -16,8 +16,8 @@ them running in the background while games run in the foreground.
 Also make the config dir + seed the config:
 
 ```
-mkdir /data/PS4RP
-put config/config.json -> /data/PS4RP/config.json
+mkdir /data/orbisRPC
+put config/config.json -> /data/orbisRPC/config.json
 ```
 
 ## 2. First boot check
@@ -25,14 +25,14 @@ put config/config.json -> /data/PS4RP/config.json
 Reboot (or run the payload from the GoldHEN loader) and check:
 
 ```
-get /data/PS4RP/log.txt
+get /data/orbisRPC/log.txt
 ```
 
 Expected lines:
 
 ```
-[..] config not found at /data/PS4RP/config.json; defaults applied   (only first run)
-[..] FATAL: set client_id + auth_code (or refresh) in /data/PS4RP/config.json
+[..] config not found at /data/orbisRPC/config.json; defaults applied   (only first run)
+[..] FATAL: set client_id + auth_code (or refresh) in /data/orbisRPC/config.json
 ```
 
 The FATAL exit is expected until you supply Discord credentials (step 3).
@@ -40,13 +40,13 @@ The FATAL exit is expected until you supply Discord credentials (step 3).
 ## 3. One-time Discord app setup
 
 1. Open https://discord.com/developers/applications -> New Application -> name it
-   (e.g. `PS4RP`) -> Create.
+   (e.g. `orbisRPC`) -> Create.
 2. Copy **Application ID** and **Client Secret**.
 3. In the app -> **OAuth2 -> General**, add a Redirect URL:
    `http://localhost:6770/callback`
 4. In the app -> **OAuth2 -> Scopes**, enable `rpc.activities.write` and
    `identify` (and `rpc` if prompted).
-5. Edit `/data/PS4RP/config.json` over FTP/USB:
+5. Edit `/data/orbisRPC/config.json` over FTP/USB:
    - `client_id`: your Application ID
    - `client_secret`: your Client Secret
 6. Generate an authorization code on any device (phone/PC — one time only):
@@ -89,7 +89,7 @@ The daemon exchanges the `auth_code` once for an access + refresh token
 (`token_expires_at`, `refresh_token` in config). It refreshes automatically
 before expiry. The one-time `auth_code` is blanked after use.
 
-Config lives on the PS4 at `/data/PS4RP/config.json` — no PC needed at runtime.
+Config lives on the PS4 at `/data/orbisRPC/config.json` — no PC needed at runtime.
 
 ## Troubleshooting
 
@@ -108,5 +108,5 @@ Config lives on the PS4 at `/data/PS4RP/config.json` — no PC needed at runtime
 OO_PS4_TOOLCHAIN=~/PS4Toolchain/OpenOrbis/PS4Toolchain \
   LLD=/Users/mac/lldbuild/build/bin/ld.lld \
   ./scripts/build.sh
-# -> build/ps4rp.fself
+# -> build/orbisrpc.fself
 ```

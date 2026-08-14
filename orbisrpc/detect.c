@@ -151,7 +151,7 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
     }else{
         strncpy(out_name, "(unknown game)", cap-1); out_name[cap-1]=0;
     }
-    if(out_path){ snprintf(out_path, p_cap, "/data/PS4RP/.lastgame/%s", titleId[0]?titleId:"unknown"); }
+    if(out_path){ snprintf(out_path, p_cap, "/data/orbisRPC/.lastgame/%s", titleId[0]?titleId:"unknown"); }
     log_msg("detect: active name=%s tid=%s", out_name, titleId);
     return 0;
 }
