@@ -1,0 +1,25 @@
+; GoldHEN plugins.ini — GTA V mod menu + orbisRPC Discord presence
+;
+; [default] loads plugins for ANY game title, so orbisRPC auto-starts
+; whenever a game launches (no PC needed).
+;
+[default]
+/data/GoldHEN/plugins/orbisrpc_plugin.prx=true
+
+; Lotus SPRX (primary mod menu — requires GTA V 1.48 update)
+; Press R1 + Square in-game to open
+;
+[CUSA00411]
+/data/GoldHEN/plugins/gtaPayload_148.sprx=true
+
+[CUSA00419]
+/data/GoldHEN/plugins/gtaPayload_148.sprx=true
+
+; Scorpion Menu v1.2B (alternate mod menu — backup option)
+; Uncomment these lines if you prefer Scorpion over Lotus:
+;
+;[CUSA00411]
+;/data/GoldHEN/plugins/ScorpionMenu-v1.2b-148.prx=true
+;
+;[CUSA00419]
+;/data/GoldHEN/plugins/ScorpionMenu-v1.2b-148.prx=true

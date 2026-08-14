@@ -2,3 +2,5 @@ build/
 *.o
 *.err
 /tmp/
+config/config.ps4.json
+plugin/build/

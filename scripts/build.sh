@@ -19,7 +19,7 @@ cd "$ROOT"
 export OO_PS4_TOOLCHAIN="$SDK"
 OUT="$ROOT/build"; mkdir -p "$OUT"
 echo "=== compiling ==="
-for f in log cfg jsonlite b64 http ws detect discord main; do
+for f in log cfg jsonlite b64 http ws detect discord daemon main; do
   "$CC" $CFLAGS -c -o "$OUT/$f.o" "orbisrpc/$f.c" || { echo "compile $f FAILED"; exit 1; }
 done
 echo "=== linking ($LD) ==="

@@ -156,3 +156,15 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
     if(out_path){ snprintf(out_path, p_cap, "/data/orbisRPC/.lastgame/%s", titleId[0]?titleId:"unknown"); }
     return 0;
 }
+
+/* Resolve a display name for a KNOWN title id (plugin mode: the plugin is
+ * loaded into the game process and knows the titleid from the GoldHEN SDK,
+ * so we skip the foreground-app heuristics entirely). */
+int detect_name_for_title(const char *titleId, char *out_name, size_t cap){
+    if(!titleId || !titleId[0] || !out_name || cap==0) return -1;
+    if(appxml_title(titleId, out_name, cap)==0) return 0;
+    appdb_title(titleId, out_name, cap);
+    if(out_name[0]) return 0;
+    strncpy(out_name, titleId, cap-1); out_name[cap-1]=0;
+    return 0;
+}

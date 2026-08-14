@@ -1,45 +1,56 @@
 # orbisRPC — Deploy + setup guide
 
-Target: GoldHEN 2.2 jailbroken PS4 (FW 9.00), daemon route.
+Target: GoldHEN 2.3+ jailbroken PS4, **GoldHEN plugin route** (the native,
+auto-starting mechanism — same one the GTA mod menu uses).
 
-## 1. Copy the payload to the console
+**Why a plugin and not a payload:** `/data/GoldHEN/payloads/` is NOT an
+auto-load folder (PPPwn stage2 only loads `goldhen.bin` from there; payload
+auto-loading from a folder is an unimplemented GoldHEN feature request #296).
+The only auto-start mechanism that works on-boot with zero PC involvement is
+the GoldHEN **plugin loader**, driven by `/data/GoldHEN/plugins.ini`.
 
-Via FTP (the console must be awake and online). GoldHEN's `/data/GoldHEN/payloads/`
-auto-loader takes a **raw ELF** payload named `.bin`, so deploy `orbisrpc.elf`
-(the real ELF — `build/orbisrpc.bin` is the fself tool's eboot output, not this):
+## 1. Copy the plugin to the console
+
+Via FTP (console must be awake and online), build it first:
 
 ```
-put build/orbisrpc.elf -> /data/GoldHEN/payloads/orbisrpc.bin
+OO_PS4_TOOLCHAIN=~/PS4Toolchain/OpenOrbis/PS4Toolchain \
+  GOLDHEN_SDK=/tmp/ghsdk LLD=/Users/mac/lldbuild/build/bin/ld.lld \
+  make -C plugin
+# -> plugin/build/orbisrpc_plugin.prx
 ```
 
-GoldHEN auto-loads payloads from `/data/GoldHEN/payloads/` at boot and keeps
-them running in the background while games run in the foreground.
+Then deploy:
 
-Also make the config dir + seed the config:
+```
+put plugin/build/orbisrpc_plugin.prx -> /data/GoldHEN/plugins/orbisrpc_plugin.prx
+```
+
+## 2. plugins.ini
+
+`/data/GoldHEN/plugins.ini` must list the plugin. The `[default]` section loads
+it for ANY game title, so presence auto-starts every time a game launches:
+
+```
+[default]
+/data/GoldHEN/plugins/orbisrpc_plugin.prx=true
+```
+
+Existing per-title sections (e.g. the GTA menu `[CUSA00411]`) are untouched.
+A ready-made file lives at `plugin/plugins.ini.ps4`.
+
+## 3. Seed the config
 
 ```
 mkdir /data/orbisRPC
 put config/config.json -> /data/orbisRPC/config.json
 ```
 
-## 2. First boot check
+The plugin reads `/data/orbisRPC/config.json` (cfg.h: `CFG_PATH`), logs to
+`/data/orbisRPC/log.txt` (`LOG_PATH`), and caches per-game state in
+`/data/orbisRPC/.lastgame/`.
 
-Reboot (or run the payload from the GoldHEN loader) and check:
-
-```
-get /data/orbisRPC/log.txt
-```
-
-Expected lines:
-
-```
-[..] config not found at /data/orbisRPC/config.json; defaults applied   (only first run)
-[..] FATAL: set client_id + auth_code (or refresh) in /data/orbisRPC/config.json
-```
-
-The FATAL exit is expected until you supply Discord credentials (step 3).
-
-## 3. One-time Discord app setup
+## 4. One-time Discord app setup
 
 1. Open https://discord.com/developers/applications -> New Application -> name it
    (e.g. `orbisRPC`) -> Create.
@@ -63,30 +74,27 @@ The FATAL exit is expected until you supply Discord credentials (step 3).
    refused is fine — just copy the `code=XXXX` part).
 7. Paste that code into `config.json` as `auth_code`.
 
-## 4. Reboot + validate
+## 5. Launch a game + validate
 
-Reboot the console. `log.txt` should show:
+Launch any game (e.g. GTA V). The plugin loads into the game process, reads the
+title id via the GoldHEN SDK, and starts the daemon. Check:
+
+```
+get /data/orbisRPC/log.txt
+```
+
+Expected lines:
 
 ```
 [..] token refreshed, expires_in=604799s
 [..] gateway connected, hb=41250ms
-```
-
-Play a game. After the poll interval (`poll_interval_s`, default 12 s):
-
-```
-[..] detect: active name=<Game> tid=CUSAxxxxx
 [..] presence: <Game>
 ```
 
-Your Discord profile now shows **Playing <Game>** with a timer. Exit to the
-home screen and presence clears:
+Your Discord profile now shows **Playing <Game>** with a timer. Exit to the home
+screen and presence clears (the plugin unloads with the game process).
 
-```
-[..] presence: (cleared)
-```
-
-## 5. Token lifecycle
+## 6. Token lifecycle
 
 The daemon exchanges the `auth_code` once for an access + refresh token
 (`token_expires_at`, `refresh_token` in config). It refreshes automatically
@@ -98,12 +106,13 @@ Config lives on the PS4 at `/data/orbisRPC/config.json` — no PC needed at runt
 
 | Symptom | Cause / fix |
 |---|---|
-| `FATAL: set client_id` | config missing / `SET_ME` placeholder. Fill in step 3. |
-| `oauth failed rc=401` | wrong client_id/secret, or the auth_code expired (10 min). Re-do step 3.6. |
+| no `log.txt` at all after launching a game | plugin didn't load: check `plugins.ini` has the `[default]` section + correct path, and GoldHEN has `[PluginLoader] PluginLoader_Enabled=1` in its config.ini. |
+| `FATAL: set client_id` | config missing / `SET_ME` placeholder. Fill in step 4. |
+| `oauth failed rc=401` | wrong client_id/secret, or the auth_code expired (10 min). Re-do step 4.6. |
 | `no 101:` in log | Discord blocked the TLS handshake — check clock / network. |
 | `gateway dropped` every poll | WS keepalive mismatch; the reconnect loop is automatic. |
-| presence shows but clears instantly | foreground detection returned active=0 (home screen). |
 | game name shows `CUSAxxxxx` | app.xml/app.db lookup didn't find a human name; titleId fallback. |
+| plugin loads into a system app | `plugin.c` filters non-game titleids (NPXS...) and skips them. |
 
 ## Build on Mac (if rebuilding)
 
@@ -111,5 +120,20 @@ Config lives on the PS4 at `/data/orbisRPC/config.json` — no PC needed at runt
 OO_PS4_TOOLCHAIN=~/PS4Toolchain/OpenOrbis/PS4Toolchain \
   LLD=/Users/mac/lldbuild/build/bin/ld.lld \
   ./scripts/build.sh
-# -> build/orbisrpc.fself
+# -> build/orbisrpc.elf  (payload ELF, BinLoader route — not auto-loaded)
+
+OO_PS4_TOOLCHAIN=~/PS4Toolchain/OpenOrbis/PS4Toolchain \
+  GOLDHEN_SDK=/tmp/ghsdk LLD=/Users/mac/lldbuild/build/bin/ld.lld \
+  make -C plugin
+# -> plugin/build/orbisrpc_plugin.prx  (the deployed artifact)
+```
+
+## Repo layout
+
+```
+orbisrpc/daemon.c      shared daemon loop (payload + plugin use it)
+orbisrpc/detect.c      foreground detection + titleid->name resolution
+plugin/plugin.c        GoldHEN plugin entry (plugin_load / plugin_unload)
+plugin/Makefile        builds orbisrpc_plugin.prx against GoldHEN SDK
+plugin/plugins.ini.ps4 ready-to-deploy plugins.ini with [default] section
 ```
