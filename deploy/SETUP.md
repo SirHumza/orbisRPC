@@ -46,8 +46,9 @@ The FATAL exit is expected until you supply Discord credentials (step 3).
 2. Copy **Application ID** and **Client Secret**.
 3. In the app -> **OAuth2 -> General**, add a Redirect URL:
    `http://localhost:6770/callback`
-4. In the app -> **OAuth2 -> Scopes**, enable `rpc.activities.write` and
-   `identify` (and `rpc` if prompted).
+4. In the app -> **OAuth2 -> Scopes**, enable `identify` (the `rpc.*` scopes
+   are restricted to whitelisted apps and are NOT needed: the daemon uses the
+   gateway directly, and the gateway accepts an `identify`-scoped user token).
 5. Edit `/data/orbisRPC/config.json` over FTP/USB:
    - `client_id`: your Application ID
    - `client_secret`: your Client Secret
@@ -55,7 +56,7 @@ The FATAL exit is expected until you supply Discord credentials (step 3).
    open this URL in a browser, approve, and copy the `code=` from the redirect:
 
    ```
-   https://discord.com/api/oauth2/authorize?client_id=<CLIENT_ID>&response_type=code&redirect_uri=http://localhost:6770/callback&scope=rpc.activities.write%20identify
+   https://discord.com/api/oauth2/authorize?client_id=<CLIENT_ID>&response_type=code&redirect_uri=http://localhost:6770/callback&scope=identify
    ```
 
    The browser will hit `http://localhost:6770/callback?code=XXXX` (connection
