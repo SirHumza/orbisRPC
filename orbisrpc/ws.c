@@ -127,14 +127,14 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
     }
     w->ssl_ctx = (int32_t)(intptr_t)ctx;   /* stash for teardown */
     w->ssl     = (int32_t)(intptr_t)ssl;
-    /* HTTP Upgrade handshake. Present a desktop-client UA like a native
-     * client would, instead of an app name. */
+    /* HTTP Upgrade handshake. Desktop-client UA, and NO Origin header:
+     * native clients (unlike browsers) don't send Origin to the gateway. */
     char req[640]; int n=snprintf(req,sizeof req,
         "GET %s HTTP/1.1\r\nHost: %s:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
         "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) discord/1.0.9175 Chrome/122.0.6261.112 Electron/30.0.8 "
         "Safari/537.36\r\n"
-        "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nOrigin: https://discord.com\r\n\r\n",
+        "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n",
         resource?resource:"/", host, port, key);
     if(SSL_write(ssl, req, n) <= 0){ log_msg("SSL_write hs fail"); goto fail; }
     /* read handshake response in chunks (socket is non-blocking: handle

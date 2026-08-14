@@ -65,10 +65,10 @@ static void fetch_gateway_url(char *url, size_t cap){
 }
 
 static void send_identify(discord_t *d, const char *token){
-    /* User OAuth2 connection: no intents (bot-only field). The gateway
-     * REQUIRES connection properties; we present a plausible desktop-client
-     * fingerprint rather than advertising the console (less of an obvious
-     * selfbot signal). */
+    /* User OAuth2 connection: no intents (bot-only field). Present a
+     * plausible desktop-client fingerprint (no intents, plus the
+     * capabilities bitfield and initial presence a real client sends)
+     * rather than advertising the console. */
     jl_val_t *root=jl_new_object();
     jl_obj_set(root,"op",jl_new_number(2));
     jl_val_t *dd=jl_new_object();
@@ -89,6 +89,13 @@ static void send_identify(discord_t *d, const char *token){
     jl_obj_set(pp,"release_channel",jl_new_string("stable"));
     jl_obj_set(pp,"client_build_number",jl_new_number(300042));
     jl_obj_set(dd,"properties",pp);
+    jl_obj_set(dd,"capabilities",jl_new_number(125));
+    jl_val_t *pr=jl_new_object();
+    jl_obj_set(pr,"status",jl_new_string("online"));
+    jl_obj_set(pr,"activities",jl_new_array());
+    jl_obj_set(pr,"afk",jl_new_bool(0));
+    jl_obj_set(pr,"since",jl_new_number(0));
+    jl_obj_set(dd,"presence",pr);
     jl_obj_set(root,"d",dd);
     char *s=jl_stringify(root); jl_free(root);
     ws_send_text(&d->ws,s,strlen(s)); free(s);
