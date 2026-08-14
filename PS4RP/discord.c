@@ -23,9 +23,9 @@ int discord_connect(discord_t *d, const char *token, const char *intent){
     (void)intent;
     memset(d,0,sizeof(*d));
     strncpy(d->token, token, sizeof d->token-1);
-    /* fetch gateway url */
+    /* fetch gateway url (public endpoint, no bot auth needed) */
     char resp[512];
-    if(http_get("https://discord.com/api/gateway/bot",resp,sizeof resp)!=0){
+    if(http_get("https://discord.com/api/gateway",resp,sizeof resp)!=0){
         log_msg("gateway fetch failed; using default");
     }
     char url[512]="wss://gateway.discord.gg";
@@ -36,7 +36,7 @@ int discord_connect(discord_t *d, const char *token, const char *intent){
         jl_free(r);
     }
     char key[64]=""; make_key(key);
-    const char *res=(strstr(url,"discord.gg"))? "/?v=10&encoding=json":"/?v=10&encoding=json";
+    const char *res="/?v=10&encoding=json";
     /* host parse: take after https:// or default gateway.discord.gg */
     const char *host="gateway.discord.gg";
     int port=443;
