@@ -65,16 +65,29 @@ static void fetch_gateway_url(char *url, size_t cap){
 }
 
 static void send_identify(discord_t *d, const char *token){
-    /* User OAuth2 connection: no intents (bot-only field), but the gateway
-     * REQUIRES connection properties os/browser/device. */
+    /* User OAuth2 connection: no intents (bot-only field). The gateway
+     * REQUIRES connection properties; we present a plausible desktop-client
+     * fingerprint rather than advertising the console (less of an obvious
+     * selfbot signal). */
     jl_val_t *root=jl_new_object();
     jl_obj_set(root,"op",jl_new_number(2));
     jl_val_t *dd=jl_new_object();
     jl_obj_set(dd,"token",jl_new_string(token));
     jl_val_t *pp=jl_new_object();
-    jl_obj_set(pp,"os",jl_new_string("PS4"));
-    jl_obj_set(pp,"browser",jl_new_string("orbisRPC"));
-    jl_obj_set(pp,"device",jl_new_string("orbisRPC"));
+    jl_obj_set(pp,"os",jl_new_string("windows"));
+    jl_obj_set(pp,"browser",jl_new_string("Discord Client"));
+    jl_obj_set(pp,"device",jl_new_string(""));
+    jl_obj_set(pp,"system_locale",jl_new_string("en-US"));
+    jl_obj_set(pp,"browser_user_agent",
+        jl_new_string("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) discord/1.0.9175 Chrome/122.0.6261.112 "
+                      "Electron/30.0.8 Safari/537.36"));
+    jl_obj_set(pp,"browser_version",jl_new_string("30.0.8"));
+    jl_obj_set(pp,"os_version",jl_new_string("10.0.19045"));
+    jl_obj_set(pp,"referrer",jl_new_string(""));
+    jl_obj_set(pp,"referring_domain",jl_new_string(""));
+    jl_obj_set(pp,"release_channel",jl_new_string("stable"));
+    jl_obj_set(pp,"client_build_number",jl_new_number(300042));
     jl_obj_set(dd,"properties",pp);
     jl_obj_set(root,"d",dd);
     char *s=jl_stringify(root); jl_free(root);
