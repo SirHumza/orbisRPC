@@ -54,7 +54,7 @@ Everything stays on the PS4. Your Mac only touches this repo to *build* it.
 | M5 — GoldHEN autoload + package + install | pending (needs on-console test) |
 | On-console validation (M1's TLS + detection against live FW) | pending |
 
-`build/orbisrpc.elf` (169 KB) and `build/orbisrpc.fself` (175 KB) link successfully
+`build/orbisrpc.elf` (186 KB) and `build/orbisrpc.fself` (192 KB) link successfully
 against OpenOrbis v0.5.4; the TLS layer uses `libSceLibreSSL`'s OpenSSL-ABI
 exports (`SSL_CTX_new` / `SSL_connect` / `SSL_write` / `SSL_read`).
 
@@ -79,11 +79,11 @@ brew install llvm          # clang 21
 OO_PS4_TOOLCHAIN=~/PS4Toolchain/OpenOrbis/PS4Toolchain \
   LLD=/Users/mac/lldbuild/build/bin/ld.lld \
   ./scripts/build.sh
-# -> build/orbisrpc.elf, build/orbisrpc.fself, build/eboot.bin
+# -> build/orbisrpc.elf, build/orbisrpc.fself, build/orbisrpc.bin
 ```
 
 The runtime artifact is `build/orbisrpc.fself` (GoldHEN payload) or
-`build/eboot.bin` (PKG route). No toolchain = no build.
+`build/orbisrpc.bin` (PKG route). No toolchain = no build.
 
 ---
 
