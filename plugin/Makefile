@@ -20,13 +20,13 @@ INTDIR      := $(BUILD_DIR)
 
 # Our daemon sources (payload main.c is NOT part of the plugin; plugin.c is the entry)
 DAEMON_SRC  := $(ORBISRPC)/log.c $(ORBISRPC)/cfg.c $(ORBISRPC)/jsonlite.c $(ORBISRPC)/b64.c \
-               $(ORBISRPC)/http.c $(ORBISRPC)/ws.c $(ORBISRPC)/discord.c $(ORBISRPC)/detect.c \
+               $(ORBISRPC)/ws.c $(ORBISRPC)/discord.c $(ORBISRPC)/detect.c \
                $(ORBISRPC)/daemon.c
 PLUGIN_SRC  := $(SRCDIR)/plugin.c
 CFILES      := $(PLUGIN_SRC) $(DAEMON_SRC)
 OBJS        := $(patsubst %.c,$(INTDIR)/%.o,$(notdir $(CFILES)))
 
-LIBS := -lSceLibcInternal -lSceNet -lSceNetCtl -lSceLibreSSL -lSceSsl -lSceHttp \
+LIBS := -lSceLibcInternal -lSceNet -lSceNetCtl -lSceLibreSSL \
         -lSceSysmodule -lSceUserService -lSceAppInstUtil -lSceAppContent \
         -lGoldHEN_Hook -lkernel
 

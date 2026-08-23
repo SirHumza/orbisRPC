@@ -47,12 +47,12 @@ Everything stays on the PS4. Your Mac only touches this repo to *build* it.
 | Milestone | Progress |
 |---|---|
 | Toolchain / build (OpenOrbis, macOS native, LLVM 21 + lld) | **done** |
-| M1 — network + TLS (SceNet + LibreSSL/OpenSSL-ABI) | **done (compiles + links)** |
-| M2 — Discord OAuth2 token flow + refresh | **done (compiles + links)** |
-| M3 — gateway: connect / heartbeat / presence | **done (compiles + links)** |
+| M1 — network + TLS (SceNet + LibreSSL/OpenSSL-ABI) | **done** |
+| M2 — auth: Discord user session token | **done** (v1's OAuth2 flow was dead-on-arrival: the public gateway rejects OAuth2 access tokens with close 4004) |
+| M3 — gateway: connect / heartbeat / presence | **done** (handshake + close-code behavior verified against the live gateway) |
 | M4 — game detection (foreground user → CUSA → title) | **done (compiles + links)** |
 | M5 — GoldHEN autoload + package + install | pending (needs on-console test) |
-| On-console validation (M1's TLS + detection against live FW) | pending |
+| On-console validation (TLS + detection against live FW) | pending |
 
 `build/orbisrpc.elf` (182 KiB) and `build/orbisrpc.fself` (188 KiB) link successfully
 against OpenOrbis v0.5.4; the TLS layer uses `libSceLibreSSL`'s OpenSSL-ABI
@@ -105,37 +105,36 @@ Logs go to `/data/orbisRPC/log.txt`.
 
 ---
 
-## One-time setup: your Discord app
+## One-time setup: your Discord user token
 
-The safe route (recommended; ToS-friendly) needs a Discord **Developer Application**:
-it's what makes Discord show "Playing …" as an integration rather than as your own
-account automating itself (which Discord bans on the user account — see notes in the
-repo). Steps:
+The daemon connects to Discord's gateway as *you*, so it needs your **user
+session token** (the same string the Discord client itself uses). This is the
+only auth Discord accepts on the gateway without a running client — OAuth2
+app tokens are rejected with close `4004` (v1 of this repo tried and failed
+exactly that way).
 
-1. Open https://discord.com/developers/applications → **New Application** → name it
-   `orbisRPC` (or whatever) → **Create**.
-2. Copy the **Application ID** (Client ID) and **Client Secret** into
-   `/data/orbisRPC/config.json` (`client_id`, `client_secret`).
-3. In the app → **OAuth2 → Redirects**, add:
-   `https://example.com/callback`
-4. In the app → **OAuth2 → Scopes**, add `rpc.activities.write` (and `identify`).
-5. Reboot the daemon: it will print an authorize URL into `log.txt`. Open that URL
-   on your phone/computer, approve, then paste the `code=` back into the config
-   (or let the daemon watch the config file). It exchanges the code once and then
-   refreshes automatically.
+1. Get your user token from a logged-in Discord session (search "how to obtain
+   discord user token" — many guides exist; only follow steps you understand).
+2. Paste it into `/data/orbisRPC/config.json` over FTP:
+   `"token": "your-token-here"`.
+3. Reboot / relaunch the game. The log prints `discord: gateway ready`, then
+   `presence: <Game>`.
 
-After that it just runs. No PC needed at runtime.
+That's it — no developer app, no OAuth dance, nothing else.
 
----
+Optional: `"application_id"` in config is only needed if you upload custom
+asset images to a Discord application and want them attached to the activity.
 
 ## Safety / ToS notes
 
-- We use the **OAuth2 application flow**, not your personal account token.
-  Automating your *user* account is what Discord flags as a "selfbot" and bans for.
-  A registered application acting on your permission is the supported integration path.
-- Discord may require your application to be verified to use `rpc.activities.write`.
-  For a personal, low-traffic app it usually works unverified; worst case it labels
-  the activity "via orbisRPC".
+- Using your user token programmatically is technically against Discord's
+  Terms of Service. This is exactly how every working headless presence tool
+  operates (multi-scrobbler's headless mode, etc.). There is no precedent of
+  bans for non-spam presence usage, but the risk is yours.
+- Treat the token like a password: it grants full account access. Never share
+  the config file or commit a real token to this repo.
+- Changing your password or "log out of all devices" invalidates the token;
+  grab a fresh one if the log shows close code `4004`.
 
 ---
 
