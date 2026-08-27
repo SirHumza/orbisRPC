@@ -42,17 +42,21 @@ static int rx_frame(discord_t *d, char *buf, size_t cap, int *op, int *fin, int6
     }
 }
 
-static void send_identify(discord_t *d, const char *token){
+static int send_identify(discord_t *d, const char *token){
     jl_val_t *root=jl_new_object();
+    if(!root) return -1;
     jl_obj_set(root,"op",jl_new_number(2));
     jl_val_t *dd=jl_new_object();
+    if(!dd){ jl_free(root); return -1; }
     jl_obj_set(dd,"token",jl_new_string(token));
     jl_val_t *pp=jl_new_object();
+    if(!pp){ jl_free(root); return -1; }
     jl_obj_set(pp,"os",jl_new_string("windows"));
     jl_obj_set(pp,"browser",jl_new_string("Discord Client"));
     jl_obj_set(pp,"device",jl_new_string(""));
     jl_obj_set(dd,"properties",pp);
     jl_val_t *pr=jl_new_object();
+    if(!pr){ jl_free(root); return -1; }
     jl_obj_set(pr,"status",jl_new_string("online"));
     jl_obj_set(pr,"activities",jl_new_array());
     jl_obj_set(pr,"afk",jl_new_bool(0));
@@ -60,12 +64,17 @@ static void send_identify(discord_t *d, const char *token){
     jl_obj_set(dd,"presence",pr);
     jl_obj_set(root,"d",dd);
     char *s=jl_stringify(root); jl_free(root);
-    ws_send_text(&d->ws,s,strlen(s)); free(s);
+    if(!s) return -1;
+    int rc = ws_send_text(&d->ws,s,strlen(s));
+    free(s);
+    return rc < 0 ? -1 : 0;
 }
 
 int discord_connect(discord_t *d, const char *token){
+    if(!d || !token || !token[0]) return -1;
     memset(d,0,sizeof(*d));
     strncpy(d->token, token, sizeof d->token-1);
+    d->token[sizeof d->token-1] = 0;
     char key[64]=""; make_key(key);
     int rc=ws_connect(&d->ws, GW_HOST, GW_PORT, GW_PATH, key);
     if(rc){ log_msg("ws connect fail %d",rc); return -1; }
@@ -90,7 +99,11 @@ int discord_connect(discord_t *d, const char *token){
         jl_free(h);
     }
     if(!d->hb_interval_ms) d->hb_interval_ms=45000;
-    send_identify(d, token);
+    if(send_identify(d, token) < 0){
+        log_msg("discord: identify send failed");
+        ws_close(&d->ws); d->connected=0;
+        return -1;
+    }
     log_msg("discord: identify sent, hb=%llds",(long long)(d->hb_interval_ms/1000));
     /* READY confirms the token was accepted */
     int64_t dl=time(NULL)+20;
@@ -118,13 +131,15 @@ int discord_connect(discord_t *d, const char *token){
 
 int discord_set_presence(discord_t *d, const char *state, const char *name,
                          const char *application_id, int64_t started_epoch){
-    if(!d->connected) return -1;
+    if(!d || !d->connected || !name) return -1;
     jl_val_t *act=jl_new_object();
+    if(!act) return -1;
     jl_obj_set(act,"name",jl_new_string(name?name:""));
     jl_obj_set(act,"type",jl_new_number(0)); /* Playing */
     if(state&&state[0]) jl_obj_set(act,"state",jl_new_string(state));
     if(started_epoch>0){
         jl_val_t *ts=jl_new_object();
+        if(!ts){ jl_free(act); return -1; }
         jl_obj_set(ts,"start",jl_new_number((double)started_epoch*1000.0)); /* ms epoch */
         jl_obj_set(act,"timestamps",ts);
     }
@@ -137,30 +152,34 @@ int discord_set_presence(discord_t *d, const char *state, const char *name,
     jl_obj_set(dd,"since",jl_new_number(0));
     jl_obj_set(dd,"afk",jl_new_bool(0));
     jl_val_t *root=jl_new_object();
+    if(!root){ jl_free(dd); return -1; }
     jl_obj_set(root,"op",jl_new_number(3));
     jl_obj_set(root,"d",dd);
     char *s=jl_stringify(root); jl_free(root);
+    if(!s) return -1;
     int r=ws_send_text(&d->ws,s,strlen(s)); free(s);
     return (r>=0)?0:-1;
 }
 
 int discord_clear_presence(discord_t *d){
-    if(!d->connected) return -1;
+    if(!d || !d->connected) return -1;
     jl_val_t *dd=jl_new_object();
     jl_obj_set(dd,"activities",jl_new_array());
     jl_obj_set(dd,"status",jl_new_string("online")); /* stay visible, just idle */
     jl_obj_set(dd,"since",jl_new_number(0));
     jl_obj_set(dd,"afk",jl_new_bool(0));
     jl_val_t *root=jl_new_object();
+    if(!root){ jl_free(dd); return -1; }
     jl_obj_set(root,"op",jl_new_number(3));
     jl_obj_set(root,"d",dd);
     char *s=jl_stringify(root); jl_free(root);
+    if(!s) return -1;
     int r=ws_send_text(&d->ws,s,strlen(s)); free(s);
     return (r>=0)?0:-1;
 }
 
 int discord_tick(discord_t *d){
-    if(!d->connected) return -1;
+    if(!d || !d->connected) return -1;
     int64_t now=time(NULL);
     long hb_s=(long)(d->hb_interval_ms/1000); if(hb_s<5)hb_s=5;
     /* gateway must ack heartbeats; 2 missed intervals means it's gone */

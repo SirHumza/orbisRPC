@@ -37,6 +37,9 @@ attr_public uint32_t    g_pluginVersion = 0x00000100; /* 1.00 */
 
 struct proc_info procInfo;
 
+static OrbisPthread s_daemon_thread;
+static int s_daemon_started = 0;
+
 static void *daemon_thread(void *args){
     /* args = display name of the game we are loaded into */
     char name[128];
@@ -69,8 +72,24 @@ int32_t attr_public plugin_load(int32_t argc, const char *argv[]){
     detect_name_for_title(procInfo.titleid, game_name, sizeof game_name);
     klog("[orbisrpc] game: %s\n", game_name);
 
+    /* explicit fat stack: TLS handshakes + JSON buffers overflow the
+     * small default plugin-thread stacks */
     OrbisPthread thread;
-    scePthreadCreate(&thread, NULL, daemon_thread, game_name, "orbisrpc_daemon");
+    OrbisPthreadAttr attr;
+    memset(&attr, 0, sizeof attr);
+    if(scePthreadAttrInit(&attr) == 0 &&
+       scePthreadAttrSetstacksize(&attr, 256*1024) == 0){
+        if(scePthreadCreate(&s_daemon_thread, &attr, daemon_thread, game_name, "orbisrpc_daemon") == 0)
+            s_daemon_started = 1;
+        else
+            klog("[orbisrpc] daemon thread creation failed\\n");
+    }else{
+        klog("[orbisrpc] attr init failed; falling back to default stack\n");
+        if(scePthreadCreate(&s_daemon_thread, NULL, daemon_thread, game_name, "orbisrpc_daemon2") == 0)
+            s_daemon_started = 1;
+        else
+            klog("[orbisrpc] daemon thread creation failed\\n");
+    }
     return 0;
 }
 
@@ -78,6 +97,11 @@ int32_t attr_public plugin_unload(int32_t argc, const char *argv[]){
     (void)argc; (void)argv;
     klog("[orbisrpc] <%s\\Ver.0x%08x> %s\n", g_pluginName, g_pluginVersion, __func__);
     daemon_request_stop();
+    if(s_daemon_started){
+        int rc = scePthreadJoin(s_daemon_thread, NULL);
+        klog("[orbisrpc] daemon thread joined rc=%d\\n", rc);
+        s_daemon_started = 0;
+    }
     return 0;
 }
 

@@ -11,8 +11,8 @@ TARGET      := $(BUILD_DIR)/$(OUTPUT_PRX).prx
 TARGET_ELF  := $(BUILD_DIR)/$(OUTPUT_PRX).elf
 
 # Root vars
-TOOLCHAIN   := $(OO_PS4_TOOLCHAIN)
-GH_SDK      := $(GOLDHEN_SDK)
+TOOLCHAIN   := $(or $(OO_PS4_TOOLCHAIN),/Users/mac/PS4Toolchain/OpenOrbis/PS4Toolchain)
+GH_SDK      := $(or $(GOLDHEN_SDK),/Users/mac/PS4Toolchain/GoldHEN_Plugins_SDK)
 ROOT        := ..
 SRCDIR      := .
 ORBISRPC    := $(ROOT)/orbisrpc
@@ -20,13 +20,15 @@ INTDIR      := $(BUILD_DIR)
 
 # Our daemon sources (payload main.c is NOT part of the plugin; plugin.c is the entry)
 DAEMON_SRC  := $(ORBISRPC)/log.c $(ORBISRPC)/cfg.c $(ORBISRPC)/jsonlite.c $(ORBISRPC)/b64.c \
-               $(ORBISRPC)/ws.c $(ORBISRPC)/discord.c $(ORBISRPC)/detect.c \
+               $(ORBISRPC)/tls.c $(ORBISRPC)/ws.c $(ORBISRPC)/discord.c $(ORBISRPC)/detect.c \
                $(ORBISRPC)/daemon.c
-PLUGIN_SRC  := $(SRCDIR)/plugin.c
+PLUGIN_SRC  := $(SRCDIR)/plugin.c $(SRCDIR)/compat.c
 CFILES      := $(PLUGIN_SRC) $(DAEMON_SRC)
 OBJS        := $(patsubst %.c,$(INTDIR)/%.o,$(notdir $(CFILES)))
+BEAR_SRC    := $(shell find $(ROOT)/third_party/bearssl/src -name '*.c' | sort)
+BEAR_OBJS   := $(patsubst $(ROOT)/third_party/bearssl/src/%.c,$(INTDIR)/bear/%.o,$(BEAR_SRC))
 
-LIBS := -lSceLibcInternal -lSceNet -lSceNetCtl -lSceLibreSSL \
+LIBS := -lSceLibcInternal -lSceNet -lSceNetCtl \
         -lSceSysmodule -lSceUserService -lSceAppInstUtil -lSceAppContent \
         -lGoldHEN_Hook -lkernel
 
@@ -36,14 +38,15 @@ EXTRAFLAGS := $(DEBUG_FLAGS) -std=gnu11 -Wall -Wno-unused \
 
 CFLAGS  := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -c $(EXTRAFLAGS) \
            -isysroot $(TOOLCHAIN) -isystem $(TOOLCHAIN)/include \
-           -I$(GH_SDK)/include -I$(ORBISRPC) -I$(SRCDIR)
+           -I$(GH_SDK)/include -I$(GH_SDK) -I$(ORBISRPC) -I$(SRCDIR) \
+           -I$(ROOT)/third_party/bearssl/inc -I$(ROOT)/third_party/bearssl/src
 LDFLAGS := -m elf_x86_64 -pie --script $(TOOLCHAIN)/link.x -e _init --eh-frame-hdr \
            -L$(TOOLCHAIN)/lib -L$(GH_SDK) $(LIBS)
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-	CC      := /usr/local/opt/llvm/bin/clang
-	LD      := $(LLD)
+	CC      := $(or $(LLVM_CC),/usr/local/opt/llvm/bin/clang)
+	LD      := $(or $(LLD),/Users/mac/lldbuild/build/bin/ld.lld)
 	CDIR    := macos
 	FSUFFIX := -macos
 else
@@ -61,9 +64,13 @@ $(INTDIR)/%.o: $(ORBISRPC)/%.c
 $(INTDIR)/plugin.o: $(SRCDIR)/plugin.c
 	$(CC) $(CFLAGS) -o $@ $<
 
-$(TARGET): $(OBJS)
-	$(LD) $(GH_SDK)/build/crtprx.o $(OBJS) -o $(TARGET_ELF) $(LDFLAGS)
-	$(TOOLCHAIN)/bin/$(CDIR)/create-fself$(FSUFFIX) -in=$(TARGET_ELF) -out=$(TARGET_ELF).oelf \
+$(INTDIR)/bear/%.o: $(ROOT)/third_party/bearssl/src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -o $@ $<
+
+$(TARGET): $(OBJS) $(BEAR_OBJS)
+	$(LD) $(GH_SDK)/build/crtprx.o $(OBJS) $(BEAR_OBJS) -o $(TARGET_ELF) $(LDFLAGS)
+	OO_PS4_TOOLCHAIN=$(TOOLCHAIN) $(TOOLCHAIN)/bin/$(CDIR)/create-fself$(FSUFFIX) -in=$(TARGET_ELF) -out=$(TARGET_ELF).oelf \
 		--lib=$(TARGET) --paid 0x3800000000000011
 
 .PHONY: clean

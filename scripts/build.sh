@@ -10,8 +10,8 @@ LD="${LLD:-/Users/mac/lldbuild/build/bin/ld.lld}"
 TARGET="x86_64-pc-freebsd12-elf"
 CFLAGS="--target=$TARGET -fPIC -std=gnu11 -Wall -Wno-unused \
         -Wno-int-conversion -Wno-incompatible-pointer-types \
-        -isystem $SDK/include"
-LIBS="-lc -lkernel -lSceNet -lSceNetCtl -lSceLibreSSL -lSceSysmodule \
+        -isystem $SDK/include -Ithird_party/bearssl/inc -Ithird_party/bearssl/src"
+LIBS="-lc -lkernel -lSceNet -lSceNetCtl -lSceSysmodule \
       -lSceUserService -lSceAppInstUtil -lSceAppContent"
 LDFLAGS="-m elf_x86_64 -pie --eh-frame-hdr -L$SDK/lib $LIBS $SDK/lib/crt1.o --script $SDK/link.x"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -19,8 +19,13 @@ cd "$ROOT"
 export OO_PS4_TOOLCHAIN="$SDK"
 OUT="$ROOT/build"; mkdir -p "$OUT"
 echo "=== compiling ==="
-for f in log cfg jsonlite b64 ws detect discord daemon main; do
+for f in log cfg jsonlite b64 tls ws detect discord daemon main; do
   "$CC" $CFLAGS -c -o "$OUT/$f.o" "orbisrpc/$f.c" || { echo "compile $f FAILED"; exit 1; }
+done
+echo "=== bearssl ==="
+for f in $(find third_party/bearssl/src -name '*.c' | sort); do
+  o="$OUT/bear_$(echo "$f" | sed 's|third_party/bearssl/src/||; s|/|_|g; s|\.c$||').o"
+  "$CC" $CFLAGS -c -o "$o" "$f" || { echo "bearssl $f FAILED"; exit 1; }
 done
 echo "=== linking ($LD) ==="
 "$LD" $OUT/*.o -o "$OUT/orbisrpc.elf" $LDFLAGS || { echo "link FAILED"; exit 1; }

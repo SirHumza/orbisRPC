@@ -82,6 +82,7 @@ int daemon_run(const char *fixed_game_name){
                 char name[128] = "";
                 if(fixed_game_name){
                     strncpy(name, fixed_game_name, sizeof name-1);
+                    name[sizeof name-1] = 0;
                 }else{
                     if(detect_foreground_active())
                         detect_current_game(name, sizeof name, NULL, 0);
@@ -94,6 +95,7 @@ int daemon_run(const char *fixed_game_name){
                         discord_set_presence(&dc, state, name, g_cfg.application_id, started);
                         log_msg("presence: %s", name);
                         strncpy(last, name, sizeof last-1);
+                        last[sizeof last-1] = 0;
                         active = 1;
                     }
                 }else if(active){

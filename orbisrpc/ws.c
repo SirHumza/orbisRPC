@@ -1,11 +1,11 @@
-/* ws.c - WebSocket client over SceNet + PS4 LibreSSL (OpenSSL-style) TLS.
- * Non-blocking socket: every SSL_read/SSL_write return goes through
- * SSL_get_error, so WANT_READ/WANT_WRITE means "retry", never "closed".
- * The receive buffer grows for large server frames (user-account READY
+/* ws.c - WebSocket client over SceNet + BearSSL TLS.
+ * Non-blocking friendly: tls_read() returns 0 when no data is pending, and
+ * the receive buffer grows for large server frames (user-account READY
  * payloads are big); frames beyond WS_RBUF_MAX are drained and skipped.
  * All client->server frames are masked per RFC 6455 5.3, control frames too.
  */
 #include "ws.h"
+#include "tls.h"
 #include "log.h"
 #include <orbis/Net.h>
 #include <orbis/Sysmodule.h>
@@ -17,32 +17,12 @@
 #include <unistd.h>
 #include <time.h>
 
-typedef struct ssl_ctx_st SSL_CTX;
-typedef struct ssl_st SSL;
-
-/* exported from libSceLibreSSL.so (OpenSSL ABI) */
-extern SSL_CTX *SSL_CTX_new(const void *method);
-extern void     SSL_CTX_free(SSL_CTX *ctx);
-extern SSL     *SSL_new(SSL_CTX *ctx);
-extern void     SSL_free(SSL *s);
-extern int      SSL_set_fd(SSL *s, int fd);
-extern int      SSL_set_connect_state(SSL *s);
-extern int      SSL_connect(SSL *s);
-extern int      SSL_write(SSL *s, const void *buf, int num);
-extern int      SSL_read(SSL *s, void *buf, int num);
-extern int      SSL_shutdown(SSL *s);
-extern int      SSL_get_error(SSL *s, int ret);
-extern const void *SSLv23_client_method(void);
-extern int      SSL_ctrl(SSL *s, int cmd, long larg, void *parg);
-
 #ifndef SOL_SOCKET
 #define SOL_SOCKET 0xffff
 #endif
 #ifndef SO_NBIO
 #define SO_NBIO 0x2000
 #endif
-#define SSL_ERROR_WANT_READ  2
-#define SSL_ERROR_WANT_WRITE 3
 
 static int s_net_ready = 0;
 static int s_net_mem = 0;
@@ -54,26 +34,16 @@ static int net_ensure(void){
     if(sceNetInit() < 0){ log_msg("sceNetInit fail"); return -2; }
     s_net_mem = (int)sceNetPoolCreate("orbisrpcNet", 128*1024, 0);
     if(s_net_mem < 0){ log_msg("net pool fail %d", s_net_mem); return -3; }
+    /* NOTE: deliberately NO sceNetCtlInit here — this runs inside a game
+     * process, and initializing app-level NetCtl state under a live game is
+     * a crash recipe. The kernel resolver works fine with just the pool. */
     s_net_ready = 1;
     return 0;
 }
 
-/* Write exactly n bytes over TLS, tolerating WANT_READ/WRITE with deadline. */
+/* Write exactly n bytes of plaintext through the TLS engine. */
 static int ws_send_all(ws_t *w, const unsigned char *data, size_t n){
-    SSL *ssl = (SSL*)(intptr_t)w->ssl;
-    size_t off=0;
-    int64_t t0=time(NULL);
-    while(off<n){
-        int wr = SSL_write(ssl, data+off, (int)(n-off));
-        if(wr>0){ off+=(size_t)wr; continue; }
-        int e = SSL_get_error(ssl, wr);
-        if(e==SSL_ERROR_WANT_READ || e==SSL_ERROR_WANT_WRITE){
-            if(time(NULL)-t0 > 10) return -1;
-            usleep(10000); continue;
-        }
-        return -1;
-    }
-    return (int)off;
+    return tls_write((tls_ctx_t*)w->tls, data, n) < 0 ? -1 : (int)n;
 }
 
 static void next_mask(unsigned char mk[4]){
@@ -90,11 +60,15 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
     w->rbuf = (unsigned char*)malloc(w->rcap);
     if(!w->rbuf){ log_msg("ws: rbuf alloc fail"); return -1; }
     if(net_ensure()<0) goto fail;
-    int32_t rid = sceNetResolverCreate("orbisrpcR", 0, 0);
+    /* memid = our net pool: passing 0 here fails with EBADF (0x80410109) */
+    int32_t rid = sceNetResolverCreate("orbisrpcR", s_net_mem, 0);
     OrbisNetInAddr in; memset(&in,0,sizeof in);
     int resolved = 0;
-    if(rid >= 0){
-        int32_t rr = sceNetResolverStartNtoa(rid, host, &in, 5, 3, 0);
+    if(rid < 0){
+        log_msg("resolver create fail %d", rid);
+    }else{
+        int32_t rr = sceNetResolverStartNtoa(rid, host, &in, 5000000, 3, 0);
+        if(rr < 0) log_msg("resolver %s err %d", host, rr);
         sceNetResolverDestroy(rid);
         resolved = (rr >= 0);
     }
@@ -106,48 +80,35 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
     int32_t fd = sceNetSocket("orbisrpcWs", ORBIS_NET_AF_INET, ORBIS_NET_SOCK_STREAM, 0);
     if(fd < 0){ log_msg("socket fail %d",fd); goto fail; }
     w->fd = fd; w->sock = fd;
-    /* Pack port + IPv4 into sa_data in network byte order.
-     * s_addr is a big-endian u32 value; on this LE target its FIRST octet
-     * lives in the HIGH byte, so shift down from the top.
-     * (v1 packed it low-byte-first -> reversed IPs -> connect() to nowhere.) */
+    /* Pack port + IPv4 into sa_data. The resolver's OrbisNetInAddr already
+     * stores the octets in wire-memory order, so copy the 4 bytes VERBATIM
+     * (any >>24-style arithmetic reverses the IP — v2 dialed mirrored IPs). */
+    unsigned char ipb[4];
+    memcpy(ipb, &in.s_addr, 4);
     OrbisNetSockaddr sa; memset(&sa,0,sizeof sa);
     sa.len       = (uint8_t)sizeof sa;
     sa.sa_family = (OrbisNetSaFamily_t)ORBIS_NET_AF_INET;
     sa.sa_data[0] = (char)((port >> 8) & 0xff);
     sa.sa_data[1] = (char)(port & 0xff);
-    sa.sa_data[2] = (char)((in.s_addr >> 24) & 0xff);
-    sa.sa_data[3] = (char)((in.s_addr >> 16) & 0xff);
-    sa.sa_data[4] = (char)((in.s_addr >> 8) & 0xff);
-    sa.sa_data[5] = (char)(in.s_addr & 0xff);
+    sa.sa_data[2] = (char)ipb[0];
+    sa.sa_data[3] = (char)ipb[1];
+    sa.sa_data[4] = (char)ipb[2];
+    sa.sa_data[5] = (char)ipb[3];
+    log_msg("dial %s -> %u.%u.%u.%u:%d", host,
+            (unsigned char)sa.sa_data[2], (unsigned char)sa.sa_data[3],
+            (unsigned char)sa.sa_data[4], (unsigned char)sa.sa_data[5], port);
     if(sceNetConnect(fd, &sa, sizeof sa) < 0){
-        log_msg("connect fail to %s:%d", host, port);
+        log_msg("connect fail (syscall) to %s:%d", host, port);
         goto fail;
     }
     int on = 1;
     sceNetSetsockopt(fd, SOL_SOCKET, SO_NBIO, &on, sizeof on);
     w->nb = 1;
-    /* socket already non-blocking -> SSL_connect returns WANT_*; poll it */
-    SSL_CTX *ctx = SSL_CTX_new(SSLv23_client_method());
-    if(!ctx){ log_msg("SSL_CTX_new fail"); goto fail; }
-    SSL *ssl = SSL_new(ctx);
-    if(!ssl){ log_msg("SSL_new fail"); SSL_CTX_free(ctx); goto fail; }
-    w->ssl_ctx = (int32_t)(intptr_t)ctx;   /* stash early: single cleanup path */
-    w->ssl     = (int32_t)(intptr_t)ssl;
-    if(SSL_set_fd(ssl, (int)fd) != 1){ log_msg("SSL_set_fd fail"); goto fail; }
-    /* SNI: SSL_ctrl(s, SSL_CTRL_SET_TLSEXT_HOSTNAME(55), NAMETYPE_host_name(0), host) */
-    if(SSL_ctrl(ssl, 55, 0, (void *)host) != 1){ log_msg("SNI warn"); }
-    SSL_set_connect_state(ssl);
-    int cr=-1; int64_t t0=time(NULL);
-    for(;;){
-        cr = SSL_connect(ssl);
-        if(cr==1) break;
-        int e = SSL_get_error(ssl, cr);
-        if(e==SSL_ERROR_WANT_READ || e==SSL_ERROR_WANT_WRITE){
-            if(time(NULL)-t0 > 10){ log_msg("SSL_connect timeout"); goto fail; }
-            usleep(20000); continue;
-        }
-        log_msg("SSL_connect fail err=%d", e); goto fail;
-    }
+    log_msg("tcp established");
+    /* TLS handshake over the established connection (BearSSL, no external
+     * module needed). Socket is NBIO; tls_start pumps it with a deadline. */
+    w->tls = tls_start(fd, host);
+    if(!w->tls){ goto fail; }
     /* HTTP Upgrade handshake. Desktop-client UA, NO Origin header (native
      * clients don't send Origin to the gateway). */
     char req[640]; int n=snprintf(req,sizeof req,
@@ -160,26 +121,31 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
     if(ws_send_all(w, (const unsigned char*)req, (size_t)n) < 0){ log_msg("hs write fail"); goto fail; }
     /* Read response headers; bytes past "\r\n\r\n" are the first websocket
      * frame (usually HELLO arriving early) and MUST be kept, not dropped. */
-    char hdr[2048]; int hlen=0, rd; t0=time(NULL);
+    char hdr[2048]; int hlen=0, rd; int64_t t0=time(NULL);
+    int header_end = -1;
     while(hlen<(int)sizeof hdr-1){
-        rd = SSL_read(ssl, hdr+hlen, (int)(sizeof hdr-1-hlen));
+        rd = tls_read(w->tls, hdr+hlen, sizeof hdr-1-(size_t)hlen);
         if(rd>0){
             hlen+=rd; hdr[hlen]=0;
-            if(hlen>=4 && memcmp(hdr+hlen-4,"\r\n\r\n",4)==0) break;
+            for(int i=3; i<hlen; i++){
+                if(hdr[i-3]=='\r' && hdr[i-2]=='\n' && hdr[i-1]=='\r' && hdr[i]=='\n'){
+                    header_end = i + 1;
+                    break;
+                }
+            }
+            if(header_end >= 0) break;
             continue;
         }
-        int e = SSL_get_error(ssl, rd);
-        if(e==SSL_ERROR_WANT_READ || e==SSL_ERROR_WANT_WRITE){
+        if(rd==0){
             if(time(NULL)-t0 > 10){ log_msg("hs timeout"); goto fail; }
             usleep(20000); continue;
         }
         goto fail;
     }
-    if(hlen<12 || !strstr(hdr,"101")){ log_msg("no 101: %.40s", hdr); goto fail; }
+    if(header_end < 0 || hlen < 12 || strncmp(hdr,"HTTP/1.1 101 ",12)!=0){ log_msg("no 101: %.40s", hdr); goto fail; }
     w->connected = 1;
-    const char *body = strstr(hdr,"\r\n\r\n");
-    if(body){
-        body += 4;
+    if(header_end < hlen){
+        const char *body = hdr + header_end;
         size_t bl = (size_t)(hdr+hlen-body);
         if(bl > w->rcap) bl = w->rcap;
         if(bl){ memcpy(w->rbuf, body, bl); w->rlen = bl; }
@@ -187,16 +153,15 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
     log_msg("ws: connected (handshake ok)");
     return 0;
 fail:
-    if(w->ssl)     SSL_free((SSL*)(intptr_t)w->ssl);
-    if(w->ssl_ctx) SSL_CTX_free((SSL_CTX*)(intptr_t)w->ssl_ctx);
+    tls_free((tls_ctx_t*)w->tls); w->tls=NULL;
     if(w->fd > 0)  sceNetSocketClose(w->fd);
     free(w->rbuf); w->rbuf=NULL; w->rcap=0;
-    w->connected=0; w->ssl=0; w->ssl_ctx=0; w->fd=0; w->sock=0;
+    w->connected=0; w->tls=NULL; w->fd=0; w->sock=0;
     return -9;
 }
 
 int ws_send_text(ws_t *w, const char *msg, size_t len){
-    if(!w->connected) return -1;
+    if(!w || !w->connected || (!msg && len)) return -1;
     if(len > 16384){ log_msg("ws frame too big (%zu); refusing", len); return -1; }
     unsigned char mk[4]; next_mask(mk);
     unsigned char hdr[14]; size_t f=0;
@@ -239,9 +204,20 @@ static int peek_frame(ws_t *w, size_t *hdr_out, uint64_t *plen_out){
     return 1;
 }
 
+static int valid_frame_header(const unsigned char *b, size_t avail, uint64_t plen){
+    int fin = (b[0] & 0x80) != 0;
+    int rsv = b[0] & 0x70;
+    int op = b[0] & 0x0f;
+    int masked = (b[1] & 0x80) != 0;
+    if (rsv || masked || op >= 3 || (op == 0 && fin)) return 0;
+    if (op >= 8 && (!fin || plen > 125)) return 0;
+    if ((b[1] & 0x7f) == 127 && (b[2] & 0x80)) return 0;
+    if (op == 0 && avail >= 2 && !fin) return 0;
+    return 1;
+}
+
 int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out){
-    if(!w->connected) return -1;
-    SSL *ssl = (SSL*)(intptr_t)w->ssl;
+    if(!w || !w->connected || !buf || cap==0) return -1;
     for(;;){
         /* compact consumed bytes to the front */
         if(w->rpos>0){
@@ -263,6 +239,10 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
             if(peek_frame(w,&hdr,&plen)){
                 const unsigned char *b = w->rbuf + w->rpos;
                 int fin=(b[0]&0x80)!=0, wire_op=b[0]&0x0f;
+                if(!valid_frame_header(b, w->rlen-w->rpos, plen)){
+                    log_msg("ws: protocol violation in frame header");
+                    return -2;
+                }
                 /* absurd length: skip BEFORE arithmetic (hdr+plen could
                  * overflow uint64 and smuggle a tiny "total" past the cap) */
                 if(plen > WS_RBUF_MAX){
@@ -299,23 +279,24 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
                 w->rpos=0; w->rlen=0; return -2;
             }
         }
-        int rd = SSL_read(ssl, w->rbuf+w->rlen, (int)(w->rcap-w->rlen));
+        int rd = tls_read((tls_ctx_t*)w->tls, (char*)w->rbuf+w->rlen, w->rcap-w->rlen);
         if(rd > 0){ w->rlen += (size_t)rd; continue; }
-        int e = SSL_get_error(ssl, rd);
-        if(e==SSL_ERROR_WANT_READ || e==SSL_ERROR_WANT_WRITE) return 0; /* no data yet */
+        if(rd == 0) return 0; /* no data yet */
         return -1; /* closed / error */
     }
 }
 
 int ws_close(ws_t *w){
-    if(!w->connected){ free(w->rbuf); w->rbuf=NULL; w->rcap=0; return 0; }
+    if(!w) return -1;
+    if(!w->connected){
+        free(w->rbuf); w->rbuf=NULL; w->rcap=0; w->rlen=0; w->rpos=0;
+        return 0;
+    }
     ws_send_control(w, 0x8); /* best-effort masked CLOSE */
-    SSL_shutdown((SSL*)(intptr_t)w->ssl);
-    SSL_free((SSL*)(intptr_t)w->ssl);
-    SSL_CTX_free((SSL_CTX*)(intptr_t)w->ssl_ctx);
+    tls_free((tls_ctx_t*)w->tls);
     sceNetSocketClose(w->fd);
     free(w->rbuf); w->rbuf=NULL; w->rcap=0;
-    w->connected=0; w->sock=0; w->ssl=0; w->ssl_ctx=0; w->fd=0; w->rlen=0; w->rpos=0;
+    w->connected=0; w->sock=0; w->tls=NULL; w->fd=0; w->rlen=0; w->rpos=0;
     w->skip_left=0;
     return 0;
 }

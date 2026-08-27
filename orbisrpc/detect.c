@@ -144,6 +144,9 @@ static void appdb_title(const char *titleId, char *out, size_t cap){
 }
 
 int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap){
+    if(!out_name || cap==0) return -1;
+    out_name[0] = 0;
+    if(out_path && p_cap) out_path[0] = 0;
     if(!detect_foreground_active()) return -1;
     char titleId[16]=""; int named=0;
     if(scan_recent_titleid(titleId,sizeof titleId)==0){

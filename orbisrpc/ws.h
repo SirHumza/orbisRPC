@@ -10,10 +10,10 @@
 #define WS_RBUF_MAX (2*1024*1024)  /* grow limit; bigger frames are skipped */
 
 typedef struct {
-    int32_t sock; int32_t ssl; int32_t ssl_ctx;
-    int32_t connected; int32_t fd;
+    int32_t sock; int32_t connected; int32_t fd;
     int nb;                     /* underlying socket non-blocking flag */
-    unsigned char *rbuf;        /* raw bytes from SSL_read (heap, grows) */
+    void *tls;                  /* tls_ctx_t* (opaque: BearSSL session) */
+    unsigned char *rbuf;        /* raw bytes from TLS layer (heap, grows) */
     size_t rcap;                /* allocated size of rbuf */
     size_t rlen;                /* valid bytes in rbuf */
     size_t rpos;                /* consumed parse position */

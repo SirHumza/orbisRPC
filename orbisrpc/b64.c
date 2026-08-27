@@ -3,6 +3,7 @@
 static const char b64t[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 size_t b64_encode(const unsigned char *in, size_t len, char *out){
     size_t o=0, i;
+    if(!out || (len && !in)) return 0;
     for(i=0;i<len;i+=3){
         unsigned char b0=in[i], b1=(i+1<len)?in[i+1]:0, b2=(i+2<len)?in[i+2]:0;
         unsigned v=((unsigned)b0<<16)|((unsigned)b1<<8)|b2;

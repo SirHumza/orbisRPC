@@ -25,6 +25,7 @@ static jl_val_t *parse_string(jl_parse_t *p) {
     jl_val_t *v = newval(JL_STRING); if(!v){p->err=1;return NULL;}
     size_t cap=32, len=0;
     char *buf = (char*)malloc(cap);
+    if(!buf){ p->err=1; jl_free(v); return NULL; }
     while (p->cur < p->end && *p->cur != '"') {
         char c = *p->cur++;
         if (c=='\\') {
@@ -40,13 +41,23 @@ static jl_val_t *parse_string(jl_parse_t *p) {
                     if(p->err)break; char outb[5]; int on=0; if(cp<0x80)outb[on++]=cp;
                     else if(cp<0x800){outb[on++]=(char)(0xC0|(cp>>6));outb[on++]=(char)(0x80|(cp&0x3F));}
                     else {outb[on++]=(char)(0xE0|(cp>>12));outb[on++]=(char)(0x80|((cp>>6)&0x3F));outb[on++]=(char)(0x80|(cp&0x3F));}
-                    if(len+(size_t)on+1>cap){cap=(len+on+1)*2;buf=(char*)realloc(buf,cap);}
+                    if(len+(size_t)on+1>cap){
+                        size_t ncap=(len+(size_t)on+1)*2;
+                        char *nb=(char*)realloc(buf,ncap);
+                        if(!nb){ free(buf); jl_free(v); p->err=1; return NULL; }
+                        buf=nb; cap=ncap;
+                    }
                     memcpy(buf+len,outb,on);len+=on; continue;}
                 default: p->err=1; break;
             }
             if(p->err)break;
         }
-        if(len+2>cap){cap*=2;buf=(char*)realloc(buf,cap);}
+        if(len+2>cap){
+            size_t ncap=cap*2;
+            char *nb=(char*)realloc(buf,ncap);
+            if(!nb){ free(buf); jl_free(v); p->err=1; return NULL; }
+            buf=nb; cap=ncap;
+        }
         buf[len++]=c;
     }
     if(p->err){free(buf);jl_free(v);return NULL;}
@@ -113,10 +124,12 @@ static jl_val_t *parse_value(jl_parse_t *p) {
 }
 
 jl_val_t *jl_parse(const char *s, size_t len){
-    size_t l = len?len:strlen(s);
+    if(!s) return NULL;
+    size_t l = len;
     jl_parse_t p={s,s+l,0};
     jl_val_t *v=parse_value(&p);
-    if(p.err){jl_free(v);return NULL;}
+    skip_ws(&p);
+    if(p.err || p.cur != p.end){jl_free(v);return NULL;}
     return v;
 }
 
@@ -147,8 +160,8 @@ void jl_free(jl_val_t *v){
     free(v);
 }
 
-jl_val_t *jl_obj_get(jl_val_t *obj, const char *key){
-    if(!obj||obj->type!=JL_OBJECT)return NULL;
+jl_val_t *jl_obj_get(const jl_val_t *obj, const char *key){
+    if(!obj||obj->type!=JL_OBJECT||!key)return NULL;
     jl_val_t *p=obj->child;
     while(p){
         if(p->str && !strcmp(p->str,key)){
@@ -160,7 +173,7 @@ jl_val_t *jl_obj_get(jl_val_t *obj, const char *key){
     return NULL;
 }
 
-jl_val_t *jl_arr_at(jl_val_t *arr, size_t i){
+jl_val_t *jl_arr_at(const jl_val_t *arr, size_t i){
     if(!arr||arr->type!=JL_ARRAY)return NULL;
     jl_val_t *e=arr->child;
     while(e&&i--){ e=e->next; }
@@ -168,10 +181,14 @@ jl_val_t *jl_arr_at(jl_val_t *arr, size_t i){
 }
 
 /* ---- serializer ---- */
-static void escstr(const char *s, char **out, size_t *cap, size_t *len){
+static int ensure_capacity(char **out, size_t *cap, size_t need);
+
+static int escstr(const char *s, char **out, size_t *cap, size_t *len){
+    if(!s) s = "";
     size_t l=strlen(s);
+    if(l > ((size_t)-1 - *len - 3) / 6) return -1;
     size_t need=*len+l*6+2;
-    if(need>*cap){*cap=need*2;*out=(char*)realloc(*out,*cap);}
+    if(ensure_capacity(out,cap,need+1)<0) return -1;
     char *p=*out+*len; *p++='"';
     for(size_t i=0;i<l;i++){
         char c=s[i];
@@ -184,60 +201,93 @@ static void escstr(const char *s, char **out, size_t *cap, size_t *len){
                     *p++=hx[(c>>4)&0xf];*p++=hx[c&0xf];break;}}
         } else { *p++=c; }
     }
-    *p++='"'; *len=p-*out;
+    *p++='"'; *len=(size_t)(p-*out);
+    return 0;
 }
 
-static void emit(jl_val_t *v, char **out, size_t *cap, size_t *len){
+static int ensure_capacity(char **out, size_t *cap, size_t need){
+    if (need <= *cap) return 0;
+    size_t ncap = *cap;
+    while (ncap < need) {
+        if (ncap > (size_t)-1 / 2) return -1;
+        ncap *= 2;
+    }
+    char *p = (char *)realloc(*out, ncap);
+    if (!p) return -1;
+    *out = p;
+    *cap = ncap;
+    return 0;
+}
+
+static int emit(jl_val_t *v, char **out, size_t *cap, size_t *len){
     char buf[64];
     switch(v->type){
-        case JL_NULL: { size_t l=4; if(*len+l+1>*cap){*cap=(*len+l+2)*2;*out=realloc(*out,*cap);} memcpy(*out+*len,"null",4);*len+=4; return; }
+        case JL_NULL: { size_t l=4; if(ensure_capacity(out,cap,*len+l+1)<0)return -1; memcpy(*out+*len,"null",4);*len+=4; return 0; }
         case JL_BOOL: { const char*s=v->num?"true":"false"; size_t l=strlen(s);
-            if(*len+l+1>*cap){*cap=(*len+l+2)*2;*out=realloc(*out,*cap);} memcpy(*out+*len,s,l);*len+=l; return; }
+            if(ensure_capacity(out,cap,*len+l+1)<0)return -1; memcpy(*out+*len,s,l);*len+=l; return 0; }
         case JL_NUMBER: snprintf(buf,sizeof buf,"%.17g",v->num); break;
-        case JL_STRING: escstr(v->str,out,cap,len); return;
+        case JL_STRING: return escstr(v->str,out,cap,len);
         case JL_ARRAY:{
-            size_t l=*len+1; if(l>*cap){*cap=l*2;*out=realloc(*out,*cap);} (*out)[(*len)++]='[';
+            size_t l=*len+1; if(ensure_capacity(out,cap,l+1)<0)return -1; (*out)[(*len)++]='[';
             jl_val_t*e=v->child;int first=1;
-            while(e){ if(!first){ size_t l2=*len+1; if(l2>*cap){*cap=l2*2;*out=realloc(*out,*cap);} (*out)[(*len)++]=','; }
-                first=0; emit(e,out,cap,len); e=e->next; }
-            l=*len+1; if(l>*cap){*cap=l*2;*out=realloc(*out,*cap);} (*out)[(*len)++]=']'; return; }
+            while(e){ if(!first){ size_t l2=*len+1; if(ensure_capacity(out,cap,l2+1)<0)return -1; (*out)[(*len)++]=','; }
+                first=0; if(emit(e,out,cap,len)<0)return -1; e=e->next; }
+            l=*len+1; if(ensure_capacity(out,cap,l+1)<0)return -1; (*out)[(*len)++]=']'; return 0; }
         case JL_OBJECT:{
-            size_t l=*len+1; if(l>*cap){*cap=l*2;*out=realloc(*out,*cap);} (*out)[(*len)++]='{';
+            size_t l=*len+1; if(ensure_capacity(out,cap,l+1)<0)return -1; (*out)[(*len)++]='{';
             jl_val_t*p=v->child;int first=1;
             while(p){ if(p->str){
-                if(!first){ size_t l2=*len+1; if(l2>*cap){*cap=l2*2;*out=realloc(*out,*cap);} (*out)[(*len)++]=','; }
+                if(!first){ size_t l2=*len+1; if(ensure_capacity(out,cap,l2+1)<0)return -1; (*out)[(*len)++]=','; }
                 first=0;
-                escstr(p->str,out,cap,len);
-                size_t l3=*len+1; if(l3>*cap){*cap=l3*2;*out=realloc(*out,*cap);} (*out)[(*len)++]=':';
-                if(p->child){ emit(p->child,out,cap,len); }
-                else { size_t lz=*len+4; if(lz>*cap){*cap=lz*2;*out=realloc(*out,*cap);} memcpy(*out+*len,"null",4);*len+=4; }
+                if(escstr(p->str,out,cap,len)<0)return -1;
+                size_t l3=*len+1; if(ensure_capacity(out,cap,l3+1)<0)return -1; (*out)[(*len)++]= ':';
+                if(p->child){ if(emit(p->child,out,cap,len)<0)return -1; }
+                else { size_t lz=*len+4; if(ensure_capacity(out,cap,lz+1)<0)return -1; memcpy(*out+*len,"null",4);*len+=4; }
                 } p=p->next; }
-            l=*len+1; if(l>*cap){*cap=l*2;*out=realloc(*out,*cap);} (*out)[(*len)++]='}'; return; }
+            l=*len+1; if(ensure_capacity(out,cap,l+1)<0)return -1; (*out)[(*len)++]='}'; return 0; }
     }
     if(buf[0]){ size_t lb=strlen(buf);
-        if(*len+lb+1>*cap){*cap=(*len+lb+2)*2;*out=realloc(*out,*cap);}
-        memcpy(*out+*len,buf,lb);*len+=lb; }
+        if(ensure_capacity(out,cap,*len+lb+1)<0)return -1;
+        memcpy(*out+*len,buf,lb);*len+=lb;
+    }
+    return 0;
 }
 
 char *jl_stringify(const jl_val_t *v){
+    if(!v) return NULL;
     char *out=(char*)malloc(256); if(!out) return NULL;
     size_t cap=256,len=0;
-    emit((jl_val_t*)v,&out,&cap,&len);
+    if(emit((jl_val_t*)v,&out,&cap,&len)<0){ free(out); return NULL; }
     char *t=(char*)realloc(out,len+1);
     if(t){ t[len]=0; return t; }
     out[len]=0; return out; /* realloc failed: still return what we have */
 }
 
-jl_val_t *jl_new_string(const char *s){ jl_val_t *v=newval(JL_STRING); v->str=strdup(s?s:""); v->strlen=strlen(v->str); return v; }
-jl_val_t *jl_new_number(double n){ jl_val_t *v=newval(JL_NUMBER); v->num=n; return v; }
-jl_val_t *jl_new_bool(int b){ jl_val_t *v=newval(JL_BOOL); v->num=b?1:0; return v; }
+jl_val_t *jl_new_string(const char *s){
+    jl_val_t *v=newval(JL_STRING);
+    if(!v) return NULL;
+    v->str=strdup(s?s:"");
+    if(!v->str){ free(v); return NULL; }
+    v->strlen=strlen(v->str);
+    return v;
+}
+jl_val_t *jl_new_number(double n){ jl_val_t *v=newval(JL_NUMBER); if(v)v->num=n; return v; }
+jl_val_t *jl_new_bool(int b){ jl_val_t *v=newval(JL_BOOL); if(v)v->num=b?1:0; return v; }
 jl_val_t *jl_new_object(void){ return newval(JL_OBJECT); }
 jl_val_t *jl_new_array(void){ return newval(JL_ARRAY); }
 void jl_obj_set(jl_val_t *obj,const char *key,jl_val_t *val){
-    jl_val_t *pair=newval(JL_OBJECT); pair->str=strdup(key); pair->strlen=strlen(key); pair->child=val;
+    if(!obj || obj->type!=JL_OBJECT || !key || !val) return;
+    jl_val_t *pair=newval(JL_OBJECT);
+    if(!pair) return;
+    pair->str=strdup(key);
+    if(!pair->str){ free(pair); return; }
+    pair->strlen=strlen(key); pair->child=val;
     if(!obj->child){obj->child=pair;}else{ jl_val_t*t=obj->child; while(t->next)t=t->next; t->next=pair; }
+    obj->count++;
 }
 void jl_arr_push(jl_val_t *arr,jl_val_t *val){
+    if(!arr || arr->type!=JL_ARRAY || !val) return;
     if(!arr->child){arr->child=val;val->next=NULL;}
     else{ jl_val_t*t=arr->child; while(t->next)t=t->next; t->next=val; }
+    arr->count++;
 }
