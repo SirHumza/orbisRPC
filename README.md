@@ -1,5 +1,16 @@
 # orbisRPC — Discord Rich Presence for the PS4
 
+## Status (Sep 2026)
+
+Backend fully functional: connects to Discord, posts and clears presence,
+survives reconnects with the timer intact. You only need your user token
+plus the `.elf` injection, everything else happens on the console.
+
+Still open: display names can fall back to the raw titleId (e.g.
+`CUSA00740`) inside restricted sandboxes, and cover art needs a shared
+Discord app with uploaded assets before icons appear. Discord auto-serves
+official covers for exact title matches, no image handling in this repo.
+
 A background daemon that runs **entirely on your jailbroken PS4** and posts what you're
 playing to your Discord profile as Rich Presence — "Playing *Call of Duty: Black
 Ops III* — 1h 23m". No laptop, no phone bridge, no secondary device at runtime.
