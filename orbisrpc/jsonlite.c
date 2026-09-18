@@ -94,7 +94,9 @@ static jl_val_t *parse_object(jl_parse_t *p) {
         skip_ws(p);
         if(p->cur<p->end&&*p->cur==':'){p->cur++;skip_ws(p);}else{p->err=1;jl_free(key);jl_free(v);return NULL;}
         jl_val_t *val=parse_value(p); if(p->err){jl_free(key);jl_free(v);return NULL;}
-        jl_val_t *pair=newval(JL_OBJECT); pair->str=key->str; pair->strlen=key->strlen; pair->child=val;
+        jl_val_t *pair=newval(JL_OBJECT);
+        if(!pair){ p->err=1; jl_free(key); jl_free(val); jl_free(v); return NULL; }
+        pair->str=key->str; pair->strlen=key->strlen; pair->child=val;
         free(key); /* moved key->str into pair */
         if(!v->child)v->child=pair;else{tail->next=pair;}
         tail=pair; v->count++;
@@ -113,12 +115,12 @@ static jl_val_t *parse_value(jl_parse_t *p) {
     if(c=='{')return parse_object(p);
     if(c=='[')return parse_array(p);
     if(c=='"')return parse_string(p);
-    if(c=='t'){ if(p->end-p->cur>=4&&!memcmp(p->cur,"true",4)){p->cur+=4;jl_val_t*b=newval(JL_BOOL);b->num=1;return b;} p->err=1;return NULL;}
-    if(c=='f'){ if(p->end-p->cur>=5&&!memcmp(p->cur,"false",5)){p->cur+=5;jl_val_t*b=newval(JL_BOOL);b->num=0;return b;} p->err=1;return NULL;}
-    if(c=='n'){ if(p->end-p->cur>=4&&!memcmp(p->cur,"null",4)){p->cur+=4;return newval(JL_NULL);} p->err=1;return NULL;}
+    if(c=='t'){ if(p->end-p->cur>=4&&!memcmp(p->cur,"true",4)){p->cur+=4;jl_val_t*b=newval(JL_BOOL);if(!b){p->err=1;return NULL;}b->num=1;return b;} p->err=1;return NULL;}
+    if(c=='f'){ if(p->end-p->cur>=5&&!memcmp(p->cur,"false",5)){p->cur+=5;jl_val_t*b=newval(JL_BOOL);if(!b){p->err=1;return NULL;}b->num=0;return b;} p->err=1;return NULL;}
+    if(c=='n'){ if(p->end-p->cur>=4&&!memcmp(p->cur,"null",4)){p->cur+=4;jl_val_t*nv=newval(JL_NULL);if(!nv){p->err=1;return NULL;}return nv;} p->err=1;return NULL;}
     if(c=='-'||(c>='0'&&c<='9')){
         char *ep; double d=strtod(p->cur,&ep); if(ep==p->cur){p->err=1;return NULL;} p->cur=ep;
-        jl_val_t *n=newval(JL_NUMBER); n->num=d; return n;
+        jl_val_t *n=newval(JL_NUMBER); if(!n){p->err=1;return NULL;} n->num=d; return n;
     }
     p->err=1; return NULL;
 }

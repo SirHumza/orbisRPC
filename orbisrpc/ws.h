@@ -6,8 +6,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define WS_RBUF_MIN 16384          /* initial raw socket buffer */
-#define WS_RBUF_MAX (2*1024*1024)  /* grow limit; bigger frames are skipped */
+#define WS_RBUF_MIN 65536          /* initial raw socket buffer (READY is big) */
+#define WS_RBUF_MAX (8*1024*1024)  /* grow limit; bigger frames are skipped */
 
 typedef struct {
     int32_t sock; int32_t connected; int32_t fd;
@@ -26,5 +26,6 @@ int ws_send_text(ws_t *w, const char *msg, size_t len);
 /* Returns frame payload length (>0), 0 if no complete frame yet, <0 on error,
  * or -3 if an oversized frame was drained and skipped (payload lost). */
 int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out);
+int ws_pong(ws_t *w); /* answer a server PING (call when recv gives opcode 9) */
 int ws_close(ws_t *w);
 #endif

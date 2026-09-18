@@ -25,8 +25,8 @@ DAEMON_SRC  := $(ORBISRPC)/log.c $(ORBISRPC)/cfg.c $(ORBISRPC)/jsonlite.c $(ORBI
 PLUGIN_SRC  := $(SRCDIR)/plugin.c $(SRCDIR)/compat.c
 CFILES      := $(PLUGIN_SRC) $(DAEMON_SRC)
 OBJS        := $(patsubst %.c,$(INTDIR)/%.o,$(notdir $(CFILES)))
-BEAR_SRC    := $(shell find $(ROOT)/third_party/bearssl/src -name '*.c' | sort)
-BEAR_OBJS   := $(patsubst $(ROOT)/third_party/bearssl/src/%.c,$(INTDIR)/bear/%.o,$(BEAR_SRC))
+MBED_SRC    := $(shell find $(ROOT)/third_party/mbedtls/library -name '*.c' ! -name 'net_sockets.c' ! -name 'timing.c' ! -name 'entropy_poll.c' | sort)
+MBED_OBJS   := $(patsubst $(ROOT)/third_party/mbedtls/library/%.c,$(INTDIR)/mbed/%.o,$(MBED_SRC))
 
 LIBS := -lSceLibcInternal -lSceNet -lSceNetCtl \
         -lSceSysmodule -lSceUserService -lSceAppInstUtil -lSceAppContent \
@@ -34,12 +34,13 @@ LIBS := -lSceLibcInternal -lSceNet -lSceNetCtl \
 
 EXTRAFLAGS := $(DEBUG_FLAGS) -std=gnu11 -Wall -Wno-unused \
               -Wno-int-conversion -Wno-incompatible-pointer-types \
-              -Wno-address-of-packed-member
+              -Wno-address-of-packed-member \
+              -DMBEDTLS_NO_PLATFORM_ENTROPY
 
 CFLAGS  := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -c $(EXTRAFLAGS) \
            -isysroot $(TOOLCHAIN) -isystem $(TOOLCHAIN)/include \
            -I$(GH_SDK)/include -I$(GH_SDK) -I$(ORBISRPC) -I$(SRCDIR) \
-           -I$(ROOT)/third_party/bearssl/inc -I$(ROOT)/third_party/bearssl/src
+           -I$(ROOT)/third_party/mbedtls/include
 LDFLAGS := -m elf_x86_64 -pie --script $(TOOLCHAIN)/link.x -e _init --eh-frame-hdr \
            -L$(TOOLCHAIN)/lib -L$(GH_SDK) $(LIBS)
 
@@ -64,12 +65,12 @@ $(INTDIR)/%.o: $(ORBISRPC)/%.c
 $(INTDIR)/plugin.o: $(SRCDIR)/plugin.c
 	$(CC) $(CFLAGS) -o $@ $<
 
-$(INTDIR)/bear/%.o: $(ROOT)/third_party/bearssl/src/%.c
+$(INTDIR)/mbed/%.o: $(ROOT)/third_party/mbedtls/library/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -o $@ $<
 
-$(TARGET): $(OBJS) $(BEAR_OBJS)
-	$(LD) $(GH_SDK)/build/crtprx.o $(OBJS) $(BEAR_OBJS) -o $(TARGET_ELF) $(LDFLAGS)
+$(TARGET): $(OBJS) $(MBED_OBJS)
+	$(LD) $(GH_SDK)/build/crtprx.o $(OBJS) $(MBED_OBJS) -o $(TARGET_ELF) $(LDFLAGS)
 	OO_PS4_TOOLCHAIN=$(TOOLCHAIN) $(TOOLCHAIN)/bin/$(CDIR)/create-fself$(FSUFFIX) -in=$(TARGET_ELF) -out=$(TARGET_ELF).oelf \
 		--lib=$(TARGET) --paid 0x3800000000000011
 

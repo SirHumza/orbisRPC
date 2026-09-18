@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
+#include <sys/time.h>
 
 #ifndef SOL_SOCKET
 #define SOL_SOCKET 0xffff
@@ -60,10 +61,15 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
     w->rbuf = (unsigned char*)malloc(w->rcap);
     if(!w->rbuf){ log_msg("ws: rbuf alloc fail"); return -1; }
     if(net_ensure()<0) goto fail;
-    /* memid = our net pool: passing 0 here fails with EBADF (0x80410109) */
-    int32_t rid = sceNetResolverCreate("orbisrpcR", s_net_mem, 0);
+    /* memid = our net pool: passing 0 here fails with EBADF (0x80410109).
+     * If pool creation failed, skip DNS and only allow IP literals. */
+    int32_t rid = -1;
     OrbisNetInAddr in; memset(&in,0,sizeof in);
     int resolved = 0;
+    if(s_net_mem < 0){
+        log_msg("net pool invalid; skipping resolver");
+    }else{
+    rid = sceNetResolverCreate("orbisrpcR", s_net_mem, 0);
     if(rid < 0){
         log_msg("resolver create fail %d", rid);
     }else{
@@ -71,6 +77,7 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
         if(rr < 0) log_msg("resolver %s err %d", host, rr);
         sceNetResolverDestroy(rid);
         resolved = (rr >= 0);
+    }
     }
     if(!resolved){
         struct in_addr ia = { .s_addr = inet_addr(host) };
@@ -97,9 +104,19 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
     log_msg("dial %s -> %u.%u.%u.%u:%d", host,
             (unsigned char)sa.sa_data[2], (unsigned char)sa.sa_data[3],
             (unsigned char)sa.sa_data[4], (unsigned char)sa.sa_data[5], port);
+    /* Bound the blocking connect: 10s send timeout so a dead route can't
+     * hang the daemon thread forever (plugin_unload joins this thread). */
+    {
+        struct timeval tv = { .tv_sec = 10, .tv_usec = 0 };
+        sceNetSetsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+    }
     if(sceNetConnect(fd, &sa, sizeof sa) < 0){
         log_msg("connect fail (syscall) to %s:%d", host, port);
         goto fail;
+    }
+    {
+        struct timeval tv0 = { .tv_sec = 0, .tv_usec = 0 };
+        sceNetSetsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv0, sizeof tv0);
     }
     int on = 1;
     sceNetSetsockopt(fd, SOL_SOCKET, SO_NBIO, &on, sizeof on);
@@ -110,20 +127,25 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
     w->tls = tls_start(fd, host);
     if(!w->tls){ goto fail; }
     /* HTTP Upgrade handshake. Desktop-client UA, NO Origin header (native
-     * clients don't send Origin to the gateway). */
+     * clients don't send Origin to the gateway). Host has no :port —
+     * browsers never send the default-port suffix and the front side
+     * ignores requests it can't route. */
     char req[640]; int n=snprintf(req,sizeof req,
-        "GET %s HTTP/1.1\r\nHost: %s:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        "GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
         "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) discord/1.0.9175 Chrome/122.0.6261.112 Electron/30.0.8 "
         "Safari/537.36\r\n"
         "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n",
-        resource?resource:"/", host, port, key);
+        resource?resource:"/", host, key);
     if(ws_send_all(w, (const unsigned char*)req, (size_t)n) < 0){ log_msg("hs write fail"); goto fail; }
+    log_msg("hs request sent (%dB)", n);
     /* Read response headers; bytes past "\r\n\r\n" are the first websocket
      * frame (usually HELLO arriving early) and MUST be kept, not dropped. */
     char hdr[2048]; int hlen=0, rd; int64_t t0=time(NULL);
     int header_end = -1;
+    extern int daemon_stop_requested(void) __attribute__((weak));
     while(hlen<(int)sizeof hdr-1){
+        if(daemon_stop_requested && daemon_stop_requested()){ log_msg("ws: hs aborted (stop)"); goto fail; }
         rd = tls_read(w->tls, hdr+hlen, sizeof hdr-1-(size_t)hlen);
         if(rd>0){
             hlen+=rd; hdr[hlen]=0;
@@ -137,7 +159,7 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
             continue;
         }
         if(rd==0){
-            if(time(NULL)-t0 > 10){ log_msg("hs timeout"); goto fail; }
+            if(time(NULL)-t0 > 10){ log_msg("hs timeout (got %dB)", hlen); goto fail; }
             usleep(20000); continue;
         }
         goto fail;
@@ -169,12 +191,18 @@ int ws_send_text(ws_t *w, const char *msg, size_t len){
     if(len<126){ hdr[f++]=(unsigned char)(0x80|len); }
     else { hdr[f++]=0x80|126; hdr[f++]=(unsigned char)((len>>8)&0xff); hdr[f++]=(unsigned char)(len&0xff); }
     memcpy(hdr+f, mk, 4); f+=4;
-    unsigned char *buf=(unsigned char*)malloc(f+len);
-    if(!buf) return -1;
+    /* Small frames (heartbeats, presence) avoid malloc churn in long sessions */
+    unsigned char stack[1024];
+    unsigned char *buf = stack;
+    int use_heap = (f + len > sizeof stack);
+    if(use_heap){
+        buf = (unsigned char*)malloc(f+len);
+        if(!buf) return -1;
+    }
     memcpy(buf,hdr,f);
     for(size_t i=0;i<len;i++) buf[f+i]=(unsigned char)msg[i]^mk[i%4];
     int r = ws_send_all(w, buf, f+len);
-    free(buf);
+    if(use_heap) free(buf);
     return r<0?-1:r;
 }
 
@@ -184,6 +212,11 @@ static int ws_send_control(ws_t *w, unsigned char op){
     unsigned char mk[4]; next_mask(mk);
     unsigned char f[6] = { (unsigned char)(0x80|op), 0x80, mk[0], mk[1], mk[2], mk[3] };
     return ws_send_all(w, f, 6);
+}
+
+/* Answer a server PING with an (empty) PONG so the gateway keeps us. */
+int ws_pong(ws_t *w){
+    return ws_send_control(w, 0xA);
 }
 
 /* Peek at the pending frame header without consuming. 1 = full header ready. */
@@ -204,15 +237,15 @@ static int peek_frame(ws_t *w, size_t *hdr_out, uint64_t *plen_out){
     return 1;
 }
 
-static int valid_frame_header(const unsigned char *b, size_t avail, uint64_t plen){
+static int valid_frame_header(const unsigned char *b, uint64_t plen){
     int fin = (b[0] & 0x80) != 0;
     int rsv = b[0] & 0x70;
     int op = b[0] & 0x0f;
     int masked = (b[1] & 0x80) != 0;
-    if (rsv || masked || op >= 3 || (op == 0 && fin)) return 0;
-    if (op >= 8 && (!fin || plen > 125)) return 0;
-    if ((b[1] & 0x7f) == 127 && (b[2] & 0x80)) return 0;
-    if (op == 0 && avail >= 2 && !fin) return 0;
+    if (rsv || masked) return 0;
+    if (op >= 3 && op <= 7) return 0; /* reserved opcodes */
+    if (op >= 8 && (!fin || plen > 125)) return 0; /* control: final, <=125 */
+    if ((b[1] & 0x7f) == 127 && (b[2] & 0x80)) return 0; /* absurd 64-bit length */
     return 1;
 }
 
@@ -239,13 +272,16 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
             if(peek_frame(w,&hdr,&plen)){
                 const unsigned char *b = w->rbuf + w->rpos;
                 int fin=(b[0]&0x80)!=0, wire_op=b[0]&0x0f;
-                if(!valid_frame_header(b, w->rlen-w->rpos, plen)){
-                    log_msg("ws: protocol violation in frame header");
+                if(!valid_frame_header(b, plen)){
+                    log_msg("ws: protocol violation op=%d fin=%d plen=%llu b1=0x%02x b2=0x%02x",
+                        b[0]&0x0f, (b[0]&0x80)!=0, (unsigned long long)plen, b[0], b[1]);
                     return -2;
                 }
                 /* absurd length: skip BEFORE arithmetic (hdr+plen could
                  * overflow uint64 and smuggle a tiny "total" past the cap) */
                 if(plen > WS_RBUF_MAX){
+                    log_msg("ws: oversized frame op=%d fin=%d plen=%llu (cap %u)",
+                        b[0]&0x0f, (b[0]&0x80)!=0, (unsigned long long)plen, WS_RBUF_MAX);
                     size_t avail = w->rlen - w->rpos;
                     size_t h = (hdr < avail) ? hdr : avail;
                     w->rpos += h;                       /* eat the header */

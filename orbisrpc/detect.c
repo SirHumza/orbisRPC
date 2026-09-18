@@ -30,16 +30,19 @@
 #include <fcntl.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <errno.h>
 
 static int s_user_inited = 0;
+static int s_user_ok = 0;
 static int user_init(void){
-    if(s_user_inited) return 0;
+    if(s_user_inited) return s_user_ok ? 0 : -1;
+    s_user_inited = 1;
     /* UserService is an external module -> load via internal id */
     uint32_t r = sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_USER_SERVICE);
-    if(r != 0){ int32_t ir=(int32_t)r; log_msg("load UserService fail %d", ir); }
+    if(r != 0){ int32_t ir=(int32_t)r; log_msg("load UserService fail %d", ir); return -1; }
     int32_t rc = sceUserServiceInitialize(NULL);
-    (void)rc;
-    s_user_inited = 1;
+    if(rc != 0){ log_msg("UserService init fail %d", rc); return -1; }
+    s_user_ok = 1;
     return 0;
 }
 
@@ -55,8 +58,9 @@ static int scu_init(void){
     if(s_scu_tried) return s_is_app_launched != NULL;
     s_scu_tried = 1;
     void *h = dlopen("libSceShellCoreUtil.sprx", 0);
-    if(h){ s_is_app_launched = (shellcore_isapplaunched_fn)(uintptr_t)dlsym(h, "sceShellCoreUtilIsAppLaunched"); }
-    log_msg("ShellCoreUtil IsAppLaunched %s", s_is_app_launched ? "resolved" : "unavailable");
+    if(!h){ log_msg("ShellCoreUtil unavailable (dlopen fail); using foreground-user fallback"); return 0; }
+    s_is_app_launched = (shellcore_isapplaunched_fn)(uintptr_t)dlsym(h, "sceShellCoreUtilIsAppLaunched");
+    log_msg("ShellCoreUtil IsAppLaunched %s", s_is_app_launched ? "resolved" : "unavailable (dlsym fail)");
     return s_is_app_launched != NULL;
 }
 
@@ -66,8 +70,9 @@ int detect_foreground_active(void){
         int on = s_is_app_launched();
         return (on != 0) ? 1 : 0;   /* 0 when sitting on the home screen */
     }
-    /* fallback: foreground user exists */
-    user_init();
+    /* fallback: foreground user exists. If UserService itself failed,
+     * report inactive instead of guessing "playing". */
+    if(user_init() != 0) return 0;
     int32_t fg = -1;
     int32_t rc = sceUserServiceGetForegroundUser(&fg);
     if(rc != 0){ log_msg("GetForegroundUser err %d", rc); return 0; }
@@ -75,16 +80,31 @@ int detect_foreground_active(void){
 }
 
 /* --- title naming ---------------------------------------------------- */
-static long scan_recent_titleid(char *out, size_t cap){
-    DIR *d = opendir("/data/app");
-    if(!d) return -1;
-    struct dirent *e; long best=-1; out[0]=0;
+static int is_title_prefix(const char *n){
+    /* CUSA (PS4) + PPSA (PS5-backport) + EU/JP/indie variants */
+    return strncmp(n,"CUSA",4)==0 || strncmp(n,"PPSA",4)==0 ||
+           strncmp(n,"PCSE",4)==0 || strncmp(n,"PCSB",4)==0 ||
+           strncmp(n,"PCSG",4)==0 || strncmp(n,"EPSA",4)==0;
+}
+/* last resolved titleId (for Discord asset key); valid after a successful
+ * detect_current_game / detect_name_for_title. */
+static char s_last_titleid[16] = "";
+const char *detect_last_titleid(void){ return s_last_titleid[0] ? s_last_titleid : NULL; }
+static void remember_titleid(const char *ti){
+    if(!ti) return;
+    strncpy(s_last_titleid, ti, sizeof s_last_titleid - 1);
+    s_last_titleid[sizeof s_last_titleid - 1] = 0;
+}
+static long scan_one_appdir(const char *base, char *out, size_t cap, long best){
+    DIR *d = opendir(base);
+    if(!d) return best;
+    struct dirent *e;
     char path[256]; size_t plen;
     while((e=readdir(d))){
         if(e->d_name[0]=='.') continue;
         size_t l=strlen(e->d_name);
-        if(l!=9 || strncmp(e->d_name,"CUSA",4)!=0) continue;
-        plen=snprintf(path,sizeof path,"/data/app/%s/app.xml",e->d_name);
+        if(l!=9 || !is_title_prefix(e->d_name)) continue;
+        plen=snprintf(path,sizeof path,"%s/%s/app.xml",base,e->d_name);
         if(plen>=sizeof path) continue;
         struct stat st2;
         if(stat(path,&st2)==0){
@@ -93,51 +113,124 @@ static long scan_recent_titleid(char *out, size_t cap){
         }
     }
     closedir(d);
+    return best;
+}
+static long scan_recent_titleid(char *out, size_t cap){
+    out[0]=0;
+    long best = scan_one_appdir("/user/app", out, cap, -1);
+    best = scan_one_appdir("/data/app", out, cap, best);
     return (out[0])? 0 : -1;
 }
 
-static int appxml_title(const char *titleId, char *out, size_t cap){
-    char path[256]; snprintf(path,sizeof path,"/data/app/%s/app.xml",titleId);
-    int fd=open(path,O_RDONLY); if(fd<0) return -1;
-    char buf[640]; ssize_t n=read(fd,buf,sizeof buf-1); close(fd);
+/* Best name on the box: /user/appmeta/<id>/pronunciation.xml holds the
+ * display title in its first <text> element (works for every game that
+ * ships speech data, e.g. Terraria). Small file, single read. */
+static int pronunc_title(const char *titleId, char *out, size_t cap){
+    char path[256]; snprintf(path,sizeof path,"/user/appmeta/%s/pronunciation.xml",titleId);
+    int fd=open(path,O_RDONLY);
+    if(fd<0){ log_msg("appmeta open fail %s err=%d", path, errno); return -1; }
+    char buf[2048]; ssize_t n=read(fd,buf,sizeof buf-1); close(fd);
     if(n<=0) return -1; buf[n]=0;
+    const char *p=strstr(buf,"<text>");
+    if(!p) return -1;
+    p+=6;
+    while(*p==' '||*p=='\t'||*p=='\r'||*p=='\n') p++;
+    size_t i=0;
+    while(*p && *p!='<' && *p!='\n' && *p!='\r' && i<cap-1){ out[i++]=*p++; }
+    out[i]=0;
+    while(i>0 && (out[i-1]==' '||out[i-1]=='\t')) out[--i]=0;
+    return (i>1)?0:-1;
+}
+
+static int appxml_title(const char *titleId, char *out, size_t cap){
+    const char *bases[] = { "/user/app", "/data/app", NULL };
+    for(int b=0; bases[b]; b++){
+    char path[256]; snprintf(path,sizeof path,"%s/%s/app.xml",bases[b],titleId);
+    int fd=open(path,O_RDONLY); if(fd<0) continue;
+    char buf[640]; ssize_t n=read(fd,buf,sizeof buf-1); close(fd);
+    if(n<=0) continue; buf[n]=0;
     char *p=strstr(buf,"<title>");
     if(!p) p=strstr(buf,"titleName");
-    if(!p) return -1;
+    if(!p) continue;
     p = strchr(p, '>');
-    if(!p) return -1;
+    if(!p) continue;
     p++;
     while(*p==' '||*p=='\t'||*p=='\r'||*p=='\n') p++; /* trim leading ws */
     size_t i=0;
     while(*p && *p!='<' && *p!='\n' && *p!='\r' && i<cap-1){ out[i++]=*p++; }
     out[i]=0;
     while(i>0 && (out[i-1]==' '||out[i-1]=='\t')) out[--i]=0; /* trim trailing */
-    return (i>0)?0:-1;
+    if(i>0) return 0;
+    }
+    return -1;
+}
+
+/* Pull one text run starting at *pp (letters, digits, space and common
+ * title punctuation). Returns run length, advances *pp past it. */
+static size_t take_run(const char **pp, const char *end, char *out, size_t cap){
+    const char *p = *pp;
+    size_t i = 0;
+    while(p < end && i < cap-1){
+        char c = *p;
+        if((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||
+           c==' '||c=='\''||c=='-'||c==':'||c=='!'||c=='&'||c=='.'||c=='+'||c=='('||c==')'){
+            out[i++]=c; p++;
+        } else break;
+    }
+    out[i]=0;
+    /* trim trailing space/punct */
+    while(i>0 && (out[i-1]==' '||out[i-1]=='.')) out[--i]=0;
+    *pp = p;
+    return i;
+}
+/* A run is junk (not a display title) when it looks like an id/path. */
+static int run_is_junk(const char *run, const char *titleId){
+    if(!run[0]) return 1;
+    if(strstr(run, titleId)) return 1;          /* contentId embeds titleId */
+    if(strstr(run, "_00-")) return 1;           /* contentId marker */
+    if(strchr(run, '/') || strchr(run, '.')) return 1; /* paths, versions */
+    size_t n = strlen(run);
+    if(n < 2) return 1;
+    /* ALL-CAPS + digits + _- only (e.g. leftover id fragments) */
+    int has_lower = 0;
+    for(size_t i=0;i<n;i++) if(run[i]>='a'&&run[i]<='z'){ has_lower=1; break; }
+    if(!has_lower){
+        int has_space = (strchr(run,' ')!=NULL);
+        if(!has_space) return 1; /* e.g. "GBTX00001" */
+    }
+    return 0;
 }
 
 static void appdb_title(const char *titleId, char *out, size_t cap){
     out[0]=0;
-    const char *dbs[]={ "/system_data/priv/app.db", "/system_data/etc/app.db", NULL };
+    /* mms/app.db is the real title store on retail FW; keep legacy paths too */
+    const char *dbs[]={ "/system_data/priv/mms/app.db", "/system_data/priv/app.db", "/system_data/etc/app.db", NULL };
     for(int k=0;dbs[k];k++){
         FILE *f=fopen(dbs[k],"rb");
         if(!f) continue;
         fseek(f,0,SEEK_END); long sz=ftell(f); fseek(f,0,SEEK_SET);
-        if(sz<=0||sz>1L<<21){ fclose(f); continue; }
+        if(sz<=0||sz>1L<<22){ fclose(f); continue; }
         char *b=(char*)malloc((size_t)sz+1);
         if(!b){fclose(f);return;}
         size_t rd=fread(b,1,(size_t)sz,f); fclose(f); b[rd]=0;
-        const char *q=strstr(b,titleId);
-        if(q){
-            q+=strlen(titleId);
-            while(*q && *q!='<'){
-                if(*q>='A'&&*q<='z'){ break; }
-                q++;
+        const char *end = b + rd;
+        /* same titleId can appear in several user tables; try each hit */
+        const char *q=b;
+        while((q=strstr(q,titleId))!=NULL){
+            const char *p = q + strlen(titleId);
+            char run[128];
+            /* walk following text runs; first non-junk run is titleName */
+            for(int t=0; t<6; t++){
+                while(p < end && !((*p>='A'&&*p<='Z')||(*p>='a'&&*p<='z')||(*p>='0'&&*p<='9'))) p++;
+                if(p >= end) break;
+                if(take_run(&p, end, run, sizeof run) < 1) break;
+                if(!run_is_junk(run, titleId)){
+                    strncpy(out, run, cap-1); out[cap-1]=0;
+                    free(b);
+                    return;
+                }
             }
-            size_t i=0;
-            while(*q && *q!='<' && *q!='\n' && *q!='\r' && i<cap-1){ out[i++]=*q++; }
-            out[i]=0;
-            free(b);
-            if(i>0) return;
+            q += strlen(titleId);
         }
         free(b);
     }
@@ -150,8 +243,10 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
     if(!detect_foreground_active()) return -1;
     char titleId[16]=""; int named=0;
     if(scan_recent_titleid(titleId,sizeof titleId)==0){
-        if(appxml_title(titleId, out_name, cap)==0){ named=1; }
+        remember_titleid(titleId);
+        if(pronunc_title(titleId, out_name, cap)==0){ named=1; }
         if(!named){ appdb_title(titleId, out_name, cap); named=(out_name[0]!=0); }
+        if(!named){ if(appxml_title(titleId, out_name, cap)==0) named=1; }
         if(!named){ strncpy(out_name, titleId, cap-1); out_name[cap-1]=0; }
     }else{
         strncpy(out_name, "(unknown game)", cap-1); out_name[cap-1]=0;
@@ -165,9 +260,13 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
  * so we skip the foreground-app heuristics entirely). */
 int detect_name_for_title(const char *titleId, char *out_name, size_t cap){
     if(!titleId || !titleId[0] || !out_name || cap==0) return -1;
-    if(appxml_title(titleId, out_name, cap)==0) return 0;
+    remember_titleid(titleId);
+    if(pronunc_title(titleId, out_name, cap)==0){ log_msg("name: %s via appmeta", out_name); return 0; }
+    else log_msg("name: appmeta miss for %s", titleId);
     appdb_title(titleId, out_name, cap);
-    if(out_name[0]) return 0;
+    if(out_name[0]){ log_msg("name: %s via appdb", out_name); return 0; }
+    else log_msg("name: appdb miss for %s", titleId);
+    if(appxml_title(titleId, out_name, cap)==0){ log_msg("name: %s via appxml", out_name); return 0; }
     strncpy(out_name, titleId, cap-1); out_name[cap-1]=0;
     return 0;
 }

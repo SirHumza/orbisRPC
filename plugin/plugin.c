@@ -45,6 +45,8 @@ static void *daemon_thread(void *args){
     char name[128];
     strncpy(name, (const char *)args, sizeof name - 1);
     name[sizeof name - 1] = 0;
+    FILE *m = fopen("/data/orbisRPC/plugin_boot.log", "a");
+    if(m){ fprintf(m, "daemon thread up game=%s\n", name); fclose(m); }
     daemon_clear_stop();
     daemon_run(name);
     return NULL;
@@ -54,18 +56,23 @@ int32_t attr_public plugin_load(int32_t argc, const char *argv[]){
     (void)argc; (void)argv;
     klog("[orbisrpc] <%s\\Ver.0x%08x> %s\n", g_pluginName, g_pluginVersion, __func__);
     klog("[orbisrpc] Plugin Author(s): %s\n", g_pluginAuth);
+    { FILE *m = fopen("/data/orbisRPC/plugin_boot.log", "a");
+      if(m){ fprintf(m, "plugin_load enter\n"); fclose(m); } }
 
     if(sys_sdk_proc_info(&procInfo) != 0){
         klog("[orbisrpc] sys_sdk_proc_info failed; not starting\n");
         return 0;
     }
-    klog("[orbisrpc] loaded into process: pid=%d name=%s titleid=%s\n",
-         procInfo.pid, procInfo.name, procInfo.titleid);
-
-    if(!is_game_titleid(procInfo.titleid)){
+    /* Validate SDK struct: must be NUL-terminated ASCII, else version mismatch */
+    procInfo.titleid[sizeof procInfo.titleid - 1] = 0;
+    procInfo.name[sizeof procInfo.name - 1] = 0;
+    size_t tlen = strnlen(procInfo.titleid, sizeof procInfo.titleid);
+    if(tlen != 9 || !is_game_titleid(procInfo.titleid)){
         klog("[orbisrpc] not a game title (system app?); not starting daemon\n");
         return 0;
     }
+    klog("[orbisrpc] loaded into process: pid=%d name=%s titleid=%s\n",
+         procInfo.pid, procInfo.name, procInfo.titleid);
 
     /* Resolve a display name for the title we are loaded into. */
     static char game_name[128];
@@ -73,23 +80,19 @@ int32_t attr_public plugin_load(int32_t argc, const char *argv[]){
     klog("[orbisrpc] game: %s\n", game_name);
 
     /* explicit fat stack: TLS handshakes + JSON buffers overflow the
-     * small default plugin-thread stacks */
-    OrbisPthread thread;
+     * small default plugin-thread stacks. 256KB is mandatory — falling
+     * back to 64KB crashes inside games, so refuse to start instead. */
     OrbisPthreadAttr attr;
     memset(&attr, 0, sizeof attr);
-    if(scePthreadAttrInit(&attr) == 0 &&
-       scePthreadAttrSetstacksize(&attr, 256*1024) == 0){
-        if(scePthreadCreate(&s_daemon_thread, &attr, daemon_thread, game_name, "orbisrpc_daemon") == 0)
-            s_daemon_started = 1;
-        else
-            klog("[orbisrpc] daemon thread creation failed\\n");
-    }else{
-        klog("[orbisrpc] attr init failed; falling back to default stack\n");
-        if(scePthreadCreate(&s_daemon_thread, NULL, daemon_thread, game_name, "orbisrpc_daemon2") == 0)
-            s_daemon_started = 1;
-        else
-            klog("[orbisrpc] daemon thread creation failed\\n");
+    if(scePthreadAttrInit(&attr) != 0 ||
+       scePthreadAttrSetstacksize(&attr, 256*1024) != 0){
+        klog("[orbisrpc] attr/stack setup failed; NOT starting (no fallback)\n");
+        return 0;
     }
+    if(scePthreadCreate(&s_daemon_thread, &attr, daemon_thread, game_name, "orbisrpc_daemon") == 0)
+        s_daemon_started = 1;
+    else
+        klog("[orbisrpc] daemon thread creation failed\\n");
     return 0;
 }
 

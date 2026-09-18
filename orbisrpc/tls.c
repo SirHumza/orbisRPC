@@ -1,271 +1,176 @@
-/* tls.c - BearSSL-backed TLS client for orbisRPC.
+/* tls.c - mbedTLS-backed TLS client for orbisRPC.
  *
- * Handshake runs with the socket in blocking mode guarded by an overall
- * deadline; afterwards the caller keeps the socket non-blocking and drives
- * tls_read()/tls_write(), which pump the engine without ever stalling.
+ * Why mbedTLS and not BearSSL: Cloudflare (fronting gateway.discord.gg)
+ * silently drops handshakes whose ClientHello looks non-browser. BearSSL
+ * cannot offer session tickets, EMS or encrypt-then-MAC at all, so its
+ * fingerprint always scores as a bot and the server ghosts us after the
+ * handshake (established TLS, zero HTTP bytes back — verified on-host).
+ * mbedTLS sends the standard extension set and gets 101 immediately.
  *
- * No certificate validation: no trust store exists on console. We still get
- * an authenticated-encryption channel against whoever owns the wire; SNI is
- * sent so Discord serves its normal cert chain.
+ * The socket stays non-blocking; WANT_READ/WRITE maps to our pump model.
+ * No certificate validation: no trust store exists on console. Same
+ * posture as before — encryption against passive sniffing, SNI is sent.
  */
 #include "tls.h"
 #include "log.h"
-#include <bearssl.h>
+#include <mbedtls/ssl.h>
+#include <mbedtls/entropy.h>
+#include <mbedtls/ctr_drbg.h>
 #include <orbis/Net.h>
 #include <string.h>
 #include <stdlib.h>
-#include <stddef.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <time.h>
 
-/* ---- minimal X.509 "validator" ----------------------------------------
- * Decodes certificates to extract the server's public key (required for
- * ECDHE_RSA/ECDSA ServerKeyExchange verification) but performs NO chain
- * validation — end_chain always reports success. */
-typedef struct {
-    const br_x509_class *vtable;
-    br_x509_decoder_context dc;
-    br_x509_pkey pkey;
-    /* Deep-copied key bytes: br_x509_decoder_get_pkey() returns pointers
-     * INTO the decoder's scratch buffers, which the next certs in the chain
-     * overwrite. Capturing the leaf key must own its bytes. */
-    unsigned char qbuf[133];    /* max EC point (P-521) */
-    unsigned char nbuf[512];    /* max RSA modulus (BR_MAX_RSA_SIZE/8) */
-    unsigned char ebuf[8];
-    unsigned key_usages;
-    int have_leaf;
-} mini_x509;
-
-static void mx_start_chain(const br_x509_class **ctx, const char *server_name){
-    (void)ctx; (void)server_name;
-}
-static void mx_start_cert(const br_x509_class **ctx, uint32_t length){
-    mini_x509 *m = (mini_x509 *)((char *)ctx - offsetof(mini_x509, vtable));
-    (void)length;
-    br_x509_decoder_init(&m->dc, NULL, NULL);
-}
-static void mx_append(const br_x509_class **ctx, const unsigned char *buf, size_t len){
-    mini_x509 *m = (mini_x509 *)((char *)ctx - offsetof(mini_x509, vtable));
-    br_x509_decoder_push(&m->dc, buf, len);
-}
-static void mx_end_cert(const br_x509_class **ctx){
-    mini_x509 *m = (mini_x509 *)((char *)ctx - offsetof(mini_x509, vtable));
-    const br_x509_pkey *pk = br_x509_decoder_get_pkey(&m->dc);
-    /* keep only the FIRST cert's key — that's the leaf whose key verifies
-     * the ServerKeyExchange signature */
-    if(pk && !m->have_leaf){
-        m->pkey = *pk;
-        if(pk->key_type == BR_KEYTYPE_EC && pk->key.ec.q
-           && pk->key.ec.qlen <= sizeof m->qbuf){
-            memcpy(m->qbuf, pk->key.ec.q, pk->key.ec.qlen);
-            m->pkey.key.ec.q = m->qbuf;
-        }else if(pk->key_type == BR_KEYTYPE_RSA && pk->key.rsa.n && pk->key.rsa.e
-                 && pk->key.rsa.nlen <= sizeof m->nbuf
-                 && pk->key.rsa.elen <= sizeof m->ebuf){
-            memcpy(m->nbuf, pk->key.rsa.n, pk->key.rsa.nlen);
-            memcpy(m->ebuf, pk->key.rsa.e, pk->key.rsa.elen);
-            m->pkey.key.rsa.n = m->nbuf;
-            m->pkey.key.rsa.e = m->ebuf;
-        }else{
-            return; /* unusable key: leave have_leaf unset */
-        }
-        m->have_leaf = 1;
-    }
-}
-static unsigned mx_end_chain(const br_x509_class **ctx){(void)ctx; return 0;}
-static const br_x509_pkey *mx_get_pkey(const br_x509_class *const *ctx, unsigned *usages){
-    mini_x509 *m = (mini_x509 *)((const char *)ctx - offsetof(mini_x509, vtable));
-    if(usages){
-        /* allow both key-exchange and signature usages */
-        *usages |= BR_KEYTYPE_KEYX | BR_KEYTYPE_SIGN;
-    }
-    return &m->pkey;
-}
-static const br_x509_class mini_vtable = {
-    sizeof(br_x509_class *),
-    &mx_start_chain,
-    &mx_start_cert,
-    &mx_append,
-    &mx_end_cert,
-    &mx_end_chain,
-    mx_get_pkey
-};
-
 struct tls_ctx {
-    br_ssl_client_context cc;
-    mini_x509 mx;               /* certificate decoder / key extractor */
-    unsigned char *iobuf;
+    mbedtls_ssl_context ssl;
+    mbedtls_ssl_config conf;
+    mbedtls_ctr_drbg_context rng;
+    mbedtls_entropy_context ent;
     int fd;
 };
 
-/* ---- raw socket IO (socket may be NBIO: short sends/recv are normal) -- */
-static int raw_send(int fd, const unsigned char *b, size_t n){
-    if(n > 32768) n = 32768;
-    return (int)sceNetSend(fd, b, (int)n, 0);
-}
-static int raw_recv(int fd, unsigned char *b, size_t n){
-    if(n > 16384) n = 16384;
-    return (int)sceNetRecv(fd, b, (int)n, 0);
-}
-
-/* Drive one engine transition. Returns 1 on progress, 0 on would-block. */
-static int pump_once(tls_ctx_t *t, int *iter){
-    int trace = *iter < 6;
-    int current = *iter;
-    (*iter)++;
-    br_ssl_engine_context *e = &t->cc.eng;
-    unsigned st = br_ssl_engine_current_state(e);
-    if(trace) log_msg("tls: pump[%d] st=0x%x", current, st);
-    if(st & BR_SSL_SENDREC){
-        size_t sz; unsigned char *b = br_ssl_engine_sendrec_buf(e, &sz);
-        int r = raw_send(t->fd, b, sz);
-        if(trace) log_msg("tls: pump[%d] send sz=%zu r=%d", current, sz, r);
-        if(r > 0){ br_ssl_engine_sendrec_ack(e, (size_t)r); return 1; }
-        return 0;
+/* Strong entropy from the OS; weak time fallback so we never hard-fail. */
+static int orbis_poll(void *data, unsigned char *out, size_t len, size_t *olen){
+    (void)data;
+    int fd = open("/dev/urandom", O_RDONLY);
+    if(fd >= 0){
+        size_t got = 0;
+        while(got < len){
+            long r = read(fd, (char *)out + got, len - got);
+            if(r <= 0) break;
+            got += (size_t)r;
+        }
+        close(fd);
+        if(got == len){ *olen = len; return 0; }
     }
-    if(st & BR_SSL_RECVREC){
-        size_t sz; unsigned char *b = br_ssl_engine_recvrec_buf(e, &sz);
-        int r = raw_recv(t->fd, b, sz);
-        if(trace) log_msg("tls: pump[%d] recv sz=%zu r=%d", current, sz, r);
-        if(r > 0){ br_ssl_engine_recvrec_ack(e, (size_t)r); return 1; }
-        if(r == 0){ log_msg("tls: recv EOF"); br_ssl_engine_recvrec_ack(e, 0); return 1; }
-        return 0;
-    }
+    /* fallback: time + address jitter (weak, but keeps us functional) */
+    srand((unsigned)(time(NULL) ^ (uintptr_t)out));
+    for(size_t i = 0; i < len; i++) out[i] = (unsigned char)rand();
+    *olen = len;
     return 0;
 }
 
-static void dump_error(tls_ctx_t *t, const char *where){
-    int err = (int)br_ssl_engine_last_error(&t->cc.eng);
-    log_msg("tls: %s failed err=%d", where, err);
+static int net_send(void *ctx, const unsigned char *b, size_t n){
+    tls_ctx_t *t = (tls_ctx_t *)ctx;
+    size_t cap = n > 32768 ? 32768 : n;
+    int r = (int)sceNetSend(t->fd, b, (int)cap, 0);
+    if(r < 0) return MBEDTLS_ERR_SSL_WANT_WRITE; /* NBIO: retry till deadline */
+    return r;
+}
+
+static int net_recv(void *ctx, unsigned char *b, size_t n){
+    tls_ctx_t *t = (tls_ctx_t *)ctx;
+    size_t cap = n > 16384 ? 16384 : n;
+    int r = (int)sceNetRecv(t->fd, b, (int)cap, 0);
+    if(r < 0) return MBEDTLS_ERR_SSL_WANT_READ; /* NBIO: retry till deadline */
+    return r;
 }
 
 tls_ctx_t *tls_start(int fd, const char *host){
-    tls_ctx_t *t = (tls_ctx_t*)calloc(1, sizeof *t);
+    tls_ctx_t *t = (tls_ctx_t *)calloc(1, sizeof *t);
     if(!t) return NULL;
     t->fd = fd;
-    t->iobuf = (unsigned char*)malloc(BR_SSL_BUFSIZE_BIDI);
-    if(!t->iobuf){ free(t); return NULL; }
+    int rc = 0;
 
-    br_ssl_client_zero(&t->cc);
-    memset(&t->mx, 0, sizeof t->mx);
+    mbedtls_ssl_init(&t->ssl);
+    mbedtls_ssl_config_init(&t->conf);
+    mbedtls_ctr_drbg_init(&t->rng);
+    mbedtls_entropy_init(&t->ent);
+    mbedtls_entropy_add_source(&t->ent, orbis_poll, NULL, 64,
+                               MBEDTLS_ENTROPY_SOURCE_STRONG);
+
+    if((rc = mbedtls_ctr_drbg_seed(&t->rng, mbedtls_entropy_func, &t->ent,
+                                   (const unsigned char *)"orbisRPC", 8)) != 0){
+        log_msg("tls: rng seed fail %d", rc);
+        goto fail;
+    }
+    if((rc = mbedtls_ssl_config_defaults(&t->conf, MBEDTLS_SSL_IS_CLIENT,
+                MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT)) != 0){
+        log_msg("tls: config fail %d", rc);
+        goto fail;
+    }
+    /* No trust store on console: parse the chain, skip validation. */
+    mbedtls_ssl_conf_authmode(&t->conf, MBEDTLS_SSL_VERIFY_NONE);
+    mbedtls_ssl_conf_rng(&t->conf, mbedtls_ctr_drbg_random, &t->rng);
     {
-        /* full profile wires prf/ciphers/ec/rsa defaults; we then swap the
-         * verifier for our decode-only validator (no trust anchors) */
-        static br_x509_minimal_context xc;
-        br_ssl_client_init_full(&t->cc, &xc, NULL, 0);
+        static const char *protos[] = { "http/1.1", NULL };
+        mbedtls_ssl_conf_alpn_protocols(&t->conf, protos);
     }
-    t->mx.vtable = &mini_vtable;
-    br_ssl_engine_set_x509(&t->cc.eng, &t->mx.vtable);
-    br_ssl_engine_set_buffer(&t->cc.eng, t->iobuf, BR_SSL_BUFSIZE_BIDI, 1);
+    if((rc = mbedtls_ssl_setup(&t->ssl, &t->conf)) != 0){
+        log_msg("tls: setup fail %d", rc);
+        goto fail;
+    }
+    if((rc = mbedtls_ssl_set_hostname(&t->ssl, host)) != 0){
+        log_msg("tls: hostname fail %d", rc);
+        goto fail;
+    }
+    mbedtls_ssl_set_bio(&t->ssl, t, net_send, net_recv, NULL);
 
-    if(br_ssl_client_reset(&t->cc, host, 0) == 0){
-        log_msg("tls: client reset fail");
-        free(t->iobuf); free(t);
-        return NULL;
-    }
     log_msg("tls: handshake start");
-
-    /* handshake: pump until application-data phase or failure */
-    int hs_iter = 0;
-    int64_t dl = time(NULL) + 15;
-    for(;;){
-        unsigned st = br_ssl_engine_current_state(&t->cc.eng);
-        if(st & BR_SSL_CLOSED){
-            log_msg("tls: hs closed st=0x%x err=%d (0x%x)", st,
-                    (int)br_ssl_engine_last_error(&t->cc.eng),
-                    (unsigned)br_ssl_engine_last_error(&t->cc.eng));
-            free(t->iobuf); free(t);
-            return NULL;
-        }
-        if((st & BR_SSL_RECVAPP) || (st & BR_SSL_SENDAPP)) break; /* ready */
-        if(!pump_once(t, &hs_iter)){
-            if(time(NULL) > dl){ log_msg("tls: handshake timeout"); free(t->iobuf); free(t); return NULL; }
+    {
+        int64_t dl = time(NULL) + 15;
+        extern int daemon_stop_requested(void) __attribute__((weak));
+        for(;;){
+            if(daemon_stop_requested && daemon_stop_requested()){ log_msg("tls: aborted (stop)"); goto fail; }
+            rc = mbedtls_ssl_handshake(&t->ssl);
+            if(rc == 0) break;
+            if(rc != MBEDTLS_ERR_SSL_WANT_READ &&
+               rc != MBEDTLS_ERR_SSL_WANT_WRITE){
+                log_msg("tls: handshake fail %d", rc);
+                goto fail;
+            }
+            if(time(NULL) > dl){ log_msg("tls: handshake timeout"); goto fail; }
             usleep(20000);
         }
     }
-    log_msg("tls: established");
+    log_msg("tls: established (%s)", mbedtls_ssl_get_version(&t->ssl));
     return t;
+
+fail:
+    mbedtls_ssl_free(&t->ssl);
+    mbedtls_ssl_config_free(&t->conf);
+    mbedtls_ctr_drbg_free(&t->rng);
+    mbedtls_entropy_free(&t->ent);
+    free(t);
+    return NULL;
 }
 
 int tls_read(tls_ctx_t *t, void *buf, size_t cap){
-    br_ssl_engine_context *e = &t->cc.eng;
-    unsigned st = br_ssl_engine_current_state(e);
-    if(st & BR_SSL_CLOSED) return -1;
-
-    /* decrypted bytes waiting? hand them over */
-    if(st & BR_SSL_RECVAPP){
-        size_t sz; unsigned char *p = br_ssl_engine_recvapp_buf(e, &sz);
-        size_t n = sz < cap ? sz : cap;
-        memcpy(buf, p, n);
-        br_ssl_engine_recvapp_ack(e, n);
-        return (int)n;
-    }
-
-    /* opportunistic flush of queued outbound records */
-    if(st & BR_SSL_SENDREC){
-        size_t sz; unsigned char *b = br_ssl_engine_sendrec_buf(e, &sz);
-        int r = raw_send(t->fd, b, sz);
-        if(r > 0) br_ssl_engine_sendrec_ack(e, (size_t)r);
-    }
-
-    /* pull ciphertext to decrypt more app data */
-    if(st & BR_SSL_RECVREC){
-        size_t sz; unsigned char *b = br_ssl_engine_recvrec_buf(e, &sz);
-        int r = raw_recv(t->fd, b, sz);
-        if(r > 0){ br_ssl_engine_recvrec_ack(e, (size_t)r); return 0; }
-        if(r == 0){ br_ssl_engine_recvrec_ack(e, 0); return -1; }
-        /* r<0: would-block or dead — let the heartbeat timeout decide */
-        return 0;
-    }
-    return 0;
+    if(!t || !buf || cap == 0) return -1;
+    int r = mbedtls_ssl_read(&t->ssl, (unsigned char *)buf, cap);
+    if(r > 0) return r;
+    if(r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE)
+        return 0; /* nothing yet */
+    if(r == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || r == 0) return -1;
+    return -1;
 }
 
 int tls_write(tls_ctx_t *t, const void *buf, size_t len){
-    const unsigned char *p = (const unsigned char*)buf;
+    if(!t || (!buf && len)) return -1;
+    const unsigned char *p = (const unsigned char *)buf;
+    size_t done = 0;
     int64_t dl = time(NULL) + 10;
-    while(len > 0){
-        br_ssl_engine_context *e = &t->cc.eng;
-        unsigned st = br_ssl_engine_current_state(e);
-        if(st & BR_SSL_CLOSED){ dump_error(t, "write"); return -1; }
-        if(st & BR_SSL_SENDAPP){
-            size_t sz; unsigned char *b = br_ssl_engine_sendapp_buf(e, &sz);
-            size_t n = sz < len ? sz : len;
-            memcpy(b, p, n);
-            br_ssl_engine_sendapp_ack(e, n);
-            p += n; len -= n;
-            continue;
-        }
-        if(st & BR_SSL_SENDREC){
-            size_t sz; unsigned char *b = br_ssl_engine_sendrec_buf(e, &sz);
-            int r = raw_send(t->fd, b, sz);
-            if(r > 0){ br_ssl_engine_sendrec_ack(e, (size_t)r); continue; }
+    while(done < len){
+        int r = mbedtls_ssl_write(&t->ssl, p + done, len - done);
+        if(r > 0){ done += (size_t)r; continue; }
+        if(r != MBEDTLS_ERR_SSL_WANT_READ && r != MBEDTLS_ERR_SSL_WANT_WRITE){
+            log_msg("tls: write fail %d", r);
+            return -1;
         }
         if(time(NULL) > dl){ log_msg("tls: write timeout"); return -1; }
         usleep(10000);
     }
-    /* Encrypt any acked plaintext into a pending record NOW: BearSSL only
-     * does this on br_ssl_engine_flush() — current_state() alone never
-     * converts SENDAPP data, so without this the bytes never reach SENDREC
-     * and are silently dropped. */
-    br_ssl_engine_flush(&t->cc.eng, 1);
-    /* flush records out promptly */
-    int64_t t2 = time(NULL) + 5;
-    for(;;){
-        br_ssl_engine_context *e = &t->cc.eng;
-        unsigned st = br_ssl_engine_current_state(e);
-        if(st & BR_SSL_CLOSED){ dump_error(t, "flush"); return -1; }
-        if(!(st & BR_SSL_SENDREC)) break;
-        size_t sz; unsigned char *b = br_ssl_engine_sendrec_buf(e, &sz);
-        int r = raw_send(t->fd, b, sz);
-        if(r > 0){ br_ssl_engine_sendrec_ack(e, (size_t)r); continue; }
-        if(time(NULL) > t2){ log_msg("tls: flush timeout"); return -1; }
-        usleep(10000);
-    }
-    return (int)(p - (const unsigned char*)buf);
+    return (int)done;
 }
 
 void tls_free(tls_ctx_t *t){
     if(!t) return;
-    free(t->iobuf);
+    mbedtls_ssl_close_notify(&t->ssl);
+    mbedtls_ssl_free(&t->ssl);
+    mbedtls_ssl_config_free(&t->conf);
+    mbedtls_ctr_drbg_free(&t->rng);
+    mbedtls_entropy_free(&t->ent);
     free(t);
 }

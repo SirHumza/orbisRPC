@@ -30,6 +30,68 @@ static void make_key(char *out){
     b64_encode(b,16,out);
 }
 
+/* Gateway events live INSIDE the JSON text payload ("op":N) — not in the
+ * WebSocket frame header (1=text, 8=close, 9=ping). Scan top-level keys
+ * with string-awareness so a nested `"op":` inside a string value can't
+ * spoof the event type. Works on truncated buffers too (op/s/t sit at the
+ * payload prefix, while the megabyte-long "d" blob may be cut off). */
+static const char *top_val(const char *json, size_t len, const char *key){
+    size_t kl = strlen(key);
+    int depth = 0, instr = 0, esc = 0;
+    for(size_t i = 0; i < len; i++){
+        char c = json[i];
+        if(instr){
+            if(esc) esc = 0;
+            else if(c == '\\') esc = 1;
+            else if(c == '"') instr = 0;
+            continue;
+        }
+        if(c == '"'){
+            /* possible key: must be at depth 1 followed by optional ws + ':' */
+            size_t j = i + 1, k = 0;
+            while(j < len && k < kl && json[j] == key[k]){ j++; k++; }
+            if(k == kl && j < len && json[j] == '"'){
+                j++;
+                while(j < len && (json[j]==' '||json[j]=='\t')) j++;
+                if(j < len && json[j] == ':'){
+                    if(depth == 1) return json + j + 1;
+                    /* nested same-name key: skip its string opener below */
+                    i = j; continue;
+                }
+            }
+            instr = 1; continue;
+        }
+        if(c == '{' || c == '[') depth++;
+        else if(c == '}' || c == ']') depth--;
+    }
+    return NULL;
+}
+static int gw_op(const char *json, size_t len){
+    const char *v = top_val(json, len, "op");
+    if(!v) return -1;
+    while(v < json+len && (*v==' '||*v=='\t')) v++;
+    if(v >= json+len || *v<'0' || *v>'9') return -1;
+    int op = 0;
+    while(v < json+len && *v>='0' && *v<='9'){ op = op*10 + (*v-'0'); v++; }
+    return op;
+}
+static void gw_seq(discord_t *d, const char *json, size_t len){
+    if(!d) return;
+    const char *v = top_val(json, len, "s");
+    if(!v) return;
+    while(v < json+len && (*v==' '||*v=='\t')) v++;
+    if(v >= json+len || *v<'0' || *v>'9') return; /* null or missing: not a seq */
+    int s = 0;
+    while(v < json+len && *v>='0' && *v<='9'){ s = s*10 + (*v-'0'); v++; }
+    d->seq = s;
+}
+static int is_ready(const char *json, size_t len){
+    const char *v = top_val(json, len, "t");
+    if(!v) return 0;
+    while(v < json+len && (*v==' '||*v=='\t')) v++;
+    return (size_t)(json+len-v) >= 7 && !memcmp(v, "\"READY\"", 7);
+}
+
 /* recv one frame with a deadline; -4 = timed out. Skipped oversized frames
  * (-3) are logged and retried transparently. */
 static int rx_frame(discord_t *d, char *buf, size_t cap, int *op, int *fin, int64_t deadline){
@@ -81,10 +143,10 @@ int discord_connect(discord_t *d, const char *token){
     d->connected=1;
     int64_t now=time(NULL);
     d->last_heartbeat=now; d->last_ack=now;
-    /* HELLO */
+    /* HELLO (text frame carrying {"op":10,...}) */
     char buf[2048]; int op=0,fin=0;
     int nr=rx_frame(d,buf,sizeof buf,&op,&fin,now+15);
-    if(nr<=0 || op!=1){
+    if(nr<=0 || (op!=1 && op!=0)){
         log_msg("no HELLO (nr=%d op=%d)",nr,op);
         ws_close(&d->ws); d->connected=0;
         return -1;
@@ -105,25 +167,29 @@ int discord_connect(discord_t *d, const char *token){
         return -1;
     }
     log_msg("discord: identify sent, hb=%llds",(long long)(d->hb_interval_ms/1000));
-    /* READY confirms the token was accepted */
+    /* READY confirms the token was accepted. `op` is the WebSocket frame
+     * type; the gateway event is JSON inside — parse it, don't switch on it. */
     int64_t dl=time(NULL)+20;
     for(;;){
         nr=rx_frame(d,buf,sizeof buf,&op,&fin,dl);
         if(nr<=0){ log_msg("no READY after identify (nr=%d)",nr); break; }
-        if(op==11){ d->last_ack=time(NULL); continue; }
         if(op==8){
+            if(!fin){ log_msg("fragmented close; reconnecting"); ws_close(&d->ws); d->connected=0; return -1; }
             unsigned code = nr>=2 ? (((unsigned char)buf[0]<<8)|((unsigned char)buf[1])) : 0;
             log_msg("gateway closed during auth: %u",code);
             ws_close(&d->ws); d->connected=0;
             return code==4004 ? -2 : -1;
         }
-        if(op==0 && strstr(buf,"READY")){
-            const char *p=strstr(buf,"\"s\":");
-            if(p){ p+=4; while(*p==' ')p++; if(*p>='0'&&*p<='9') d->seq=(int)strtol(p,NULL,10); }
+        if(op==9){ ws_pong(&d->ws); continue; }
+        if(op!=1 && op!=0) continue;
+        int go = gw_op(buf, (size_t)nr);
+        if(go==11){ d->last_ack=time(NULL); continue; }
+        if(go==0 && is_ready(buf, (size_t)nr)){
+            gw_seq(d, buf, (size_t)nr);
             log_msg("discord: gateway ready");
             return 0;
         }
-        /* other pre-READY ops: ignore */
+        /* other pre-READY events: ignore */
     }
     ws_close(&d->ws); d->connected=0;
     return -1;
@@ -131,6 +197,12 @@ int discord_connect(discord_t *d, const char *token){
 
 int discord_set_presence(discord_t *d, const char *state, const char *name,
                          const char *application_id, int64_t started_epoch){
+    return discord_set_presence_ex(d, state, name, NULL, application_id, started_epoch);
+}
+
+int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
+                         const char *title_id, const char *application_id,
+                         int64_t started_epoch){
     if(!d || !d->connected || !name) return -1;
     jl_val_t *act=jl_new_object();
     if(!act) return -1;
@@ -145,6 +217,24 @@ int discord_set_presence(discord_t *d, const char *state, const char *name,
     }
     if(application_id&&application_id[0])
         jl_obj_set(act,"application_id",jl_new_string(application_id));
+    if(title_id&&title_id[0]&&application_id&&application_id[0]){
+        /* asset key: lowercase titleId, exactly how the icon is uploaded */
+        char key[16]; size_t ki=0;
+        for(size_t i=0; title_id[i] && ki<sizeof key-1; i++){
+            char c=title_id[i];
+            if(c>='A'&&c<='Z') c+='a'-'A';
+            if((c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='_') key[ki++]=c;
+        }
+        key[ki]=0;
+        if(ki>=4){
+            jl_val_t *as=jl_new_object();
+            if(as){
+                jl_obj_set(as,"large_image",jl_new_string(key));
+                jl_obj_set(as,"large_text",jl_new_string(name?name:""));
+                jl_obj_set(act,"assets",as);
+            }
+        }
+    }
     jl_val_t *dd=jl_new_object();
     jl_obj_set(dd,"activities",jl_new_array());
     jl_arr_push(jl_obj_get(dd,"activities"), act);
@@ -207,16 +297,18 @@ int discord_tick(discord_t *d){
         if(nr==-3){ log_msg("skipped oversized frame"); continue; }
         if(nr==0) break;
         if(nr<0){ d->connected=0; return -1; }
-        switch(op){
+        if(op==8){ /* WS CLOSE: payload starts with a 2-byte big-endian code */
+            if(!fin){ log_msg("fragmented close; reconnecting"); d->connected=0; return -1; }
+            unsigned code = nr>=2 ? (((unsigned char)buf[0]<<8)|((unsigned char)buf[1])) : 0;
+            log_msg("gateway closed: code=%u",code);
+            d->connected=0;
+            return code==4004 ? -2 : -1;
+        }
+        if(op==9){ ws_pong(&d->ws); continue; } /* WS PING -> PONG */
+        if(op!=1 && op!=0) continue;
+        switch(gw_op(buf, (size_t)nr)){
         case 0: /* DISPATCH: only the sequence matters to us */
-            {
-                const char *p=strstr(buf,"\"s\":");
-                if(p){
-                    p+=4; while(*p==' ')p++;
-                    if(*p=='n'){ /* null: not a dispatch seq */ }
-                    else if(*p>='0'&&*p<='9') d->seq=(int)strtol(p,NULL,10);
-                }
-            }
+            gw_seq(d, buf, (size_t)nr);
             break;
         case 7: /* RECONNECT requested */
             log_msg("gateway: reconnect requested");
@@ -229,13 +321,6 @@ int discord_tick(discord_t *d){
         case 11:
             d->last_ack=now;
             break;
-        case 8: /* CLOSE: payload starts with a 2-byte big-endian code */
-            {
-                unsigned code = nr>=2 ? (((unsigned char)buf[0]<<8)|((unsigned char)buf[1])) : 0;
-                log_msg("gateway closed: code=%u",code);
-                d->connected=0;
-                return code==4004 ? -2 : -1;
-            }
         default: break;
         }
     }

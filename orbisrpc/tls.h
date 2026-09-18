@@ -1,7 +1,7 @@
-/* tls.h - self-contained TLS client (BearSSL, statically linked).
+/* tls.h - self-contained TLS client (mbedTLS, statically linked).
  * No PS4 TLS-module dependency: works in payload and plugin processes.
- * The current validator extracts the peer key but does not validate the
- * certificate chain or hostname, so this protects against passive sniffing,
+ * The validator parses the chain but does not validate it (no trust
+ * store on console), so this protects against passive sniffing,
  * not active man-in-the-middle attacks. */
 #ifndef TLS_H
 #define TLS_H

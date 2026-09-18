@@ -8,4 +8,5 @@
 int daemon_run(const char *fixed_game_name);
 void daemon_request_stop(void);
 void daemon_clear_stop(void);
+int daemon_stop_requested(void); /* 1 when plugin_unload() wants us to exit */
 #endif

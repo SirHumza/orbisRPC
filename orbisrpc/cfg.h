@@ -6,8 +6,8 @@
 #define LOG_PATH "/data/orbisRPC/log.txt"
 #define DATA_DIR "/data/orbisRPC"
 typedef struct {
-    char token[160];           /* Discord user session token */
-    char application_id[32];   /* optional: app id for asset images */
+    char token[512];           /* Discord user session token */
+    char application_id[64];   /* optional: app id for asset images */
     int enabled;
     int poll_interval_s;       /* game-check cadence */
     char presence_state[128];  /* activity "state" line, e.g. "On PS4" */

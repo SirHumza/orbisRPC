@@ -10,4 +10,7 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
 int detect_foreground_active(void);
 /* Resolve a display name for a KNOWN title id (plugin mode). */
 int detect_name_for_title(const char *titleId, char *out_name, size_t cap);
+/* Last resolved titleId (e.g. "CUSA00740") or NULL if none yet.
+ * Used as the Discord asset key so icons follow automatically. */
+const char *detect_last_titleid(void);
 #endif

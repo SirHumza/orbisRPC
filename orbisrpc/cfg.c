@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 cfg_t g_cfg;
 
@@ -70,12 +71,15 @@ void cfg_save(const char *path, const cfg_t *c) {
     jl_obj_set(r, "presence_state",  jl_new_string(c->presence_state));
     char *s = jl_stringify(r);
     if(!s){ log_msg("cfg_save: serialization failed"); jl_free(r); return; }
-    /* write tmp + rename so a power loss can't corrupt the config */
+    /* write tmp + fsync + rename so a power loss can't corrupt the config */
     char tmp[160];
     snprintf(tmp, sizeof tmp, "%s.tmp", path);
     FILE *f = fopen(tmp, "wb");
     if (f) {
         int ok = (fputs(s, f) >= 0);
+        if(fflush(f) != 0) ok = 0;
+        /* force bytes to disk before rename */
+        if(ok) { int fd = fileno(f); if(fd >= 0 && fsync(fd) != 0) ok = 0; }
         if(fclose(f) != 0) ok = 0;
         if(ok && rename(tmp, path) != 0) ok = 0;
         if(!ok){

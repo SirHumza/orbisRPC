@@ -19,6 +19,34 @@ static void test_json(void) {
     assert(jl_parse("\"unterminated", 13) == NULL);
 }
 
+static void test_gateway_op_spoof(void) {
+    /* string value containing `"op":` must not spoof the real op */
+    const char input[] = "{\"note\":\"x \\\"op\\\":99 y\",\"op\":10,\"s\":42}";
+    jl_val_t *r = jl_parse(input, sizeof(input)-1);
+    assert(r && r->type == JL_OBJECT);
+    const jl_val_t *op = jl_obj_get(r, "op");
+    const jl_val_t *s = jl_obj_get(r, "s");
+    assert(op && op->type == JL_NUMBER && (int)op->num == 10);
+    assert(s && s->type == JL_NUMBER && (int)s->num == 42);
+    jl_free(r);
+    /* missing op -> NULL, not crash */
+    const char no_op[] = "{\"t\":\"READY\"}";
+    jl_val_t *r2 = jl_parse(no_op, sizeof(no_op)-1);
+    assert(r2 && jl_obj_get(r2, "op") == NULL);
+    jl_free(r2);
+}
+
+static void test_json_oom_safe(void) {
+    assert(jl_parse("true", 4) != NULL);
+    assert(jl_parse("false", 5) != NULL);
+    assert(jl_parse("null", 4) != NULL);
+    jl_val_t *n = jl_parse("123.5", 5);
+    assert(n && n->type == JL_NUMBER);
+    jl_free(n);
+    /* incomplete pair must fail cleanly, no leak/crash */
+    assert(jl_parse("{\"a\":", 5) == NULL);
+    assert(jl_parse("{\"a\":1", 6) == NULL);
+}
 static void test_base64(void) {
     char out[32];
     assert(b64_encode((const unsigned char *)"", 0, out) == 0);
@@ -33,6 +61,8 @@ static void test_base64(void) {
 
 int main(void) {
     test_json();
+    test_gateway_op_spoof();
+    test_json_oom_safe();
     test_base64();
     puts("utility tests passed");
     return 0;
