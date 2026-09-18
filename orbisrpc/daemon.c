@@ -38,6 +38,7 @@ int daemon_run(const char *fixed_game_name){
     s_stop = 0;
     mkdir(DATA_DIR, 0777);
     log_init(LOG_PATH);
+    log_msg("orbisRPC daemon start — build %s %s", __DATE__, __TIME__);
     cfg_load(CFG_PATH, &g_cfg);
     if(!g_cfg.enabled){ log_msg("disabled in config; exiting"); log_close(); return 0; }
     if(!have_token(&g_cfg)){

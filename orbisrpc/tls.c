@@ -26,6 +26,12 @@ typedef struct {
     const br_x509_class *vtable;
     br_x509_decoder_context dc;
     br_x509_pkey pkey;
+    /* Deep-copied key bytes: br_x509_decoder_get_pkey() returns pointers
+     * INTO the decoder's scratch buffers, which the next certs in the chain
+     * overwrite. Capturing the leaf key must own its bytes. */
+    unsigned char qbuf[133];    /* max EC point (P-521) */
+    unsigned char nbuf[512];    /* max RSA modulus (BR_MAX_RSA_SIZE/8) */
+    unsigned char ebuf[8];
     unsigned key_usages;
     int have_leaf;
 } mini_x509;
@@ -47,7 +53,24 @@ static void mx_end_cert(const br_x509_class **ctx){
     const br_x509_pkey *pk = br_x509_decoder_get_pkey(&m->dc);
     /* keep only the FIRST cert's key — that's the leaf whose key verifies
      * the ServerKeyExchange signature */
-    if(pk && !m->have_leaf){ m->pkey = *pk; m->have_leaf = 1; }
+    if(pk && !m->have_leaf){
+        m->pkey = *pk;
+        if(pk->key_type == BR_KEYTYPE_EC && pk->key.ec.q
+           && pk->key.ec.qlen <= sizeof m->qbuf){
+            memcpy(m->qbuf, pk->key.ec.q, pk->key.ec.qlen);
+            m->pkey.key.ec.q = m->qbuf;
+        }else if(pk->key_type == BR_KEYTYPE_RSA && pk->key.rsa.n && pk->key.rsa.e
+                 && pk->key.rsa.nlen <= sizeof m->nbuf
+                 && pk->key.rsa.elen <= sizeof m->ebuf){
+            memcpy(m->nbuf, pk->key.rsa.n, pk->key.rsa.nlen);
+            memcpy(m->ebuf, pk->key.rsa.e, pk->key.rsa.elen);
+            m->pkey.key.rsa.n = m->nbuf;
+            m->pkey.key.rsa.e = m->ebuf;
+        }else{
+            return; /* unusable key: leave have_leaf unset */
+        }
+        m->have_leaf = 1;
+    }
 }
 static unsigned mx_end_chain(const br_x509_class **ctx){(void)ctx; return 0;}
 static const br_x509_pkey *mx_get_pkey(const br_x509_class *const *ctx, unsigned *usages){
@@ -220,6 +243,11 @@ int tls_write(tls_ctx_t *t, const void *buf, size_t len){
         if(time(NULL) > dl){ log_msg("tls: write timeout"); return -1; }
         usleep(10000);
     }
+    /* Encrypt any acked plaintext into a pending record NOW: BearSSL only
+     * does this on br_ssl_engine_flush() — current_state() alone never
+     * converts SENDAPP data, so without this the bytes never reach SENDREC
+     * and are silently dropped. */
+    br_ssl_engine_flush(&t->cc.eng, 1);
     /* flush records out promptly */
     int64_t t2 = time(NULL) + 5;
     for(;;){
