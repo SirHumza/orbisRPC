@@ -20,6 +20,8 @@
  */
 #include "detect.h"
 #include "log.h"
+#include "sfo.h"
+#include "nametable.h"
 #include <orbis/UserService.h>
 #include <orbis/libkernel.h>
 #include <orbis/Sysmodule.h>
@@ -142,6 +144,35 @@ static int pronunc_title(const char *titleId, char *out, size_t cap){
     return (i>1)?0:-1;
 }
 
+/* Game-process-safe TITLE read: the running game's own param.sfo via the
+ * app0 mount plus on-disc sce_sys copies. Small single read, works on ANY
+ * console with zero setup. Returns 0 on success. */
+static int sfo_file_title(const char *titleId, char *out, size_t cap){
+    char path[256];
+    const char *fixed[] = { "app0/sce_sys/param.sfo", "/app0/sce_sys/param.sfo", NULL };
+    for(int i = 0; fixed[i]; i++){
+        int fd = open(fixed[i], O_RDONLY);
+        if(fd < 0) continue;
+        unsigned char buf[4096];
+        ssize_t n = read(fd, buf, sizeof buf);
+        close(fd);
+        if(n > 0 && sfo_title(buf, (size_t)n, out, cap) == 0) return 0;
+    }
+    if(titleId && titleId[0]){
+        const char *bases[] = { "/user/app", "/data/app", NULL };
+        for(int b = 0; bases[b]; b++){
+            snprintf(path, sizeof path, "%s/%s/sce_sys/param.sfo", bases[b], titleId);
+            int fd = open(path, O_RDONLY);
+            if(fd < 0) continue;
+            unsigned char buf[4096];
+            ssize_t n = read(fd, buf, sizeof buf);
+            close(fd);
+            if(n > 0 && sfo_title(buf, (size_t)n, out, cap) == 0) return 0;
+        }
+    }
+    return -1;
+}
+
 static int appxml_title(const char *titleId, char *out, size_t cap){
     const char *bases[] = { "/user/app", "/data/app", NULL };
     for(int b=0; bases[b]; b++){
@@ -244,9 +275,14 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
     char titleId[16]=""; int named=0;
     if(scan_recent_titleid(titleId,sizeof titleId)==0){
         remember_titleid(titleId);
-        if(pronunc_title(titleId, out_name, cap)==0){ named=1; }
-        if(!named){ appdb_title(titleId, out_name, cap); named=(out_name[0]!=0); }
-        if(!named){ if(appxml_title(titleId, out_name, cap)==0) named=1; }
+        /* cheap, game-process-safe sources first; the multi-MB app.db scan
+         * runs last and only in this daemon/payload context. */
+        if(pronunc_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via appmeta", out_name); }
+        if(!named){ if(sfo_file_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via sfo", out_name); } }
+        if(!named){ if(appxml_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via appxml", out_name); } }
+        if(!named){ if(nametable_lookup(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via table", out_name); } }
+        if(!named){ appdb_title(titleId, out_name, cap); named=(out_name[0]!=0);
+            log_msg("name: appdb %s for %s", named?"hit":"miss", titleId); }
         if(!named){ strncpy(out_name, titleId, cap-1); out_name[cap-1]=0; }
     }else{
         strncpy(out_name, "(unknown game)", cap-1); out_name[cap-1]=0;
@@ -261,12 +297,13 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
 int detect_name_for_title(const char *titleId, char *out_name, size_t cap){
     if(!titleId || !titleId[0] || !out_name || cap==0) return -1;
     remember_titleid(titleId);
+    /* Game-process-safe only: small reads, no multi-MB scans. The app.db
+     * scan is deliberately excluded here — it belongs to daemon context. */
     if(pronunc_title(titleId, out_name, cap)==0){ log_msg("name: %s via appmeta", out_name); return 0; }
     else log_msg("name: appmeta miss for %s", titleId);
-    appdb_title(titleId, out_name, cap);
-    if(out_name[0]){ log_msg("name: %s via appdb", out_name); return 0; }
-    else log_msg("name: appdb miss for %s", titleId);
+    if(sfo_file_title(titleId, out_name, cap)==0){ log_msg("name: %s via sfo", out_name); return 0; }
     if(appxml_title(titleId, out_name, cap)==0){ log_msg("name: %s via appxml", out_name); return 0; }
+    if(nametable_lookup(titleId, out_name, cap)==0){ log_msg("name: %s via table", out_name); return 0; }
     strncpy(out_name, titleId, cap-1); out_name[cap-1]=0;
     return 0;
 }

@@ -7,9 +7,10 @@ survives reconnects with the timer intact. You only need your user token
 plus the `.elf` injection, everything else happens on the console.
 
 Still open: display names can fall back to the raw titleId (e.g.
-`CUSA00740`) inside restricted sandboxes, and cover art needs a shared
-Discord app with uploaded assets before icons appear. Discord auto-serves
-official covers for exact title matches, no image handling in this repo.
+`CUSA00740`) inside restricted sandboxes. Cover art requires a shared
+Discord application with per-game assets uploaded (lowercase titleId as
+asset key); without it Discord shows no artwork. A bare activity name
+does not pull official art on its own.
 
 A background daemon that runs **entirely on your jailbroken PS4** and posts what you're
 playing to your Discord profile as Rich Presence — "Playing *Call of Duty: Black

@@ -10,8 +10,8 @@ all: $(TARGET)
 test: $(TARGET)
 	./$(TARGET)
 
-$(TARGET): test_utils.c ../orbisrpc/jsonlite.c ../orbisrpc/b64.c
-	$(CC) $(CFLAGS) -o $@ test_utils.c ../orbisrpc/jsonlite.c ../orbisrpc/b64.c
+$(TARGET): test_utils.c ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c
+	$(CC) $(CFLAGS) -o $@ test_utils.c ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c
 
 clean:
 	rm -f $(TARGET)

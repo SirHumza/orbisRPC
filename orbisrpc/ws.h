@@ -12,7 +12,7 @@
 typedef struct {
     int32_t sock; int32_t connected; int32_t fd;
     int nb;                     /* underlying socket non-blocking flag */
-    void *tls;                  /* tls_ctx_t* (opaque: BearSSL session) */
+    void *tls;                  /* tls_ctx_t* (opaque: mbedTLS session) */
     unsigned char *rbuf;        /* raw bytes from TLS layer (heap, grows) */
     size_t rcap;                /* allocated size of rbuf */
     size_t rlen;                /* valid bytes in rbuf */

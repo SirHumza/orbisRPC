@@ -1,8 +1,11 @@
 #include "../orbisrpc/jsonlite.h"
 #include "../orbisrpc/b64.h"
+#include "../orbisrpc/sfo.h"
+#include "../orbisrpc/nametable.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 
 static void test_json(void) {
     const char input[] = "{\"name\":\"A\\u00e9\",\"items\":[true,2,null]}";
@@ -47,6 +50,46 @@ static void test_json_oom_safe(void) {
     assert(jl_parse("{\"a\":", 5) == NULL);
     assert(jl_parse("{\"a\":1", 6) == NULL);
 }
+static void test_sfo(void) {
+    /* minimal synthetic param.sfo: header + 1 entry (TITLE="Terraria") */
+    unsigned char sfo[128];
+    char out[64];
+    memset(sfo, 0, sizeof sfo);
+    sfo[0]=0x00; sfo[1]='P'; sfo[2]='S'; sfo[3]='F';
+    sfo[4]=0x01; sfo[5]=0x02;
+    sfo[8]=36; sfo[12]=48; sfo[16]=1;   /* keys@36 data@48 */
+    sfo[20]=0; sfo[21]=0; sfo[22]=0x04; sfo[23]=0; /* key_off=0 fmt=0x0004 */
+    sfo[24]=9; sfo[28]=16; sfo[32]=0;   /* len=9 max=16 data_off=0 */
+    memcpy(sfo+36, "TITLE", 6);
+    memcpy(sfo+48, "Terraria", 9);
+    assert(sfo_title(sfo, 64, out, sizeof out) == 0);
+    assert(strcmp(out, "Terraria") == 0);
+    /* malformed: bad magic, truncated, insane count, OOB offsets */
+    unsigned char bad[64];
+    memset(bad, 0, sizeof bad);
+    assert(sfo_title(bad, sizeof bad, out, sizeof out) != 0);
+    assert(sfo_title(sfo, 10, out, sizeof out) != 0);
+    sfo[16]=200; /* count overflow */
+    assert(sfo_title(sfo, 64, out, sizeof out) != 0);
+    sfo[16]=1; sfo[8]=200; /* key_off OOB */
+    assert(sfo_title(sfo, 64, out, sizeof out) != 0);
+    sfo[8]=36;
+    /* tiny output buffer still safe */
+    assert(sfo_title(sfo, 64, out, 4) == 0);
+    assert(out[3] == 0);
+}
+static void test_nametable(void) {
+    char out[64];
+    assert(nametable_lookup("CUSA00740", out, sizeof out) == 0);
+    assert(strcmp(out, "Terraria") == 0);
+    assert(nametable_lookup("CUSA00411", out, sizeof out) == 0);
+    assert(strcmp(out, "Grand Theft Auto V") == 0);
+    assert(nametable_lookup("XXXX99999", out, sizeof out) != 0);
+    assert(nametable_lookup(NULL, out, sizeof out) != 0);
+    /* tiny buffer: truncated but terminated */
+    assert(nametable_lookup("CUSA00740", out, 4) == 0);
+    assert(out[3] == 0);
+}
 static void test_base64(void) {
     char out[32];
     assert(b64_encode((const unsigned char *)"", 0, out) == 0);
@@ -63,6 +106,8 @@ int main(void) {
     test_json();
     test_gateway_op_spoof();
     test_json_oom_safe();
+    test_sfo();
+    test_nametable();
     test_base64();
     puts("utility tests passed");
     return 0;

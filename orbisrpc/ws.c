@@ -1,4 +1,4 @@
-/* ws.c - WebSocket client over SceNet + BearSSL TLS.
+/* ws.c - WebSocket client over SceNet + mbedTLS TLS.
  * Non-blocking friendly: tls_read() returns 0 when no data is pending, and
  * the receive buffer grows for large server frames (user-account READY
  * payloads are big); frames beyond WS_RBUF_MAX are drained and skipped.
@@ -122,7 +122,7 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
     sceNetSetsockopt(fd, SOL_SOCKET, SO_NBIO, &on, sizeof on);
     w->nb = 1;
     log_msg("tcp established");
-    /* TLS handshake over the established connection (BearSSL, no external
+    /* TLS handshake over the established connection (mbedTLS, no external
      * module needed). Socket is NBIO; tls_start pumps it with a deadline. */
     w->tls = tls_start(fd, host);
     if(!w->tls){ goto fail; }

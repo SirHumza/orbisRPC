@@ -175,7 +175,8 @@ int discord_connect(discord_t *d, const char *token){
         if(nr<=0){ log_msg("no READY after identify (nr=%d)",nr); break; }
         if(op==8){
             if(!fin){ log_msg("fragmented close; reconnecting"); ws_close(&d->ws); d->connected=0; return -1; }
-            unsigned code = nr>=2 ? (((unsigned char)buf[0]<<8)|((unsigned char)buf[1])) : 0;
+            if(nr<2){ log_msg("malformed close (len %d); reconnecting", nr); ws_close(&d->ws); d->connected=0; return -1; }
+            unsigned code = (((unsigned char)buf[0]<<8)|((unsigned char)buf[1]));
             log_msg("gateway closed during auth: %u",code);
             ws_close(&d->ws); d->connected=0;
             return code==4004 ? -2 : -1;
@@ -217,6 +218,13 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
     }
     if(application_id&&application_id[0])
         jl_obj_set(act,"application_id",jl_new_string(application_id));
+    else if(title_id&&title_id[0]){
+        /* No artwork will appear without a shared app: say so once instead
+         * of failing silently every presence update. */
+        static int art_warned = 0;
+        if(!art_warned){ art_warned = 1;
+            log_msg("art: no application_id configured; presence sends without artwork"); }
+    }
     if(title_id&&title_id[0]&&application_id&&application_id[0]){
         /* asset key: lowercase titleId, exactly how the icon is uploaded */
         char key[16]; size_t ki=0;
@@ -299,7 +307,8 @@ int discord_tick(discord_t *d){
         if(nr<0){ d->connected=0; return -1; }
         if(op==8){ /* WS CLOSE: payload starts with a 2-byte big-endian code */
             if(!fin){ log_msg("fragmented close; reconnecting"); d->connected=0; return -1; }
-            unsigned code = nr>=2 ? (((unsigned char)buf[0]<<8)|((unsigned char)buf[1])) : 0;
+            if(nr<2){ log_msg("malformed close (len %d); reconnecting", nr); d->connected=0; return -1; }
+            unsigned code = (((unsigned char)buf[0]<<8)|((unsigned char)buf[1]));
             log_msg("gateway closed: code=%u",code);
             d->connected=0;
             return code==4004 ? -2 : -1;
