@@ -205,12 +205,12 @@ int discord_connect(discord_t *d, const char *token){
 
 int discord_set_presence(discord_t *d, const char *state, const char *name,
                          const char *application_id, int64_t started_epoch){
-    return discord_set_presence_ex(d, state, name, NULL, application_id, NULL, started_epoch);
+    return discord_set_presence_ex(d, state, name, NULL, application_id, NULL, NULL, started_epoch);
 }
 
 int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
                          const char *title_id, const char *application_id,
-                         const char *art_base_url,
+                         const char *art_base_url, const char *art_url,
                          int64_t started_epoch){
     if(!d || !d->connected || !name) return -1;
     jl_val_t *act=jl_new_object();
@@ -226,14 +226,23 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
     }
     if(application_id&&application_id[0])
         jl_obj_set(act,"application_id",jl_new_string(application_id));
-    else if(title_id&&title_id[0]&&!(art_base_url&&art_base_url[0])){
+    else if(title_id&&title_id[0]&&!(art_base_url&&art_base_url[0])&&!(art_url&&art_url[0])){
         /* No artwork will appear without a shared app or art URL pack:
          * say so once instead of failing silently every update. */
         static int art_warned = 0;
         if(!art_warned){ art_warned = 1;
             log_msg("art: no application_id or art_base_url; presence sends without artwork"); }
     }
-    if(title_id&&title_id[0]&&(art_base_url&&art_base_url[0])){
+    if(title_id&&title_id[0]&&(art_url&&art_url[0])){
+        /* official art URL (TMDB/Sony CDN): most direct, no uploads. */
+        jl_val_t *as=jl_new_object();
+        if(as){
+            jl_obj_set(as,"large_image",jl_new_string(art_url));
+            jl_obj_set(as,"large_text",jl_new_string(name?name:""));
+            jl_obj_set(act,"assets",as);
+        }
+    }
+    else if(title_id&&title_id[0]&&(art_base_url&&art_base_url[0])){
         /* external-URL artwork: <base><lower titleId>.png, e.g. a repo-hosted
          * icon pack. No uploads, no app needed for the image itself. */
         char key[16]; size_t ki=0;

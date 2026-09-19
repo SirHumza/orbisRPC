@@ -1,6 +1,7 @@
 #include "../orbisrpc/jsonlite.h"
 #include "../orbisrpc/b64.h"
 #include "../orbisrpc/sfo.h"
+#include "../orbisrpc/tmdb_crypto.h"
 #include "../orbisrpc/nametable.h"
 #include <assert.h>
 #include <stdio.h>
@@ -111,6 +112,45 @@ static void test_sfo(void) {
     sfo[20]=0; sfo[22]=0x04; sfo[24]=9; sfo[28]=16; sfo[32]=0;
     assert(sfo_title(sfo, 64, out, sizeof out) != 0);
 }
+static void test_tmdb(void) {
+    unsigned char dig[20];
+    char hex[41];
+    int i;
+    /* SHA1("abc") = a9993e364706816aba3e25717850c26c9cd0d4d */
+    tmdb_sha1((const unsigned char *)"abc", 3, dig);
+    for(i=0;i<20;i++) sprintf(hex+2*i, "%02x", dig[i]);
+    assert(strcmp(hex, "a9993e364706816aba3e25717850c26c9cd0d89d") == 0);
+    /* HMAC-SHA1 RFC 2202 case 1 */
+    {
+        unsigned char key[20];
+        memset(key, 0x0b, 20);
+        tmdb_hmac_sha1(key, 20, (const unsigned char *)"Hi There", 8, dig);
+        for(i=0;i<20;i++) sprintf(hex+2*i, "%02x", dig[i]);
+        assert(strcmp(hex, "b617318655057264e28bc0b6fb378c8ef146be00") == 0);
+    }
+    /* URL path must match the hash Sony's live service accepts */
+    {
+        char path[128];
+        assert(tmdb_path("CUSA00740", path, sizeof path) == 0);
+        assert(strcmp(path, "/tmdb2/CUSA00740_00_95C83DE844D155477CB77C577A24D735F2E9AC08/CUSA00740_00.json") == 0);
+        assert(tmdb_path("junk!", path, sizeof path) != 0);
+        assert(tmdb_path("CUSA00740", path, 10) != 0);
+    }
+    /* response parse: name + icon URL */
+    {
+        const char body[] = "{\"names\":[{\"name\":\"Terraria\"}],\"icons\":[{\"icon\":\"http://x/y/icon0.png\",\"type\":\"512x512\"}]}";
+        char name[64], icon[128];
+        assert(tmdb_parse(body, sizeof(body)-1, name, sizeof name, icon, sizeof icon) == 0);
+        assert(strcmp(name, "Terraria") == 0);
+        assert(strcmp(icon, "http://x/y/icon0.png") == 0);
+        /* non-URL icon rejected, name still wins */
+        const char body2[] = "{\"names\":[{\"name\":\"X\"}],\"icons\":[{\"icon\":\"not a url\"}]}";
+        assert(tmdb_parse(body2, sizeof(body2)-1, name, sizeof name, icon, sizeof icon) == 0);
+        assert(icon[0] == 0);
+        /* no names -> fail */
+        assert(tmdb_parse("{\"icons\":[]}", 12, name, sizeof name, icon, sizeof icon) != 0);
+    }
+}
 static void test_nametable(void) {
     char out[64];
     assert(nametable_lookup("CUSA00740", out, sizeof out) == 0);
@@ -140,6 +180,7 @@ int main(void) {
     test_gateway_op_spoof();
     test_json_oom_safe();
     test_json_hostile();
+    test_tmdb();
     test_sfo();
     test_nametable();
     test_base64();

@@ -21,6 +21,7 @@
 #include "detect.h"
 #include "log.h"
 #include "sfo.h"
+#include "tmdb.h"
 #include "nametable.h"
 #include <orbis/UserService.h>
 #include <orbis/libkernel.h>
@@ -91,7 +92,9 @@ static int is_title_prefix(const char *n){
 /* last resolved titleId (for Discord asset key); valid after a successful
  * detect_current_game / detect_name_for_title. */
 static char s_last_titleid[16] = "";
+static char s_last_art[256] = "";
 const char *detect_last_titleid(void){ return s_last_titleid[0] ? s_last_titleid : NULL; }
+const char *detect_last_art(void){ return s_last_art[0] ? s_last_art : NULL; }
 static void remember_titleid(const char *ti){
     if(!ti) return;
     strncpy(s_last_titleid, ti, sizeof s_last_titleid - 1);
@@ -196,76 +199,10 @@ static int appxml_title(const char *titleId, char *out, size_t cap){
     return -1;
 }
 
-/* Pull one text run starting at *pp (letters, digits, space and common
- * title punctuation). Returns run length, advances *pp past it. */
-static size_t take_run(const char **pp, const char *end, char *out, size_t cap){
-    const char *p = *pp;
-    size_t i = 0;
-    while(p < end && i < cap-1){
-        char c = *p;
-        if((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||
-           c==' '||c=='\''||c=='-'||c==':'||c=='!'||c=='&'||c=='.'||c=='+'||c=='('||c==')'){
-            out[i++]=c; p++;
-        } else break;
-    }
-    out[i]=0;
-    /* trim trailing space/punct */
-    while(i>0 && (out[i-1]==' '||out[i-1]=='.')) out[--i]=0;
-    *pp = p;
-    return i;
-}
-/* A run is junk (not a display title) when it looks like an id/path. */
-static int run_is_junk(const char *run, const char *titleId){
-    if(!run[0]) return 1;
-    if(strstr(run, titleId)) return 1;          /* contentId embeds titleId */
-    if(strstr(run, "_00-")) return 1;           /* contentId marker */
-    if(strchr(run, '/') || strchr(run, '.')) return 1; /* paths, versions */
-    size_t n = strlen(run);
-    if(n < 2) return 1;
-    /* ALL-CAPS + digits + _- only (e.g. leftover id fragments) */
-    int has_lower = 0;
-    for(size_t i=0;i<n;i++) if(run[i]>='a'&&run[i]<='z'){ has_lower=1; break; }
-    if(!has_lower){
-        int has_space = (strchr(run,' ')!=NULL);
-        if(!has_space) return 1; /* e.g. "GBTX00001" */
-    }
-    return 0;
-}
-
-static void appdb_title(const char *titleId, char *out, size_t cap){
-    out[0]=0;
-    /* mms/app.db is the real title store on retail FW; keep legacy paths too */
-    const char *dbs[]={ "/system_data/priv/mms/app.db", "/system_data/priv/app.db", "/system_data/etc/app.db", NULL };
-    for(int k=0;dbs[k];k++){
-        FILE *f=fopen(dbs[k],"rb");
-        if(!f) continue;
-        fseek(f,0,SEEK_END); long sz=ftell(f); fseek(f,0,SEEK_SET);
-        if(sz<=0||sz>1L<<22){ fclose(f); continue; }
-        char *b=(char*)malloc((size_t)sz+1);
-        if(!b){fclose(f);return;}
-        size_t rd=fread(b,1,(size_t)sz,f); fclose(f); b[rd]=0;
-        const char *end = b + rd;
-        /* same titleId can appear in several user tables; try each hit */
-        const char *q=b;
-        while((q=strstr(q,titleId))!=NULL){
-            const char *p = q + strlen(titleId);
-            char run[128];
-            /* walk following text runs; first non-junk run is titleName */
-            for(int t=0; t<6; t++){
-                while(p < end && !((*p>='A'&&*p<='Z')||(*p>='a'&&*p<='z')||(*p>='0'&&*p<='9'))) p++;
-                if(p >= end) break;
-                if(take_run(&p, end, run, sizeof run) < 1) break;
-                if(!run_is_junk(run, titleId)){
-                    strncpy(out, run, cap-1); out[cap-1]=0;
-                    free(b);
-                    return;
-                }
-            }
-            q += strlen(titleId);
-        }
-        free(b);
-    }
-}
+/* NOTE: an earlier revision byte-scanned app.db for titles. Removed:
+ * the packed record layout makes the title/contentId boundary ambiguous
+ * and the scanner returned wrong names (worse than raw IDs). Exact
+ * sources above plus Sony TMDB cover every case instead. */
 
 int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap){
     if(!out_name || cap==0) return -1;
@@ -275,14 +212,20 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
     char titleId[16]=""; int named=0;
     if(scan_recent_titleid(titleId,sizeof titleId)==0){
         remember_titleid(titleId);
-        /* cheap, game-process-safe sources first; the multi-MB app.db scan
-         * runs last and only in this daemon/payload context. */
+        s_last_art[0] = 0;
+        /* cheap, game-process-safe sources first; Sony TMDB (network)
+         * resolves anything local sources miss, on any console. */
         if(pronunc_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via appmeta", out_name); }
         if(!named){ if(sfo_file_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via sfo", out_name); } }
         if(!named){ if(appxml_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via appxml", out_name); } }
         if(!named){ if(nametable_lookup(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via table", out_name); } }
-        if(!named){ appdb_title(titleId, out_name, cap); named=(out_name[0]!=0);
-            log_msg("name: appdb %s for %s", named?"hit":"miss", titleId); }
+        if(!named){
+            char art[256] = "";
+            if(tmdb_resolve(titleId, out_name, cap, art, sizeof art)==0){
+                named = 1;
+                strncpy(s_last_art, art, sizeof s_last_art-1);
+            } else s_last_art[0] = 0;
+        }
         if(!named){ strncpy(out_name, titleId, cap-1); out_name[cap-1]=0; }
     }else{
         strncpy(out_name, "(unknown game)", cap-1); out_name[cap-1]=0;
@@ -297,13 +240,22 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
 int detect_name_for_title(const char *titleId, char *out_name, size_t cap){
     if(!titleId || !titleId[0] || !out_name || cap==0) return -1;
     remember_titleid(titleId);
-    /* Game-process-safe only: small reads, no multi-MB scans. The app.db
-     * scan is deliberately excluded here — it belongs to daemon context. */
+    s_last_art[0] = 0;
+    /* Game-process-safe only: small reads plus one bounded network
+     * lookup; no multi-megabyte scans anywhere in this codebase. */
     if(pronunc_title(titleId, out_name, cap)==0){ log_msg("name: %s via appmeta", out_name); return 0; }
     else log_msg("name: appmeta miss for %s", titleId);
     if(sfo_file_title(titleId, out_name, cap)==0){ log_msg("name: %s via sfo", out_name); return 0; }
     if(appxml_title(titleId, out_name, cap)==0){ log_msg("name: %s via appxml", out_name); return 0; }
     if(nametable_lookup(titleId, out_name, cap)==0){ log_msg("name: %s via table", out_name); return 0; }
+    {
+        char art[256] = "";
+        if(tmdb_resolve(titleId, out_name, cap, art, sizeof art)==0){
+            strncpy(s_last_art, art, sizeof s_last_art-1);
+            return 0; /* tmdb_resolve already logged */
+        }
+        s_last_art[0] = 0;
+    }
     strncpy(out_name, titleId, cap-1); out_name[cap-1]=0;
     return 0;
 }
