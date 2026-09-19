@@ -5,7 +5,7 @@
 #include "tmdb_crypto.h"
 #include "log.h"
 #include <orbis/Net.h>
-#include <orbis/NetCtl.h>
+#include <orbis/Sysmodule.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
@@ -21,13 +21,18 @@
 #define TMDB_DEADLINE_S 10
 
 static int32_t s_pool = -1;
+static int s_ready = 0;
+/* Mirror ws.c net_ensure exactly: sysmodule first, static-once guard,
+ * 128KB pool (4KB starves the resolver), and deliberately NO NetCtl
+ * init inside game processes. */
 static int net_up(void){
-    int r = sceNetInit();
-    if(r < 0 && r != 0x80410108) return -1;
-    if(s_pool < 0){
-        s_pool = sceNetPoolCreate("tmdb", 4*1024, 0);
-        if(s_pool < 0) s_pool = -2;
-    }
+    if(s_ready) return 0;
+    uint32_t ur = sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NET);
+    if((int)ur < 0){ log_msg("tmdb: load NET fail %d", (int)ur); return -1; }
+    if(sceNetInit() < 0){ log_msg("tmdb: sceNetInit fail"); return -1; }
+    s_pool = (int32_t)sceNetPoolCreate("tmdb", 128*1024, 0);
+    if(s_pool < 0){ log_msg("tmdb: net pool fail %d", (int)s_pool); return -1; }
+    s_ready = 1;
     return 0;
 }
 
@@ -54,7 +59,7 @@ static int http_get(const char *host, const char *path,
         uint32_t ip = (uint32_t)((a<<24)|(b<<16)|(c<<8)|d);
         in.s_addr = sceNetHtonl(ip);
     }
-    int fd = sceNetSocket("tmdb", 2, 1, 0);
+    int fd = sceNetSocket("tmdb", ORBIS_NET_AF_INET, ORBIS_NET_SOCK_STREAM, 0);
     if(fd < 0){ log_msg("tmdb: socket fail"); return -1; }
     struct timeval tv = { .tv_sec = TMDB_DEADLINE_S, .tv_usec = 0 };
     sceNetSetsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
