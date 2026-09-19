@@ -45,9 +45,12 @@ static int orbis_poll(void *data, unsigned char *out, size_t len, size_t *olen){
         close(fd);
         if(got == len){ *olen = len; return 0; }
     }
-    /* fallback: time + address jitter (weak, but keeps us functional) */
-    srand((unsigned)(time(NULL) ^ (uintptr_t)out));
-    for(size_t i = 0; i < len; i++) out[i] = (unsigned char)rand();
+    /* fallback: time + address jitter (weak, but keeps us functional).
+     * Local xorshift on purpose: rand()/srand() would mutate process-global
+     * RNG state inside the host game. */
+    uint32_t x = (uint32_t)(time(NULL) ^ (uintptr_t)out ^ (uintptr_t)&x);
+    if(!x) x = 0x9e3779b9u;
+    for(size_t i = 0; i < len; i++){ x ^= x<<13; x ^= x>>17; x ^= x<<5; out[i] = (unsigned char)x; }
     *olen = len;
     return 0;
 }
