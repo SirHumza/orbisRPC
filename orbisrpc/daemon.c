@@ -174,6 +174,7 @@ int daemon_run(const char *fixed_game_name){
                 log_close();
                 return 2;
             }
+            if(tr == -3){ log_msg("invalid session; fresh identify"); backoff = base_poll; ws_close(&dc.ws); break; }
             if(tr != 0){ log_msg("gateway dropped; reconnecting"); break; }
 
             for(int i = 0; i < 10 && !s_stop; i++) usleep(100000);

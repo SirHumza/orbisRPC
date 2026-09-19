@@ -146,7 +146,8 @@ int discord_connect(discord_t *d, const char *token){
     /* HELLO (text frame carrying {"op":10,...}) */
     char buf[2048]; int op=0,fin=0;
     int nr=rx_frame(d,buf,sizeof buf,&op,&fin,now+15);
-    if(nr<=0 || (op!=1 && op!=0)){
+    if(nr==-4){ log_msg("no HELLO (timeout)"); ws_close(&d->ws); d->connected=0; return -1; }
+    if(nr<=0 || op!=1){
         log_msg("no HELLO (nr=%d op=%d)",nr,op);
         ws_close(&d->ws); d->connected=0;
         return -1;
@@ -161,6 +162,11 @@ int discord_connect(discord_t *d, const char *token){
         jl_free(h);
     }
     if(!d->hb_interval_ms) d->hb_interval_ms=45000;
+    if(d->hb_interval_ms < 5000){
+        log_msg("discord: hb_interval %lldms suspiciously small; clamping to 5000",
+                (long long)d->hb_interval_ms);
+        d->hb_interval_ms = 5000;
+    }
     if(send_identify(d, token) < 0){
         log_msg("discord: identify send failed");
         ws_close(&d->ws); d->connected=0;
@@ -172,6 +178,7 @@ int discord_connect(discord_t *d, const char *token){
     int64_t dl=time(NULL)+20;
     for(;;){
         nr=rx_frame(d,buf,sizeof buf,&op,&fin,dl);
+        if(nr==-4){ log_msg("no READY after identify (timeout)"); break; }
         if(nr<=0){ log_msg("no READY after identify (nr=%d)",nr); break; }
         if(op==8){
             if(!fin){ log_msg("fragmented close; reconnecting"); ws_close(&d->ws); d->connected=0; return -1; }
@@ -182,7 +189,7 @@ int discord_connect(discord_t *d, const char *token){
             return code==4004 ? -2 : -1;
         }
         if(op==9){ ws_pong(&d->ws); continue; }
-        if(op!=1 && op!=0) continue;
+        if(op!=1) continue;
         int go = gw_op(buf, (size_t)nr);
         if(go==11){ d->last_ack=time(NULL); continue; }
         if(go==0 && is_ready(buf, (size_t)nr)){
@@ -323,10 +330,12 @@ int discord_tick(discord_t *d){
             log_msg("gateway: reconnect requested");
             d->connected=0;
             return -1;
-        case 9: /* INVALID_SESSION */
+        case 9: /* INVALID_SESSION: session dead, fresh IDENTIFY needed.
+                   * Distinct code so the caller retries promptly instead of
+                   * doubling into a long backoff. */
             log_msg("gateway: invalid session");
             d->connected=0;
-            return -1;
+            return -3;
         case 11:
             d->last_ack=now;
             break;

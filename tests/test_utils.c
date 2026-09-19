@@ -77,6 +77,12 @@ static void test_sfo(void) {
     /* tiny output buffer still safe */
     assert(sfo_title(sfo, 64, out, 4) == 0);
     assert(out[3] == 0);
+    /* unterminated key region: must fail, not read OOB */
+    memset(sfo, 0x41, sizeof sfo);
+    sfo[0]=0x00; sfo[1]='P'; sfo[2]='S'; sfo[3]='F';
+    sfo[8]=36; sfo[12]=48; sfo[16]=1;
+    sfo[20]=0; sfo[22]=0x04; sfo[24]=9; sfo[28]=16; sfo[32]=0;
+    assert(sfo_title(sfo, 64, out, sizeof out) != 0);
 }
 static void test_nametable(void) {
     char out[64];

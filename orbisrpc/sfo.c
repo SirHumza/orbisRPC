@@ -36,10 +36,15 @@ int sfo_title(const unsigned char *buf, size_t n, char *out, size_t cap){
     for(uint32_t i = 0; i < h->count; i++){
         size_t ko = (size_t)h->key_off + e[i].key_off;
         if(ko >= n) continue;
+        /* keys must be null-terminated INSIDE the buffer: bound the scan */
+        size_t kmax = n - ko;
+        size_t klen = 0;
+        while(klen < kmax && buf[ko + klen]) klen++;
+        if(klen >= kmax) continue; /* unterminated key: malformed */
         const char *key = (const char *)(buf + ko);
         /* keys of interest: TITLE first, then language variants TITLE_XX */
         int is_title = (!strcmp(key, "TITLE") ||
-            (!strncmp(key, "TITLE_", 6) && strlen(key) == 8));
+            (klen == 8 && !memcmp(key, "TITLE_", 6)));
         if(!is_title) continue;
         if(e[i].fmt != 0x0004 && e[i].fmt != 0x0204) continue;
         size_t dlen = e[i].len;

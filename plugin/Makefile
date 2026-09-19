@@ -20,6 +20,7 @@ INTDIR      := $(BUILD_DIR)
 
 # Our daemon sources (payload main.c is NOT part of the plugin; plugin.c is the entry)
 DAEMON_SRC  := $(ORBISRPC)/log.c $(ORBISRPC)/cfg.c $(ORBISRPC)/jsonlite.c $(ORBISRPC)/b64.c \
+               $(ORBISRPC)/sfo.c \
                $(ORBISRPC)/tls.c $(ORBISRPC)/ws.c $(ORBISRPC)/discord.c $(ORBISRPC)/detect.c \
                $(ORBISRPC)/daemon.c
 PLUGIN_SRC  := $(SRCDIR)/plugin.c $(SRCDIR)/compat.c
