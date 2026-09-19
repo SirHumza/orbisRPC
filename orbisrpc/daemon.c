@@ -105,6 +105,18 @@ int daemon_run(const char *fixed_game_name){
     if(base_poll < 5) base_poll = 5;
     if(base_poll > 60) base_poll = 60;
     int backoff = base_poll;
+    /* Plugin mode hands us a raw titleId: resolve it here in the daemon
+     * thread (files + TMDB), never in the loader. Payload mode passes
+     * NULL and detects per cycle below. */
+    char fixed_name[128] = "";
+    if(fixed_game_name){
+        if(detect_looks_like_titleid(fixed_game_name)){
+            detect_name_for_title(fixed_game_name, fixed_name, sizeof fixed_name);
+            log_msg("daemon: %s -> %s", fixed_game_name, fixed_name);
+        } else {
+            strncpy(fixed_name, fixed_game_name, sizeof fixed_name-1);
+        }
+    }
     for(;;){ /* outer: connect cycles with backoff on failure */
         if(s_stop) break;
         /* re-read config every cycle so token edits land without a reboot.
@@ -149,10 +161,10 @@ int daemon_run(const char *fixed_game_name){
             if(now != last_poll){
                 last_poll = now;
                 char name[128] = "";
-                if(fixed_game_name){
-                    strncpy(name, fixed_game_name, sizeof name-1);
+                if(fixed_name[0]){
+                    strncpy(name, fixed_name, sizeof name-1);
                     name[sizeof name-1] = 0;
-                }else{
+                }else if(!fixed_game_name){
                     /* detect_current_game already checks foreground-active
                      * internally; don't double-call it. */
                     if(detect_current_game(name, sizeof name, NULL, 0) != 0)

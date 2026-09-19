@@ -15,4 +15,6 @@ int detect_name_for_title(const char *titleId, char *out_name, size_t cap);
 const char *detect_last_titleid(void);
 /* Last resolved artwork URL (Sony CDN via TMDB, or empty). */
 const char *detect_last_art(void);
+/* True for raw IDs ("CUSA00740"): 9 chars of A-Z0-9 with known prefix. */
+int detect_looks_like_titleid(const char *s);
 #endif

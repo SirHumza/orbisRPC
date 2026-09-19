@@ -234,6 +234,17 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
     return 0;
 }
 
+int detect_looks_like_titleid(const char *s){
+    if(!s) return 0;
+    if(strlen(s) != 9) return 0;
+    if(strncmp(s,"CUSA",4)!=0 && strncmp(s,"PPSA",4)!=0 &&
+       strncmp(s,"PCSE",4)!=0 && strncmp(s,"PCSB",4)!=0 &&
+       strncmp(s,"PCSG",4)!=0 && strncmp(s,"EPSA",4)!=0) return 0;
+    for(int i = 4; i < 9; i++)
+        if(!((s[i]>='A'&&s[i]<='Z')||(s[i]>='0'&&s[i]<='9'))) return 0;
+    return 1;
+}
+
 /* Resolve a display name for a KNOWN title id (plugin mode: the plugin is
  * loaded into the game process and knows the titleid from the GoldHEN SDK,
  * so we skip the foreground-app heuristics entirely). */

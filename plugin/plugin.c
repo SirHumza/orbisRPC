@@ -74,10 +74,13 @@ int32_t attr_public plugin_load(int32_t argc, const char *argv[]){
     klog("[orbisrpc] loaded into process: pid=%d name=%s titleid=%s\n",
          procInfo.pid, procInfo.name, procInfo.titleid);
 
-    /* Resolve a display name for the title we are loaded into. */
-    static char game_name[128];
-    detect_name_for_title(procInfo.titleid, game_name, sizeof game_name);
-    klog("[orbisrpc] game: %s\n", game_name);
+    /* Hand the raw titleId to the daemon thread: ALL resolution (files,
+     * TMDB network) happens there, never synchronously in the loader.
+     * Blocking game boot on DNS would hang launches and risk watchdog. */
+    static char game_id[16];
+    strncpy(game_id, procInfo.titleid, sizeof game_id-1);
+    game_id[sizeof game_id-1] = 0;
+    klog("[orbisrpc] titleid for daemon: %s\n", game_id);
 
     /* explicit fat stack: TLS handshakes + JSON buffers overflow the
      * small default plugin-thread stacks. 256KB is mandatory — falling
@@ -89,7 +92,7 @@ int32_t attr_public plugin_load(int32_t argc, const char *argv[]){
         klog("[orbisrpc] attr/stack setup failed; NOT starting (no fallback)\n");
         return 0;
     }
-    if(scePthreadCreate(&s_daemon_thread, &attr, daemon_thread, game_name, "orbisrpc_daemon") == 0)
+    if(scePthreadCreate(&s_daemon_thread, &attr, daemon_thread, game_id, "orbisrpc_daemon") == 0)
         s_daemon_started = 1;
     else
         klog("[orbisrpc] daemon thread creation failed\\n");
