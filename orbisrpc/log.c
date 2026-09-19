@@ -45,7 +45,7 @@ void log_init(const char *path) {
     if (!g_log) {
         for (unsigned i = 0; i < sizeof(LOG_FALLBACKS)/sizeof(LOG_FALLBACKS[0]); i++) {
             const char *p = LOG_FALLBACKS[i];
-            if (!p || strcmp(p, path) == 0) continue;
+            if (!p || (path && strcmp(p, path) == 0)) continue;
             g_log = fopen(p, "ab");
             if (g_log) break;
         }
