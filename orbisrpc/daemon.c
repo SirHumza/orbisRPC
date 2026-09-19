@@ -8,6 +8,10 @@
  * gateway (close 4004), which was why v1 never worked.
  *
  * A `stop` flag is polled so plugin_unload() can shut the loop down cleanly.
+ *
+ * KNOWN GAP: no suspend/resume notification handling. After Rest Mode the
+ * sockets are dead; the heartbeat ack timeout plus reconnect loop should
+ * recover, but suspend behavior is UNVERIFIED on hardware.
  */
 #include "cfg.h"
 #include "log.h"
