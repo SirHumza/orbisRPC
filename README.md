@@ -117,6 +117,19 @@ Logs go to `/data/orbisRPC/log.txt`.
 
 ---
 
+## Releases (the update channel)
+
+Consoles self-update from GitHub releases. To ship one:
+
+1. Bump `ORBISRPC_VERSION` in `orbisrpc/version.h`.
+2. Full build, tests, commit, push.
+3. `gh release create vX.Y.Z /tmp/orbisrpc.bin /tmp/orbisrpc_plugin.prx`
+   (renamed from `build/orbisrpc.elf` and `plugin/build/orbisrpc_plugin.prx`).
+4. Consoles on older versions download, validate ELF magic, and stage
+   both files on next boot. Set `"auto_update": 0` in config to opt out.
+
+---
+
 ## One-time setup: your Discord user token
 
 The daemon connects to Discord's gateway as *you*, so it needs your **user
