@@ -208,6 +208,19 @@ int discord_set_presence(discord_t *d, const char *state, const char *name,
     return discord_set_presence_ex(d, state, name, NULL, application_id, NULL, NULL, started_epoch);
 }
 
+/* Lowercase titleId into an asset-key buffer. Returns key length. */
+static size_t asset_key(const char *title_id, char *key, size_t cap){
+    size_t ki = 0;
+    if(!title_id || !key || cap == 0) return 0;
+    for(size_t i = 0; title_id[i] && ki < cap-1; i++){
+        char c = title_id[i];
+        if(c>='A'&&c<='Z') c += 'a'-'A';
+        if((c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='_') key[ki++]=c;
+    }
+    key[ki] = 0;
+    return ki;
+}
+
 int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
                          const char *title_id, const char *application_id,
                          const char *art_base_url, const char *art_url,
@@ -245,14 +258,8 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
     else if(title_id&&title_id[0]&&(art_base_url&&art_base_url[0])){
         /* external-URL artwork: <base><lower titleId>.png, e.g. a repo-hosted
          * icon pack. No uploads, no app needed for the image itself. */
-        char key[16]; size_t ki=0;
-        for(size_t i=0; title_id[i] && ki<sizeof key-1; i++){
-            char c=title_id[i];
-            if(c>='A'&&c<='Z') c+='a'-'A';
-            if((c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='_') key[ki++]=c;
-        }
-        key[ki]=0;
-        if(ki>=4){
+        char key[16];
+        if(asset_key(title_id, key, sizeof key) >= 4){
             char url[288];
             int n=snprintf(url,sizeof url,"%s%s.png",art_base_url,key);
             if(n>0 && (size_t)n<sizeof url){
@@ -267,14 +274,8 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
     }
     else if(title_id&&title_id[0]&&application_id&&application_id[0]){
         /* asset key: lowercase titleId, exactly how the icon is uploaded */
-        char key[16]; size_t ki=0;
-        for(size_t i=0; title_id[i] && ki<sizeof key-1; i++){
-            char c=title_id[i];
-            if(c>='A'&&c<='Z') c+='a'-'A';
-            if((c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='_') key[ki++]=c;
-        }
-        key[ki]=0;
-        if(ki>=4){
+        char key[16];
+        if(asset_key(title_id, key, sizeof key) >= 4){
             jl_val_t *as=jl_new_object();
             if(as){
                 jl_obj_set(as,"large_image",jl_new_string(key));
