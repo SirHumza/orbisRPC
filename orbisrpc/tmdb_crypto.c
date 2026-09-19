@@ -124,9 +124,20 @@ int tmdb_parse(const char *body, size_t len,
             const jl_val_t *i0 = (icons && icons->type == JL_ARRAY) ? jl_arr_at(icons, 0) : NULL;
             const jl_val_t *iu = i0 ? jl_obj_get(i0, "icon") : NULL;
             if(iu && iu->type == JL_STRING && iu->str[0]){
-                /* only http(s) URLs are usable as external assets */
-                if(!strncmp(iu->str, "http://", 7) || !strncmp(iu->str, "https://", 8)){
-                    strncpy(icon, iu->str, icon_cap-1); icon[icon_cap-1] = 0;
+                /* only http(s) URLs are usable as external assets.
+                 * Sony serves the same bytes over TLS: prefer https so
+                 * mixed-content rules can never silently drop the art. */
+                const char *u = iu->str;
+                if(!strncmp(u, "http://", 7)){
+                    if(strstr(u, ".playstation.net/")){
+                        char tmp[256];
+                        snprintf(tmp, sizeof tmp, "https://%s", u+7);
+                        strncpy(icon, tmp, icon_cap-1); icon[icon_cap-1] = 0;
+                    } else {
+                        strncpy(icon, u, icon_cap-1); icon[icon_cap-1] = 0;
+                    }
+                } else if(!strncmp(u, "https://", 8)){
+                    strncpy(icon, u, icon_cap-1); icon[icon_cap-1] = 0;
                 }
             }
         }

@@ -148,6 +148,14 @@ static void test_tmdb(void) {
         const char body2[] = "{\"names\":[{\"name\":\"X\"}],\"icons\":[{\"icon\":\"not a url\"}]}";
         assert(tmdb_parse(body2, sizeof(body2)-1, name, sizeof name, icon, sizeof icon) == 0);
         assert(icon[0] == 0);
+        /* Sony CDN http upgrades to https */
+        const char body3[] = "{\"names\":[{\"name\":\"Y\"}],\"icons\":[{\"icon\":\"http://gs2-sec.ww.prod.dl.playstation.net/x/icon0.png\"}]}";
+        assert(tmdb_parse(body3, sizeof(body3)-1, name, sizeof name, icon, sizeof icon) == 0);
+        assert(!strncmp(icon, "https://gs2-sec.ww.prod.dl.playstation.net/", 38));
+        /* plain http elsewhere passes through untouched */
+        const char body4[] = "{\"names\":[{\"name\":\"Z\"}],\"icons\":[{\"icon\":\"http://example.com/a.png\"}]}";
+        assert(tmdb_parse(body4, sizeof(body4)-1, name, sizeof name, icon, sizeof icon) == 0);
+        assert(!strncmp(icon, "http://example.com/", 19));
         /* no names -> fail */
         assert(tmdb_parse("{\"icons\":[]}", 12, name, sizeof name, icon, sizeof icon) != 0);
     }
