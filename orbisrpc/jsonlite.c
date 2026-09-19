@@ -18,6 +18,12 @@ static void skip_ws(jl_parse_t *p) {
 }
 
 static jl_val_t *parse_value(jl_parse_t *p);
+static jl_val_t *parse_value_depth(jl_parse_t *p, int depth);
+
+/* Stack depth cap: network JSON nests a few levels; a hostile 100k-deep
+ * array would otherwise exhaust the daemon/game thread stack. Counter
+ * advances twice per nesting level, so 128 allows ~64 deep. */
+#define JL_MAX_DEPTH 128
 
 static jl_val_t *parse_string(jl_parse_t *p) {
     if (p->cur >= p->end || *p->cur != '"') { p->err=1; return NULL; }
@@ -67,13 +73,14 @@ static jl_val_t *parse_string(jl_parse_t *p) {
     return v;
 }
 
-static jl_val_t *parse_array(jl_parse_t *p) {
+static jl_val_t *parse_array(jl_parse_t *p, int depth) {
+    if(depth > JL_MAX_DEPTH){ p->err=1; return NULL; }
     p->cur++; jl_val_t *v=newval(JL_ARRAY); if(!v){p->err=1;return NULL;}
     jl_val_t *tail=NULL;
     skip_ws(p);
     if(p->cur<p->end && *p->cur==']'){p->cur++;return v;}
     while(p->cur<p->end){
-        jl_val_t *e=parse_value(p); if(p->err){jl_free(v);return NULL;}
+        jl_val_t *e=parse_value_depth(p, depth+1); if(p->err){jl_free(v);return NULL;}
         if(!v->child)v->child=e;else{tail->next=e;}
         tail=e; v->count++;
         skip_ws(p);
@@ -84,7 +91,8 @@ static jl_val_t *parse_array(jl_parse_t *p) {
     p->err=1;jl_free(v);return NULL;
 }
 
-static jl_val_t *parse_object(jl_parse_t *p) {
+static jl_val_t *parse_object(jl_parse_t *p, int depth) {
+    if(depth > JL_MAX_DEPTH){ p->err=1; return NULL; }
     p->cur++; jl_val_t *v=newval(JL_OBJECT); if(!v){p->err=1;return NULL;}
     jl_val_t *tail=NULL;
     skip_ws(p);
@@ -93,7 +101,7 @@ static jl_val_t *parse_object(jl_parse_t *p) {
         jl_val_t *key=parse_string(p); if(p->err){jl_free(v);return NULL;}
         skip_ws(p);
         if(p->cur<p->end&&*p->cur==':'){p->cur++;skip_ws(p);}else{p->err=1;jl_free(key);jl_free(v);return NULL;}
-        jl_val_t *val=parse_value(p); if(p->err){jl_free(key);jl_free(v);return NULL;}
+        jl_val_t *val=parse_value_depth(p, depth+1); if(p->err){jl_free(key);jl_free(v);return NULL;}
         jl_val_t *pair=newval(JL_OBJECT);
         if(!pair){ p->err=1; jl_free(key); jl_free(val); jl_free(v); return NULL; }
         pair->str=key->str; pair->strlen=key->strlen; pair->child=val;
@@ -108,22 +116,39 @@ static jl_val_t *parse_object(jl_parse_t *p) {
     p->err=1;jl_free(v);return NULL;
 }
 
-static jl_val_t *parse_value(jl_parse_t *p) {
+static jl_val_t *parse_value_depth(jl_parse_t *p, int depth) {
+    if(depth > JL_MAX_DEPTH){ p->err=1; return NULL; }
     skip_ws(p);
     if(p->cur>=p->end){p->err=1;return NULL;}
     char c=*p->cur;
-    if(c=='{')return parse_object(p);
-    if(c=='[')return parse_array(p);
+    if(c=='{')return parse_object(p, depth+1);
+    if(c=='[')return parse_array(p, depth+1);
     if(c=='"')return parse_string(p);
     if(c=='t'){ if(p->end-p->cur>=4&&!memcmp(p->cur,"true",4)){p->cur+=4;jl_val_t*b=newval(JL_BOOL);if(!b){p->err=1;return NULL;}b->num=1;return b;} p->err=1;return NULL;}
     if(c=='f'){ if(p->end-p->cur>=5&&!memcmp(p->cur,"false",5)){p->cur+=5;jl_val_t*b=newval(JL_BOOL);if(!b){p->err=1;return NULL;}b->num=0;return b;} p->err=1;return NULL;}
     if(c=='n'){ if(p->end-p->cur>=4&&!memcmp(p->cur,"null",4)){p->cur+=4;jl_val_t*nv=newval(JL_NULL);if(!nv){p->err=1;return NULL;}return nv;} p->err=1;return NULL;}
     if(c=='-'||(c>='0'&&c<='9')){
-        char *ep; double d=strtod(p->cur,&ep); if(ep==p->cur){p->err=1;return NULL;} p->cur=ep;
-        jl_val_t *n=newval(JL_NUMBER); if(!n){p->err=1;return NULL;} n->num=d; return n;
+        /* bounded scan: strtod needs NUL-termination but our buffer end is
+         * not terminated, so copy the number token first (64 chars is far
+         * beyond any real JSON number; longer fails cleanly). */
+        char nb[64]; size_t ni=0;
+        const char *q=p->cur;
+        while(q<p->end && ni<sizeof nb-1){
+            char d=*q;
+            if((d>='0'&&d<='9')||d=='-'||d=='+'||d=='.'||d=='e'||d=='E'){ nb[ni++]=d; q++; }
+            else break;
+        }
+        if(ni==0 || ni>=sizeof nb-1){ p->err=1; return NULL; }
+        nb[ni]=0;
+        char *ep; double dd=strtod(nb,&ep);
+        if(ep==nb){ p->err=1; return NULL; }
+        p->cur=q;
+        jl_val_t *n=newval(JL_NUMBER); if(!n){p->err=1;return NULL;} n->num=dd; return n;
     }
     p->err=1; return NULL;
 }
+
+static jl_val_t *parse_value(jl_parse_t *p){ return parse_value_depth(p, 0); }
 
 jl_val_t *jl_parse(const char *s, size_t len){
     if(!s) return NULL;

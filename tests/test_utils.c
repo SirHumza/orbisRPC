@@ -39,8 +39,7 @@ static void test_gateway_op_spoof(void) {
     jl_free(r2);
 }
 
-static void test_json_oom_safe(void) {
-    assert(jl_parse("true", 4) != NULL);
+static void test_json_oom_safe(void) {    assert(jl_parse("true", 4) != NULL);
     assert(jl_parse("false", 5) != NULL);
     assert(jl_parse("null", 4) != NULL);
     jl_val_t *n = jl_parse("123.5", 5);
@@ -49,6 +48,34 @@ static void test_json_oom_safe(void) {
     /* incomplete pair must fail cleanly, no leak/crash */
     assert(jl_parse("{\"a\":", 5) == NULL);
     assert(jl_parse("{\"a\":1", 6) == NULL);
+}
+static void test_json_hostile(void) {
+    /* 200-deep nesting must be rejected, not stack-smash */
+    char deep[420];
+    memset(deep, '[', 200);
+    memset(deep+200, ']', 200);
+    deep[400] = 0;
+    assert(jl_parse(deep, 400) == NULL);
+    /* 60-deep is fine */
+    char okd[130];
+    memset(okd, '[', 60);
+    memset(okd+60, ']', 60);
+    okd[120] = 0;
+    jl_val_t *r = jl_parse(okd, 120);
+    assert(r && r->type == JL_ARRAY);
+    jl_free(r);
+    /* number running exactly to buffer end (no NUL past it) */
+    char num[16];
+    memcpy(num, "{\"s\":41250}", 11);
+    jl_val_t *r2 = jl_parse(num, 11);
+    assert(r2);
+    assert(jl_obj_get(r2, "s")->num == 41250);
+    jl_free(r2);
+    /* absurd number token fails cleanly */
+    char big[80];
+    memset(big, '9', 70);
+    big[70] = 0;
+    assert(jl_parse(big, 70) == NULL);
 }
 static void test_sfo(void) {
     /* minimal synthetic param.sfo: header + 1 entry (TITLE="Terraria") */
@@ -112,6 +139,7 @@ int main(void) {
     test_json();
     test_gateway_op_spoof();
     test_json_oom_safe();
+    test_json_hostile();
     test_sfo();
     test_nametable();
     test_base64();
