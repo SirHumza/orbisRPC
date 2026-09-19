@@ -8,6 +8,9 @@
 
 #define WS_RBUF_MIN 65536          /* initial raw socket buffer (READY is big) */
 #define WS_RBUF_MAX (8*1024*1024)  /* grow limit; bigger frames are skipped */
+/* Why 8MB: user-account READY payloads measured ~4MB on hardware
+ * (2026-09). Only the connected TLS peer (Discord) can grow this;
+ * allocation failure or larger frames degrade to skip+reconnect. */
 
 typedef struct {
     int32_t sock; int32_t connected; int32_t fd;
