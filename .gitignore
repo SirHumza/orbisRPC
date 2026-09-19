@@ -10,3 +10,4 @@ build/
 config/config.ps4.json
 plugin/build/
 tests/test_utils
+config/icons/

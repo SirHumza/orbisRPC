@@ -1,30 +1,33 @@
 # Cover art pipeline
 
-Discord serves Rich Presence images only from assets uploaded to a
-Discord application. There is no URL mode and no automatic official art
-for custom presences. One shared app covers every install.
+Two supported paths. The URL pack is the primary one: no uploads,
+no per-game setup, no application needed for images.
 
-## One-time maintainer setup
+## Path A: icon pack + external URLs (recommended)
 
-1. Create an application at https://discord.com/developers/applications.
-2. Rich Presence, Art Assets, upload one PNG per game. Asset name must be
-   the lowercase title ID, e.g. `cusa00740` for Terraria. 512x512 PNG.
-3. Copy the Application ID into the repo default (`config/config.json`
-   `application_id`) so every install inherits it.
-
-## Where icons live on the PS4
-
-`/user/appmeta/<TITLEID>/icon0.png` (around 50KB). Pull over FTP:
+The daemon sends `assets.large_image` as
+`<art_base_url><lowercase titleId>.png` (Discord accepts external image
+URLs in asset fields). Host the pack once, e.g. in this repo:
 
 ```
-get /user/appmeta/CUSA00740/icon0.png -> cusa00740.png
+config/icons/cusa00740.png   (512x512 PNG, pulled from the console)
 ```
 
-Upload as asset `cusa00740`.
+`scripts/sync_icons.sh` pulls every `/user/appmeta/<TITLEID>/icon0.png`
+off the PS4 over FTP (read-only) into `config/icons/`. Set
+`art_base_url` in config to the hosted prefix, e.g.
+`https://raw.githubusercontent.com/<you>/orbisRPC/main/config/icons/`.
+Every install then shows art with zero setup. Missing files degrade to
+no image. Pack hosting is a maintainer decision (game art is not ours).
+
+## Path B: shared Discord application (fallback)
+
+Create an application, upload one PNG per game under Art Assets named
+as the lowercase title ID, set `application_id` in config. The daemon
+sends the asset key instead. Capped at 300 assets per app.
 
 ## Runtime behavior
 
-The daemon sends `assets: { large_image: "<lower titleId>",
-large_text: "<game name>" }` only when `application_id` is set. Without
-it, presence posts with no artwork and logs one notice. Missing assets
-for a title also degrade to no image. Nothing crashes on absent art.
+URL pack wins when `art_base_url` is set, uploaded keys when only
+`application_id` is set, no artwork otherwise (one log notice). Missing
+art never crashes anything.

@@ -152,7 +152,7 @@ int daemon_run(const char *fixed_game_name){
                     if(need_post){
                         const char *state = g_cfg.presence_state[0] ? g_cfg.presence_state : NULL;
                         const char *tid = detect_last_titleid();
-                        discord_set_presence_ex(&dc, state, name, tid, g_cfg.application_id, started);
+                        discord_set_presence_ex(&dc, state, name, tid, g_cfg.application_id, g_cfg.art_base_url, started);
                         log_msg("presence: %s", name);
                         strncpy(last, name, sizeof last-1);
                         last[sizeof last-1] = 0;

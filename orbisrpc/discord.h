@@ -19,9 +19,12 @@ int discord_set_presence(discord_t *d, const char *state, const char *name,
                          const char *application_id, int64_t started_epoch); /* op 3 */
 /* Same + titleId asset key: when application_id is set, sends
  * assets { large_image: "<lower titleId>", large_text: "<name>" } so the
- * game icon shows once uploaded under that name in the Discord app. */
+ * game icon shows once uploaded under that name in the Discord app.
+ * When art_base_url is set instead, large_image becomes
+ * "<base><lower titleId>.png" (external URL assets, no uploads needed). */
 int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
                          const char *title_id, const char *application_id,
+                         const char *art_base_url,
                          int64_t started_epoch); /* op 3 */
 int discord_clear_presence(discord_t *d);   /* clear activity, stay online */
 int discord_tick(discord_t *d);             /* 0 ok; -1 drop/reconnect; -2 auth-fatal; -3 invalid session (retry promptly) */

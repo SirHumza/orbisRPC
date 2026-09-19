@@ -7,7 +7,10 @@
 #define DATA_DIR "/data/orbisRPC"
 typedef struct {
     char token[512];           /* Discord user session token */
-    char application_id[64];   /* optional: app id for asset images */
+    char application_id[64];   /* optional: app id for uploaded asset images */
+    char art_base_url[256];    /* optional: icon pack base URL, e.g.
+                                * https://raw.githubusercontent.com/.../icons/
+                                * large_image becomes <base><lower titleId>.png */
     int enabled;
     int poll_interval_s;       /* game-check cadence */
     char presence_state[128];  /* activity "state" line, e.g. "On PS4" */

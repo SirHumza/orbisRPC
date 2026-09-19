@@ -51,6 +51,7 @@ int cfg_load(const char *path, cfg_t *c) {
     } while(0)
     STR("token", token);
     STR("application_id", application_id);
+    STR("art_base_url", art_base_url);
     STR("presence_state", presence_state);
 #undef STR
     o = jl_obj_get(root, "enabled");         if (o && o->type == JL_BOOL)   c->enabled = (int)o->num;
@@ -66,6 +67,7 @@ void cfg_save(const char *path, const cfg_t *c) {
     if(!r) { log_msg("cfg_save: allocation failed"); return; }
     jl_obj_set(r, "token",           jl_new_string(c->token));
     jl_obj_set(r, "application_id",  jl_new_string(c->application_id));
+    jl_obj_set(r, "art_base_url",    jl_new_string(c->art_base_url));
     jl_obj_set(r, "enabled",         jl_new_bool(c->enabled));
     jl_obj_set(r, "poll_interval_s", jl_new_number((double)c->poll_interval_s));
     jl_obj_set(r, "presence_state",  jl_new_string(c->presence_state));
