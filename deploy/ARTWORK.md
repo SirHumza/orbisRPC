@@ -33,6 +33,12 @@ Create an application, upload one PNG per game under Art Assets named
 as the lowercase title ID, set `application_id` in config. The daemon
 sends the asset key instead. Capped at 300 assets per app.
 
+Current default: the public PS4-Rich-Presence-for-Discord application
+(zorua98741/bshar1865, ID 858345055966461973), which already hosts
+per-title art. Borrowed backend, credited here: if it ever goes away,
+art degrades to nothing and everything else keeps working. Replace the
+default with your own app ID to own the whole chain.
+
 ## Runtime behavior
 
 URL pack wins when `art_base_url` is set, uploaded keys when only

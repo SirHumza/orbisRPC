@@ -16,6 +16,12 @@ void cfg_defaults(cfg_t *c) {
     c->poll_interval_s = 12;
     strncpy(c->token, "SET_ME", sizeof(c->token)-1);
     strncpy(c->presence_state, "On PS4", sizeof(c->presence_state)-1);
+    /* Default art backend: asset keys resolve against the public
+     * PS4-Rich-Presence-for-Discord application (zorua98741/bshar1865),
+     * which already hosts per-title art under lowercase title IDs.
+     * Dependency, not ours: if it ever goes away, art degrades to
+     * nothing and everything else keeps working. */
+    strncpy(c->application_id, "858345055966461973", sizeof(c->application_id)-1);
 }
 
 /* keep the daemon sane if the user puts junk in config */
