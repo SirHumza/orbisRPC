@@ -10,8 +10,8 @@ all: $(TARGET)
 test: $(TARGET)
 	./$(TARGET)
 
-$(TARGET): test_utils.c ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c ../orbisrpc/tmdb_crypto.c
-	$(CC) $(CFLAGS) -o $@ test_utils.c ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c ../orbisrpc/tmdb_crypto.c
+$(TARGET): test_utils.c ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c ../orbisrpc/tmdb_crypto.c ../orbisrpc/updater_util.c
+	$(CC) $(CFLAGS) -o $@ test_utils.c ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c ../orbisrpc/tmdb_crypto.c ../orbisrpc/updater_util.c
 
 clean:
 	rm -f $(TARGET)

@@ -18,6 +18,8 @@
 #include "ws.h"
 #include "discord.h"
 #include "detect.h"
+#include "updater.h"
+#include "version.h"
 #include <sys/stat.h>
 #include <unistd.h>
 #include <string.h>
@@ -87,6 +89,15 @@ int daemon_run(const char *fixed_game_name){
         log_msg("FATAL: put your Discord user token in %s as \"token\":\"...\"", CFG_PATH);
         log_close();
         return 1;
+    }
+
+    /* Self-update once per boot, before first connect. Never fatal:
+     * staged artifacts take effect on next launch/injection. */
+    if(g_cfg.auto_update){
+        int ur = updater_check_and_stage();
+        log_msg("updater: %s (local %s)",
+                ur > 0 ? "staged newer build" : ur == 0 ? "already current" : "check failed",
+                ORBISRPC_VERSION);
     }
 
     discord_t dc;

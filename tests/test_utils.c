@@ -2,6 +2,7 @@
 #include "../orbisrpc/b64.h"
 #include "../orbisrpc/sfo.h"
 #include "../orbisrpc/tmdb_crypto.h"
+#include "../orbisrpc/updater.h"
 #include "../orbisrpc/nametable.h"
 #include <assert.h>
 #include <stdio.h>
@@ -151,6 +152,24 @@ static void test_tmdb(void) {
         assert(tmdb_parse("{\"icons\":[]}", 12, name, sizeof name, icon, sizeof icon) != 0);
     }
 }
+static void test_updater(void) {
+    assert(updater_cmp("0.4.0", "0.4.0") == 0);
+    assert(updater_cmp("v0.4.1", "0.4.0") > 0);
+    assert(updater_cmp("0.4.0", "v0.4.1") < 0);
+    assert(updater_cmp("0.10.0", "0.9.9") > 0);
+    assert(updater_cmp("1.0", "1.0.0") == 0);
+    assert(updater_cmp(NULL, "0.1") < 0);
+    unsigned char elf[64];
+    memset(elf, 0, sizeof elf);
+    assert(updater_elf_ok(elf, sizeof elf) == 0);
+    assert(updater_elf_ok(NULL, 100) == 0);
+    assert(updater_elf_ok(elf, 10) == 0);
+    elf[0]=0x7f; elf[1]='E'; elf[2]='L'; elf[3]='F';
+    elf[4]=2; elf[5]=1; elf[18]=62; elf[19]=0;
+    assert(updater_elf_ok(elf, sizeof elf) == 1);
+    elf[18]=99;
+    assert(updater_elf_ok(elf, sizeof elf) == 0);
+}
 static void test_nametable(void) {
     char out[64];
     assert(nametable_lookup("CUSA00740", out, sizeof out) == 0);
@@ -181,6 +200,7 @@ int main(void) {
     test_json_oom_safe();
     test_json_hostile();
     test_tmdb();
+    test_updater();
     test_sfo();
     test_nametable();
     test_base64();
