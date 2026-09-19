@@ -2,15 +2,17 @@
 
 ## Status (Sep 2026)
 
-Backend fully functional: connects to Discord, posts and clears presence,
-survives reconnects with the timer intact. You only need your user token
-plus the `.elf` injection, everything else happens on the console.
+Backend verified working on hardware: TLSv1.3 through Cloudflare,
+8MB READY handling, JSON-safe gateway parsing, heartbeats, reconnects
+with the timer intact. User flow is token plus `.elf` injection.
 
-Still open: display names can fall back to the raw titleId (e.g.
-`CUSA00740`) inside restricted sandboxes. Cover art requires a shared
-Discord application with per-game assets uploaded (lowercase titleId as
-asset key); without it Discord shows no artwork. A bare activity name
-does not pull official art on its own.
+Names resolve in cost tiers (param.sfo, appmeta, app cache, baked
+table, live title database) with raw titleId only as last resort;
+on-console proof for sandboxed processes is still pending.
+
+Cover art ships as external-URL assets from a hosted icon pack
+(`art_base_url` plus lowercase titleId); see `deploy/ARTWORK.md`.
+End-to-end art on a profile is still pending a hosted pack.
 
 A background daemon that runs **entirely on your jailbroken PS4** and posts what you're
 playing to your Discord profile as Rich Presence — "Playing *Call of Duty: Black
