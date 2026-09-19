@@ -1,7 +1,14 @@
 # Cover art pipeline
 
-Two supported paths. The URL pack is the primary one: no uploads,
-no per-game setup, no application needed for images.
+## Path A: Sony TMDB icon URLs (primary, fully automatic)
+
+Every title lookup also queries Sony's TMDB service, which returns an
+official 512x512 icon URL on Sony's CDN. The daemon sends it as
+`assets.large_image` (Discord accepts external image URLs there). No
+uploads, no hosting, no per-game work, works on any console. If the
+service lacks the title or the network fails, the next path is tried.
+
+## Path B: icon pack + external URLs (fallback, maintainer-hosted)
 
 ## Path A: icon pack + external URLs (recommended)
 

@@ -7,12 +7,10 @@ Backend verified working on hardware: TLSv1.3 through Cloudflare,
 with the timer intact. User flow is token plus `.elf` injection.
 
 Names resolve in cost tiers (param.sfo, appmeta, app cache, baked
-table, live title database) with raw titleId only as last resort;
-on-console proof for sandboxed processes is still pending.
-
-Cover art ships as external-URL assets from a hosted icon pack
-(`art_base_url` plus lowercase titleId); see `deploy/ARTWORK.md`.
-End-to-end art on a profile is still pending a hosted pack.
+table, Sony TMDB, raw titleId last resort). Cover art uses Sony CDN
+icon URLs from the same lookup, falling back to a hosted pack or
+uploaded app assets. On-console proof for sandboxed processes and
+rendered-art proof are still pending.
 
 A background daemon that runs **entirely on your jailbroken PS4** and posts what you're
 playing to your Discord profile as Rich Presence — "Playing *Call of Duty: Black
