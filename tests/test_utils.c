@@ -456,7 +456,12 @@ static void test_appdb(void) {
     assert(mkdir(meta, 0700) == 0);
     sqlite3 *s = NULL;
     (void)sqlite3_initialize();
-    assert(sqlite3_open_v2(db, &s, SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE, NULL) == SQLITE_OK);
+    int rc = sqlite3_open_v2(db, &s, SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE, NULL);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "DEBUG sqlite3_open_v2 rc=%d db=%s err=%s\n", rc, db, s ? sqlite3_errmsg(s) : "null");
+        sqlite3_close(s);
+    }
+    assert(rc == SQLITE_OK);
     assert(sqlite3_exec(s, "CREATE TABLE tbl_appbrowse(titleId TEXT, titleName TEXT);", 0, 0, 0) == SQLITE_OK);
     assert(sqlite3_exec(s, "INSERT INTO tbl_appbrowse VALUES('CUSA11995','Marvel''s Spider-Man');", 0, 0, 0) == SQLITE_OK);
     assert(sqlite3_exec(s, "CREATE TABLE tbl_appinfo(titleId TEXT, key TEXT, val TEXT);", 0, 0, 0) == SQLITE_OK);
