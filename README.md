@@ -30,7 +30,7 @@ playing to Discord: name, cover art, timer. No PC at runtime.</p>
 
 After a reboot: re-jailbreak, then enable AutoRun for `orbisrpc` in
 Payload Guest once — it starts itself on every jailbreak after that.
-
+⚠️Firmware note: Currently tested only on PS4 firmware 9.00. Other firmware versions are not yet confirmed.
 ## What you get
 
 | | |
