@@ -14,7 +14,7 @@ ORBIS_SRCS := ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c ../orbi
 INST_SRCS := ../installer/icfg.c
 # SQLite amalgamation: -O0 for host iteration speed (payload uses -O2).
 SQLITE_DIR := ../third_party/sqlite/sqlite-amalgamation-3510100
-SQLITE_FLAGS := -O0 -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION -DSQLITE_OMIT_DEPRECATED -I$(SQLITE_DIR)
+SQLITE_FLAGS := -O0 -DSQLITE_OMIT_LOAD_EXTENSION -DSQLITE_OMIT_DEPRECATED -I$(SQLITE_DIR) # SQLITE_THREADSAFE=1 (default) required: SQLITE_THREADSAFE=0 breaks sqlite3_open_v2 on the ubuntu runner
 
 ORBIS_OBJS := $(patsubst ../orbisrpc/%.c,$(OBJDIR)/orbis_%.o,$(ORBIS_SRCS))
 INST_OBJS := $(patsubst ../installer/%.c,$(OBJDIR)/inst_%.o,$(INST_SRCS))
