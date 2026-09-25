@@ -455,6 +455,7 @@ static void test_appdb(void) {
     snprintf(meta, sizeof meta, "%s/appmeta", dir);
     assert(mkdir(meta, 0700) == 0);
     sqlite3 *s = NULL;
+    (void)sqlite3_initialize();
     assert(sqlite3_open_v2(db, &s, SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE, NULL) == SQLITE_OK);
     assert(sqlite3_exec(s, "CREATE TABLE tbl_appbrowse(titleId TEXT, titleName TEXT);", 0, 0, 0) == SQLITE_OK);
     assert(sqlite3_exec(s, "INSERT INTO tbl_appbrowse VALUES('CUSA11995','Marvel''s Spider-Man');", 0, 0, 0) == SQLITE_OK);
