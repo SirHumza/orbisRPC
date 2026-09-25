@@ -1,0 +1,30 @@
+build/
+*.o
+*.err
+*.elf
+*.fself
+*.prx
+*.oelf
+/tmp/
+.DS_Store
+config/config.ps4.json
+plugin/build/
+tests/test_utils
+config/icons/*
+!config/icons/logo.png
+
+# installer artifacts
+*.pkg
+installer/x64/
+installer/eboot.bin
+installer/pkg.gp4
+installer/sce_sys/param.sfo
+build-sdk/
+
+# installer build outputs
+installer/x64/
+installer/eboot.bin
+installer/pkg.gp4
+installer/assets/daemon.elf
+installer/assets/evict.elf
+installer/sce_sys/param.sfo

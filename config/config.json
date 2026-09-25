@@ -1,0 +1,8 @@
+{
+  "token": "SET_ME",
+  "application_id": "1536977374795538532",
+  "art_base_url": "https://raw.githubusercontent.com/SirHumza/orbisrpc-host/main/icons/",
+  "enabled": 1,
+  "poll_interval_s": 12,
+  "presence_state": "On PS4"
+}

@@ -1,0 +1,38 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: host unit tests
+        run: make -C tests clean && make -C tests test
+      - name: ASan/UBSan
+        run: make -C tests asan
+      - name: e2e contracts
+        run: python3 tests/e2e_consumer.py
+  sdk-payload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install llvm
+        run: sudo apt-get update -qq && sudo apt-get install -qy llvm lld
+      - name: fetch ps4-payload-sdk
+        run: |
+          curl -sL -o /tmp/sdk.zip https://github.com/ps4-payload-dev/sdk/releases/latest/download/ps4-payload-sdk.zip
+          mkdir -p ~/ps4-payload-sdk && unzip -q -o /tmp/sdk.zip -d ~/ps4-payload-sdk
+      - name: build SDK daemon payload
+        run: |
+          export PS4_PAYLOAD_SDK="$HOME/ps4-payload-sdk/ps4-payload-sdk"
+          export PATH="/usr/lib/llvm-14/bin:$PATH"
+          ./scripts/build_sdk.sh
+      - name: gate daemon-world linkage only
+        run: |
+          export LLVM_READELF="$(command -v llvm-readelf || echo /usr/lib/llvm-14/bin/llvm-readelf)"
+          NEEDED=$("$LLVM_READELF" -d build-sdk/orbisrpc_sdk.elf | grep NEEDED | sed 's/.*\[//;s/\]//')
+          echo "$NEEDED"
+          echo "$NEEDED" | grep -q libkernel_web.sprx || { echo "missing libkernel_web"; exit 1; }
+          echo "$NEEDED" | grep -q libSceLibcInternal.sprx || { echo "missing libSceLibcInternal"; exit 1; }
+          echo "$NEEDED" | grep -q libSceNet.sprx || { echo "missing libSceNet"; exit 1; }
+          if echo "$NEEDED" | grep -q 'libkernel\.so'; then echo "FORBIDDEN: app-world libkernel.so"; exit 1; fi
+          echo "linkage OK"
