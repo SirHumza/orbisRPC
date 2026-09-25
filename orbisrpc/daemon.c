@@ -83,6 +83,8 @@ static void sess_save(const char *tid, const char *name, int64_t started){    jl
     FILE *f = fopen("/data/orbisRPC/session.json.new", "wb");
     if(f){
         int ok = (fputs(s, f) >= 0) && (fflush(f) == 0);
+        /* force bytes to disk before rename (same as cfg_save) */
+        if(ok){ int fd = fileno(f); if(fd < 0 || fsync(fd) != 0) ok = 0; }
         if(fclose(f) != 0) ok = 0;
         if(ok) rename("/data/orbisRPC/session.json.new",
                       "/data/orbisRPC/session.json");

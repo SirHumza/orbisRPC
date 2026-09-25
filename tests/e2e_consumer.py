@@ -34,6 +34,28 @@ check("host/unit-tests", r.returncode == 0 and "utility tests passed" in r.stdou
 cfg = src("config/config.json")
 check("install/template-has-no-token", "SET_ME" in cfg)
 check("install/art-pack-default", "orbisrpc-host" in cfg)
+# 2b. no Discord-session-shaped token anywhere the PKG or repo ships.
+# Fatal when ORBISRPC_STRICT_SECRETS=1 (CI); a local working copy may hold
+# a dev token and gets a warning instead.
+tok_re = re.compile(rb"MT[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{20,}")
+leaks = []
+for rel in ("installer/installer.c", "installer/config.json",
+            "installer/assets/config.json", "config/config.json"):
+    try:
+        with open(os.path.join(ROOT, rel), "rb") as fh:
+            if tok_re.search(fh.read()):
+                leaks.append(rel)
+    except OSError:
+        pass
+if leaks:
+    _msg = "token-shaped string in " + ", ".join(leaks)
+    if os.environ.get("ORBISRPC_STRICT_SECRETS") == "1":
+        check("secrets/no-token-in-installer", False, _msg)
+    else:
+        print("WARN secrets/no-token-in-installer (set ORBISRPC_STRICT_SECRETS=1 "
+              "to fail) - " + _msg)
+else:
+    check("secrets/no-token-in-installer", True)
 # 3. single-instance lock with recycled-PID guard
 lock = src("orbisrpc/lock.c")
 check("runtime/single-lock", "lock_acquire" in src("orbisrpc/daemon.c"))

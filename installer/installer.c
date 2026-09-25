@@ -242,8 +242,8 @@ static int step_files(void){
         FILE *src = fopen("/app0/assets/config.json", "rb");
         if(src){
             fclose(src);
-            copy_file("/app0/assets/config.json", ICFG_PATH);
-            ilog("cfg-copy", 0, 0, 0);
+            int rc = copy_file("/app0/assets/config.json", ICFG_PATH);
+            ilog("cfg-copy", rc == 0 ? 0 : (errno ? errno : -1), 0, 0);
         } else {
             ilog("cfg-noasset", errno, 0, 0);
             /* Fallback: write template with pre-set token. */

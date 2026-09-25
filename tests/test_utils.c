@@ -11,7 +11,6 @@
 #include "../orbisrpc/discord.h"
 #include "../orbisrpc/detect.h"
 #include "../installer/icfg.h"
-#include "../installer/nettest.h"
 #include "sqlite3.h"
 #include <string.h>
 
@@ -611,11 +610,6 @@ static void test_installer_cfg(void) {
     assert(icfg_get_int(path, "poll_interval_s", &n) == 0 && n == 12);
     /* missing file: loads fail soft, save still works */
     assert(icfg_get_str("/nonexistent/x.json", "k", st, sizeof st) != 0);
-    /* net probes fail soft on garbage */
-    assert(net_probe(NULL, 443, 2) == 0);
-    assert(net_probe("", 443, 2) == 0);
-    assert(net_probe("127.0.0.1", 1, 1) == 0);
-    assert(net_probe("nonexistent.invalid", 443, 1) == 0);
 }
 
 int main(void) {

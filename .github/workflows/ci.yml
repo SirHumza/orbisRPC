@@ -11,6 +11,8 @@ jobs:
         run: make -C tests asan
       - name: e2e contracts
         run: python3 tests/e2e_consumer.py
+        env:
+          ORBISRPC_STRICT_SECRETS: "1"
   sdk-payload:
     runs-on: ubuntu-latest
     steps:

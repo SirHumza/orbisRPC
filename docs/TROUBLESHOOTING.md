@@ -28,12 +28,12 @@ predates the fix — reinstall.
 
 ## Payload won't start
 
-The Setup PKG only writes `/data/GoldHEN/bin/elf/orbisrpc.bin` — it never
-launches anything. Start it from GoldHEN's payload menu, or enable AutoRun
-for `orbisrpc` once so it boots with every jailbreak.
+The Setup PKG only writes `/data/payloads/orbisrpc.bin` — it never
+launches anything. Start it from Payload Guest (GoldHEN's payload menu),
+or enable AutoRun for `orbisrpc` once so it boots with every jailbreak.
 
 Manual injection (see `injecting.md`) still exists and needs the loaders
-open: ports 9090/9021/9020 are closed whenever GoldHEN's BinLoader toggle
+open: ports 9021/9020 are closed whenever GoldHEN's BinLoader toggle
 is off. Flip it in GoldHEN's menu. Reboot wipes jailbreak + daemon
 (RAM-only), so re-jailbreak first.
 
