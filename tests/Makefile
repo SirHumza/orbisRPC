@@ -1,5 +1,6 @@
 CC ?= cc
-CFLAGS += -std=c11 -Wall -Wextra -Werror -DHEALTH_TESTABLE -I../orbisrpc -I../third_party/mbedtls/include -I$(SQLITE_DIR)
+# Host tests target POSIX systems (glibc under -std=c11 hides fileno/strdup/etc).
+CFLAGS += -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -DHEALTH_TESTABLE -I../orbisrpc -I../third_party/mbedtls/include -I$(SQLITE_DIR)
 
 TARGET := test_utils
 OBJDIR := .objs
