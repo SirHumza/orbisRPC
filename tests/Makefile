@@ -19,13 +19,13 @@ SQLITE_FLAGS := -O2 -I$(SQLITE_DIR) # clean default compile; OMIT/THREADSAFE=0 o
 ORBIS_OBJS := $(patsubst ../orbisrpc/%.c,$(OBJDIR)/orbis_%.o,$(ORBIS_SRCS))
 INST_OBJS := $(patsubst ../installer/%.c,$(OBJDIR)/inst_%.o,$(INST_SRCS))
 MBEDTLS_OBJS := $(patsubst $(MBEDTLS_DIR)/%.c,$(OBJDIR)/mbed_%.o,$(MBEDTLS_SRCS))
-TEST_OBJS := $(OBJDIR)/test_utils.o $(ORBIS_OBJS) $(INST_OBJS) $(MBEDTLS_OBJS) $(OBJDIR)/sqlite3.o
+TEST_OBJS := $(OBJDIR)/test_utils.o $(ORBIS_OBJS) $(INST_OBJS) $(MBEDTLS_OBJS)
 
 ASAN_FLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
 ASAN_ORBIS_OBJS := $(patsubst ../orbisrpc/%.c,$(ASAN_OBJDIR)/orbis_%.o,$(ORBIS_SRCS))
 ASAN_INST_OBJS := $(patsubst ../installer/%.c,$(ASAN_OBJDIR)/inst_%.o,$(INST_SRCS))
 ASAN_MBEDTLS_OBJS := $(patsubst $(MBEDTLS_DIR)/%.c,$(ASAN_OBJDIR)/mbed_%.o,$(MBEDTLS_SRCS))
-ASAN_OBJS := $(ASAN_OBJDIR)/test_utils.o $(ASAN_ORBIS_OBJS) $(ASAN_INST_OBJS) $(ASAN_MBEDTLS_OBJS) $(ASAN_OBJDIR)/sqlite3.o
+ASAN_OBJS := $(ASAN_OBJDIR)/test_utils.o $(ASAN_ORBIS_OBJS) $(ASAN_INST_OBJS) $(ASAN_MBEDTLS_OBJS)
 
 .PHONY: all clean test asan
 
@@ -35,10 +35,10 @@ test: $(TARGET)
 	./$(TARGET)
 
 $(TARGET): $(TEST_OBJS)
-	$(CC) $(CFLAGS) -o $@ $(TEST_OBJS) -lm
+	$(CC) $(CFLAGS) -o $@ $(TEST_OBJS) -lsqlite3 -lm
 
 asan: $(ASAN_OBJS)
-	$(CC) $(CFLAGS) $(ASAN_FLAGS) -o test_utils_asan $(ASAN_OBJS) -lm
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) -o test_utils_asan $(ASAN_OBJS) -lsqlite3 -lm
 	./test_utils_asan
 
 $(OBJDIR):
