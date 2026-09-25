@@ -172,7 +172,7 @@ static char *https_get_once(const char *host, const char *path,
     if(tls_write(t, req, (size_t)rl) < 0){ tls_free(t); return NULL; }
     /* Read raw response (headers + body) up to header cap + body cap. */
     size_t rawcap = UPD_HDR_MAX + cap;
-    char *raw = (char*)malloc(rawcap);
+    char *raw = (char*)malloc(rawcap + 1); /* +1: NUL pad when a read fills cap exactly */
     if(!raw){ tls_free(t); return NULL; }
     size_t rl2 = 0;
     int64_t dl = orbis_mono_s() + UPD_DEADLINE_S + 20;
@@ -280,57 +280,6 @@ static int stage_file(const char *target, const unsigned char *data, size_t n){
     return 0;
 }
 
-/* SHA256 of a buffer, hex-encoded (64 chars + NUL). Returns 0 on success. */
-static int sha256_hex(const unsigned char *data, size_t n, char out[65]){
-    unsigned char dig[32];
-    mbedtls_sha256_context sc;
-    mbedtls_sha256_init(&sc);
-    int ok = mbedtls_sha256_starts(&sc, 0) == 0 &&
-             mbedtls_sha256_update(&sc, data ? data : (const unsigned char *)"", n) == 0 &&
-             mbedtls_sha256_finish(&sc, dig) == 0;
-    mbedtls_sha256_free(&sc);
-    if(!ok) return -1;
-    for(int i=0;i<32;i++) snprintf(out+2*i, 3, "%02x", dig[i]);
-    out[64]=0;
-    return 0;
-}
-
-/* Look up "<filename>" in a SHA256SUMS body ("<hash>  <name>\n" lines).
- * Returns 0 and fills want_hex when found. */
-static int sums_lookup(const char *sums, const char *filename, char want_hex[65]){
-    size_t fnlen = strlen(filename);
-    const char *p = sums;
-    while(*p){
-        while(*p==' '||*p=='\t'||*p=='\r'||*p=='\n') p++;
-        if(!*p) break;
-        if(strlen(p) < 64) break;
-        char hex[65];
-        memcpy(hex, p, 64); hex[64]=0;
-        int ishex=1;
-        for(int i=0;i<64;i++){
-            char c=hex[i];
-            if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F'))){ ishex=0; break; }
-        }
-        const char *e = strchr(p, '\n');
-        size_t linelen = e ? (size_t)(e-p) : strlen(p);
-        if(ishex && linelen > 65){
-            const char *nl = p+64;
-            while(nl<p+linelen && (*nl==' '||*nl=='\t'||*nl=='*')) nl++;
-            if((size_t)(p+linelen-(nl)) >= fnlen && !memcmp(nl, filename, fnlen) &&
-               (nl[fnlen]=='\n'||nl[fnlen]=='\r'||nl[fnlen]==' '||nl[fnlen]=='\t'||nl[fnlen]==0||nl[fnlen]=='*')){
-                for(int i=0;i<64;i++){
-                    char c=hex[i];
-                    want_hex[i]=(c>='A'&&c<='F')?(char)(c-'A'+'a'):c;
-                }
-                want_hex[64]=0;
-                return 0;
-            }
-        }
-        p = e ? e+1 : p+linelen;
-    }
-    return -1;
-}
-
 /* Download a release asset by exact name. Returns heap body or NULL. */
 static char *fetch_asset(const jl_val_t *assets, const char *want_name,
                          size_t cap, int *status, size_t *out_len){
@@ -428,12 +377,14 @@ int updater_check_and_stage(void){
                 free(sbody);
                 if(!have_manifest){ free(mbody); mbody = NULL; }
             }
-            /* Compat fallback: SHA256SUMS (unsigned but hash-pinned). */
-            char *sums = NULL;
+            /* Refuse unsigned updates outright. SHA256SUMS comes from the
+             * same release as the binaries, so it pins nothing against
+             * release-asset compromise — exactly what the signed manifest
+             * defends against (ORX-UPDATE-002). */
             if(!have_manifest){
-                sums = fetch_asset(assets, "SHA256SUMS", 65536, &status, NULL);
-                if(!sums)
-                    log_msg("updater: WARN ORX-UPDATE-002: no manifest and no SHA256SUMS; refusing unsigned update");
+                log_msg("updater: no valid signed manifest; refusing update (ORX-UPDATE-002)");
+                jl_free(r);
+                return 0;
             }
             /* Two-phase commit: download + verify EVERY asset first, then
              * activate all at once. A failure anywhere stages nothing, so
@@ -468,31 +419,8 @@ int updater_check_and_stage(void){
                     pend_fail = 1;
                     break;
                 }
-                if(have_manifest){
-                    if(manifest_check(&mf, nm->str, (unsigned char*)bin, al) != 0){
-                        log_msg("updater: asset %s not in manifest or hash mismatch; refusing (ORX-UPDATE-002)", nm->str);
-                        free(bin);
-                        pend_fail = 1;
-                        break;
-                    }
-                } else if(sums){
-                    char want[65];
-                    if(sums_lookup(sums, nm->str, want) != 0){
-                        log_msg("updater: asset %s not in SHA256SUMS; refusing", nm->str);
-                        free(bin);
-                        pend_fail = 1;
-                        break;
-                    }
-                    char got[65];
-                    if(sha256_hex((unsigned char*)bin, al, got) != 0 || strcmp(got, want) != 0){
-                        log_msg("updater: asset %s hash mismatch; refusing", nm->str);
-                        free(bin);
-                        pend_fail = 1;
-                        break;
-                    }
-                } else {
-                    /* No manifest and no SHA256SUMS: refuse unsigned bytes. */
-                    log_msg("updater: asset %s refused: no trust anchor (ORX-UPDATE-002)", nm->str);
+                if(manifest_check(&mf, nm->str, (unsigned char*)bin, al) != 0){
+                    log_msg("updater: asset %s not in manifest or hash mismatch; refusing (ORX-UPDATE-002)", nm->str);
                     free(bin);
                     pend_fail = 1;
                     break;
@@ -519,7 +447,6 @@ int updater_check_and_stage(void){
                 log_msg("updater: incomplete set; staged nothing (versions stay matched)");
             }
             for(int pi = 0; pi < pend_n; pi++) free(pend[pi].bin);
-            free(sums);
             free(mbody);
         }
     }

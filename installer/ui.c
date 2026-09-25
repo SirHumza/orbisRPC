@@ -113,39 +113,6 @@ int ui_ok(const char *msg){
     return 0;
 }
 
-/* Yes/No dialog. Returns 1 (Yes) or 0 (No/closed).
- * The dialog uses YESNO_FOCUS_NO which focuses the "No" button.
- * On this console, Circle=confirm and X=back. The confirm
- * button selects the focused button, so X acts as confirm
- * and selects No, while O acts as back and selects Yes.
- * Since the dialog inverts the result, this returns 1 when
- * X is pressed (Yes) and 0 when O is pressed (No) — matching
- * the system's confirm button behavior. Kept for future use. */
-int ui_confirm(const char *msg){
-    OrbisMsgDialogParam param;
-    OrbisMsgDialogUserMessageParam um;
-    OrbisMsgDialogResult res;
-    memset(&res, 0, sizeof res);
-    sceMsgDialogTerminate();
-    if(sceMsgDialogInitialize() < 0) return -1;
-    base_init(&param);
-    memset(&um, 0, sizeof um);
-    um.msg = msg;
-    /* YESNO_FOCUS_NO focuses the "No" button. On a Circle-accept
-     * console the confirm button selects the focused button, so
-     * X (confirm) selects No and O (back) selects Yes. The
-     * result is inverted: X→buttonId=NO→returns 1 (Yes). */
-    um.buttonType = ORBIS_MSG_DIALOG_BUTTON_TYPE_YESNO_FOCUS_NO;
-    param.userMsgParam = &um;
-    if(sceMsgDialogOpen(&param) < 0){ sceMsgDialogTerminate(); return -1; }
-    while(sceMsgDialogUpdateStatus() != ORBIS_COMMON_DIALOG_STATUS_FINISHED)
-        sceKernelUsleep(20000);
-    sceMsgDialogClose();
-    sceMsgDialogGetResult(&res);
-    sceMsgDialogTerminate();
-    return res.buttonId == ORBIS_MSG_DIALOG_BUTTON_ID_YES;
-}
-
 static int progress_open = 0;
 
 int ui_progress_open(const char *msg){

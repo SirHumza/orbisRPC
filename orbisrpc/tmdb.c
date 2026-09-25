@@ -281,20 +281,19 @@ int tmdb_resolve(const char *titleId, char *name, size_t name_cap,
             return name[0] ? 0 : -1;
         }
     }
-    /* Live Sony CDN first (TMDB over TLS; plain HTTP is blocked
-     * on-console and handled inside http_get/https fallback below).
-     * No baked tables: CUSA code + Sony CDN is the source of truth. */
+    /* Live Sony CDN over TLS first (plain HTTP is blocked on jailbroken
+     * consoles — http_get below is last-resort only). No baked tables:
+     * CUSA code + Sony CDN is the source of truth. */
     char path[128];
     if(tmdb_path(titleId, path, sizeof path) != 0) return -1;
     static char body[TMDB_BODY_MAX];
     int status = 0;
-    int n = http_get(TMDB_HOST, path, body, sizeof body, &status);
+    int n = https_get_tmdb(path, body, sizeof body, &status);
+    if(n > 0) log_msg("tmdb: live via https for %s", titleId);
     if(n <= 0){
-        /* Port 80 is blocked from jailbroken consoles; Sony also answers
-         * the same paths over TLS (443). Try HTTPS before giving up so
-         * new installs resolve live like everything else. */
-        n = https_get_tmdb(path, body, sizeof body, &status);
-        if(n > 0) log_msg("tmdb: live via https for %s", titleId);
+        /* Plain HTTP (port 80): blocked from jailbroken consoles, so this
+         * burns the connect timeout before giving up — keep it last. */
+        n = http_get(TMDB_HOST, path, body, sizeof body, &status);
     }
     if(n <= 0){ log_msg("tmdb: fetch fail status=%d", status); return -1; }
     char iname[128] = "", iicon[256] = "";

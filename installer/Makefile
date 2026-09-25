@@ -68,8 +68,8 @@ $(INTDIR)/jsonlite.o: orbisrpc/jsonlite.c
 	$(CC) $(CFLAGS) -o $@ $<
 
 # Stage the daemon + evict payloads + config into the app image.
-# config.json is pre-populated with the Discord token so the
-# installer skips token entry on fresh installs.
+# config.json carries the SET_ME placeholder; a pre-seeded valid token
+# (kept out of the repo) makes the installer skip token entry.
 installer/assets/daemon.elf: build-sdk/orbisrpc_sdk.elf
 	cp $< $@
 installer/assets/evict.elf: build-sdk/evict.elf

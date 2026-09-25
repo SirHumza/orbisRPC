@@ -2,6 +2,8 @@
   <img src="config/icons/logo.png" width="420" alt="orbisRPC">
 </p>
 
+# orbisRPC — Discord Rich Presence for PS4 (GoldHEN RPC)
+
 <p align="center">
   <a href="https://github.com/SirHumza/orbisRPC/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/version-1.0.0-ffd800?style=flat-square" alt="version"></a>
   <img src="https://img.shields.io/badge/PS4-GoldHEN-003791?style=flat-square" alt="PS4 GoldHEN">
@@ -20,22 +22,24 @@ playing to Discord: name, cover art, timer. No PC at runtime.</p>
 1. Grab `OrbisRPC-Setup-1.0.0.pkg` from the
    [Releases page](https://github.com/SirHumza/orbisRPC/releases/tag/v1.0.0)
    and install it with Package Installer.
-2. Open **orbisRPC Setup** → say Yes. It drops the daemon into GoldHEN's
-   `bin/elf` and saves your Discord token.
-3. Start **orbisrpc** from GoldHEN's payload menu, launch a game, watch Discord.
+2. Open **orbisRPC Setup**. It stages `orbisrpc.bin` + `evict.elf` in
+   `/data/payloads`, writes `/data/orbisRPC/config.json`, evicts any old
+   daemon, then asks for your Discord token.
+3. Launch **orbisrpc** from Payload Guest (GoldHEN's payload menu),
+   launch a game, watch Discord.
 
-After a reboot: re-jailbreak, then enable AutoRun for `orbisrpc` in GoldHEN's
-payload menu once — it starts itself on every jailbreak after that.
+After a reboot: re-jailbreak, then enable AutoRun for `orbisrpc` in
+Payload Guest once — it starts itself on every jailbreak after that.
 
 ## What you get
 
 | | |
 |---|---|
-| 🎮 **Any game, no lists** | Names resolve from your console's own database — CUSA, PPSA, indies, all covered with zero per-game setup. |
+| 🎮 **Any game, no lists** | Names resolve from your console's metadata (SFO, app.xml) plus Sony's TMDB — CUSA, PPSA, indies, zero per-game setup. |
 | 🖼️ **Real cover art** | Game art served per title, PlayStation logo when idle. |
 | ⏱️ **True timers** | Survive reconnects and restarts, resume across quick game switches. |
 | 🧠 **Self-learning** | First-seen titles are remembered, so later boots resolve instantly. |
-| 🔄 **Self-updating** | Signed daemon updates with boot rollback. No reinstall treadmill. |
+| 🔄 **Self-updating** | Daemon updates land from GitHub releases with automatic rollback. No reinstall treadmill. |
 | 📦 **One-tap installer** | Setup PKG: install → token → payload in place. |
 
 ## How it works
@@ -45,7 +49,7 @@ PS4 (GoldHEN)                              Discord
 ┌─────────────────────────┐      ┌──────────────────┐
 │ orbisRPC daemon         │ TLS  │  your profile    │
 │  sandbox scan → game ID │ ◄──► │  Playing Game    │
-│  app.db → display name  │      │  [cover] [timer] │
+│  metadata/TMDB → name   │      │  [cover] [timer] │
 └─────────────────────────┘      └──────────────────┘
 ```
 

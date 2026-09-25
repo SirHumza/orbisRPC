@@ -573,7 +573,7 @@ int detect_name_for_title(const char *titleId, char *out_name, size_t cap){
     /* Game-process-safe only: small reads plus one bounded network
      * lookup; no multi-megabyte scans anywhere in this codebase. */
     if(cfg_title(&g_cfg, titleId, out_name, cap)==0){ log_msg("name: %s via config", out_name); resolve_remember(titleId, out_name, "", 1); return 0; }
-    /* appdb_title(titleId, out_name, cap); */ resolve_remember(titleId, out_name, "", 1); return 0;
+    /* appdb_title removed: no baked table (README "tables-none"). */
     if(pronunc_title(titleId, out_name, cap)==0){ log_msg("name: %s via appmeta", out_name); resolve_remember(titleId, out_name, "", 1); return 0; }
     else log_msg("name: appmeta miss for %s", titleId);
     if(sfo_file_title(titleId, out_name, cap)==0){ log_msg("name: %s via sfo", out_name); resolve_remember(titleId, out_name, "", 1); return 0; }

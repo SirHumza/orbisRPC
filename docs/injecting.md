@@ -65,13 +65,7 @@ GoldHEN's BinLoader arms **once**. Any empty port check (`connect_ex`,
 arm** — the real payload then arrives at a dead listener. Sequence is
 always: tap → say go → fire immediately → verify. Never probe first.
 
-## Method 3 — in-app injector
-
-The OrbisRPC setup app injects over loopback itself
-(`127.0.0.1:9020`, fallback `9090`) from its menu. Needs a listening
-loader exactly like Method 2.
-
-## Method 4 — sender page (no PC tools)
+## Method 3 — sender page (no PC tools)
 
 `https://SirHumza.github.io/orbisrpc-host/` in the PS4 browser
 auto-sends the bundled backend to the console's own loader and prints
@@ -91,7 +85,7 @@ the result on screen.
 
 | Symptom | Meaning | Fix |
 |---|---|---|
-| `Connection refused` on 9020/9090 | No listener armed | Tap BinLoader / open payloader page, retry instantly |
+| `Connection refused` on 9021/9020 | No listener armed | Tap BinLoader / open payloader page, retry instantly |
 | `payload launched successfully` then silence, no log | Loader segfault (see above) | Update GoldHEN ≥ v2.4b18.5, use BinLoader server |
 | `Error handling payload` | Loader rejected the bytes | Re-check file integrity (`shasum`), resend |
 | Log exists but `FATAL: token rejected (4004)` | Token rotated/dead | Fresh token into `/data/orbisRPC/config.json`, relaunch |
