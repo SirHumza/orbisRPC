@@ -1,4 +1,5 @@
 /* jsonlite.c */
+#define _POSIX_C_SOURCE 200809L /* strdup must be visible under -std=c11 (glibc) */
 #include "jsonlite.h"
 #include <stdlib.h>
 #include <string.h>
@@ -44,7 +45,9 @@ static jl_val_t *parse_string(jl_parse_t *p) {
                     unsigned cp=0; for(int i=0;i<4;i++){char h=*p->cur++;
                         cp<<=4; if(h>='0'&&h<='9')cp|=(h-'0'); else if(h>='a'&&h<='f')cp|=(h-'a'+10);
                         else if(h>='A'&&h<='F')cp|=(h-'A'+10); else {p->err=1;break;}}
-                    if(p->err)break; char outb[5]; int on=0; if(cp<0x80)outb[on++]=cp;
+                    if(p->err)break;
+                    char outb[5]; int on=0;
+                    if(cp<0x80)outb[on++]=cp;
                     else if(cp<0x800){outb[on++]=(char)(0xC0|(cp>>6));outb[on++]=(char)(0x80|(cp&0x3F));}
                     else {outb[on++]=(char)(0xE0|(cp>>12));outb[on++]=(char)(0x80|((cp>>6)&0x3F));outb[on++]=(char)(0x80|(cp&0x3F));}
                     if(len+(size_t)on+1>cap){
@@ -255,7 +258,8 @@ static int emit(jl_val_t *v, char **out, size_t *cap, size_t *len){
     switch(v->type){
         case JL_NULL: { size_t l=4; if(ensure_capacity(out,cap,*len+l+1)<0)return -1; memcpy(*out+*len,"null",4);*len+=4; return 0; }
         case JL_BOOL: { const char*s=v->num?"true":"false"; size_t l=strlen(s);
-            if(ensure_capacity(out,cap,*len+l+1)<0)return -1; memcpy(*out+*len,s,l);*len+=l; return 0; }
+            if(ensure_capacity(out,cap,*len+l+1)<0)return -1;
+            memcpy(*out+*len,s,l);*len+=l; return 0; }
         case JL_NUMBER: if(v->num_is_int) snprintf(buf,sizeof buf,"%lld",(long long)v->inum); else snprintf(buf,sizeof buf,"%.17g",v->num); break;
         case JL_STRING: return escstr(v->str,out,cap,len);
         case JL_ARRAY:{
