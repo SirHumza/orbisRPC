@@ -449,7 +449,7 @@ static void test_cfg_titles(void) {
 }
 
 static void test_appdb(void) {
-    char dir[64], db[96], meta[96], pj[128];
+    char dir[64], db[96], meta[96], pj[160];
     assert(make_tmpdir(dir, sizeof dir) == 0);
     snprintf(db, sizeof db, "%s/app.db", dir);
     snprintf(meta, sizeof meta, "%s/appmeta", dir);
