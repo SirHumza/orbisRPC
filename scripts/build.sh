@@ -42,7 +42,7 @@ CFLAGS="--target=$TARGET -fPIC -std=gnu11 -Wall -Wno-unused \
         -DMBEDTLS_NO_PLATFORM_ENTROPY \
         -isystem $SDK/include -Ithird_party/mbedtls/include"
 LIBS="-lc -lkernel -lSceNet -lSceNetCtl -lSceSysmodule \
-      -lSceUserService -lSceAppInstUtil -lSceAppContent"
+      -lSceUserService"
 LDFLAGS="-m elf_x86_64 -pie --eh-frame-hdr -L$SDK/lib $LIBS $SDK/lib/crt1.o --script $SDK/link.x"
 export OO_PS4_TOOLCHAIN="$SDK"
 OUT="$ROOT/build"; mkdir -p "$OUT"

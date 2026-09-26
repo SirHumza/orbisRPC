@@ -25,11 +25,12 @@ playing to Discord: name, cover art, timer. No PC at runtime.</p>
 2. Open **orbisRPC Setup**. It stages `orbisrpc.bin` + `evict.elf` in
    `/data/payloads`, writes `/data/orbisRPC/config.json`, evicts any old
    daemon, then asks for your Discord token.
-3. Launch **orbisrpc** from Payload Guest (GoldHEN's payload menu),
-   launch a game, watch Discord.
+3. Open **Payloads** in GoldHEN settings, go to `orbisrpc.bin`, press
+   **Square** to enable AutoRun, then **X** once to run it. Launch a
+   game, watch Discord.
 
-After a reboot: re-jailbreak, then enable AutoRun for `orbisrpc` in
-Payload Guest once — it starts itself on every jailbreak after that.
+After a reboot: it auto-runs on every jailbreak if you selected
+AutoRun — no need to launch it again.
 
 ## What you get
 

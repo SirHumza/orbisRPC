@@ -249,7 +249,7 @@ static int step_files(void){
             /* Fallback: write template with pre-set token. */
             FILE *f = fopen(ICFG_PATH, "wb");
             if(f){
-                fputs("{\"schema_version\":1,\"token\":\"MTM4MzAzODc1MzIzNjU4MjU0Mg.GaRPLA.Ehk_GTPSNxLZIIbCMYknnXmbv7mOK4w0ZRQZBk\",\"presence_state\":\"On PS4\"}", f);
+                fputs("{\"schema_version\":1,\"token\":\"SET_ME\",\"presence_state\":\"On PS4\"}", f);
                 fclose(f);
             }
         }
@@ -277,7 +277,7 @@ static int step_files(void){
             if(!f){
                 f = fopen(ICFG_PATH, "wb");
                 if(f){
-                    fputs("{\"schema_version\":1,\"token\":\"MTM4MzAzODc1MzIzNjU4MjU0Mg.GaRPLA.Ehk_GTPSNxLZIIbCMYknnXmbv7mOK4w0ZRQZBk\",\"presence_state\":\"On PS4\"}", f);
+                    fputs("{\"schema_version\":1,\"token\":\"SET_ME\",\"presence_state\":\"On PS4\"}", f);
                     fclose(f);
                 }
             } else {
