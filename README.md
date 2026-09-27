@@ -32,6 +32,10 @@ playing to Discord: name, cover art, timer. No PC at runtime.</p>
 After a reboot: it auto-runs on every jailbreak if you selected
 AutoRun — no need to launch it again.
 
+⚠️ Firmware note: currently tested on PS4 firmware 9.00. Other firmware
+versions are supported by design (runtime capability probing, no hardcoded
+offsets) but are not yet confirmed on hardware — please report results.
+
 ## What you get
 
 | | |
