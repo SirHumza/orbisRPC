@@ -52,43 +52,8 @@ static int is_title_prefix(const char *n);
  * A launched game shows up as an "eboot.bin" process; its identity comes
  * from the freshest savedata dir (gameplay writes saves continuously).
  * Both facts verified live via probes before wiring them in. */
-/* Count eboot.bin processes. A change means launch/close: callers drop
- * stale state immediately instead of waiting out debounce windows. */
-int detect_eboot_count(void){
-    int mib[4] = { 1, 14, 8, 0 };
-    size_t sz = 0;
-    int n = 0;
-    if(sysctl(mib, 4, NULL, &sz, NULL, 0) != 0) return -1;
-    static unsigned char buf[256*1024];
-    if(sz > sizeof buf) return -1;
-    if(sysctl(mib, 4, buf, &sz, NULL, 0) != 0) return -1;
-    size_t off = 0;
-    while(off + 4 <= sz){
-        int recsz = *(int *)(buf + off);
-        if(recsz <= 0 || off + (size_t)recsz > sz) break;
-        if(recsz >= 479 && !memcmp(buf + off + 447, "eboot.bin", 10))
-            n++;
-        off += (size_t)recsz;
-    }
-    return n;
-}
-static int proc_has_eboot(void){
-    int mib[4] = { 1, 14, 8, 0 };
-    size_t sz = 0;
-    if(sysctl(mib, 4, NULL, &sz, NULL, 0) != 0) return -1;
-    static unsigned char buf[256*1024];
-    if(sz > sizeof buf) return -1;
-    if(sysctl(mib, 4, buf, &sz, NULL, 0) != 0) return -1;
-    size_t off = 0;
-    while(off + 4 <= sz){
-        int recsz = *(int *)(buf + off);
-        if(recsz <= 0 || off + (size_t)recsz > sz) return -1;
-        if(recsz >= 479 && !memcmp(buf + off + 447, "eboot.bin", 10))
-            return 1;
-        off += (size_t)recsz;
-    }
-    return 0;
-}
+/* Count eboot.bin processes etc. live below (shared sysctl fallback,
+ * outside the SDK-only ifdef so both builds probe identically). */
 
 /* Sandbox mounts: /mnt/sandbox/<TITLE>_000 exists exactly while that
  * title's game process lives. This is authoritative foreground identity
@@ -240,6 +205,52 @@ static long scan_newest_save(char *out, size_t cap){    static const char *users
 }
 #endif
 
+/* --- shared sysctl fallback (payload-SDK builds only) ------------------ */
+/* OpenOrbis SDK ships no <sys/sysctl.h>, so this probe lives in SDK builds;
+ * OpenOrbis builds fall back to the UserService foreground user instead.
+ * Both builds probe ShellCoreUtil first (see detect_foreground_active). */
+#ifdef ORBISRPC_SDK_PAYLOAD
+
+/* Count eboot.bin processes. A change means launch/close: callers drop
+ * stale state immediately instead of waiting out debounce windows. */
+int detect_eboot_count(void){
+    int mib[4] = { 1, 14, 8, 0 };
+    size_t sz = 0;
+    int n = 0;
+    if(sysctl(mib, 4, NULL, &sz, NULL, 0) != 0) return -1;
+    static unsigned char buf[256*1024];
+    if(sz > sizeof buf) return -1;
+    if(sysctl(mib, 4, buf, &sz, NULL, 0) != 0) return -1;
+    size_t off = 0;
+    while(off + 4 <= sz){
+        int recsz = *(int *)(buf + off);
+        if(recsz <= 0 || off + (size_t)recsz > sz) break;
+        if(recsz >= 479 && !memcmp(buf + off + 447, "eboot.bin", 10))
+            n++;
+        off += (size_t)recsz;
+    }
+    return n;
+}
+static int proc_has_eboot(void){
+    int mib[4] = { 1, 14, 8, 0 };
+    size_t sz = 0;
+    if(sysctl(mib, 4, NULL, &sz, NULL, 0) != 0) return -1;
+    static unsigned char buf[256*1024];
+    if(sz > sizeof buf) return -1;
+    if(sysctl(mib, 4, buf, &sz, NULL, 0) != 0) return -1;
+    size_t off = 0;
+    while(off + 4 <= sz){
+        int recsz = *(int *)(buf + off);
+        if(recsz <= 0 || off + (size_t)recsz > sz) return -1;
+        if(recsz >= 479 && !memcmp(buf + off + 447, "eboot.bin", 10))
+            return 1;
+        off += (size_t)recsz;
+    }
+    return 0;
+}
+
+#endif /* ORBISRPC_SDK_PAYLOAD (sysctl fallback) */
+
 static int s_user_inited = 0;
 static int s_user_ok = 0;
 static int user_init(void){
@@ -273,7 +284,7 @@ static int scu_init(void){
     if(s_scu_tried) return s_is_app_launched != NULL;
     s_scu_tried = 1;
     void *h = dlopen("libSceShellCoreUtil.sprx", 0);
-    if(!h){ log_msg("ShellCoreUtil unavailable (dlopen fail); using foreground-user fallback"); return 0; }
+    if(!h){ log_msg("ShellCoreUtil unavailable (dlopen fail); using sysctl eboot scan"); return 0; }
     s_is_app_launched = (shellcore_isapplaunched_fn)(uintptr_t)dlsym(h, "sceShellCoreUtilIsAppLaunched");
     log_msg("ShellCoreUtil IsAppLaunched %s", s_is_app_launched ? "resolved" : "unavailable (dlsym fail)");
     return s_is_app_launched != NULL;
@@ -281,24 +292,20 @@ static int scu_init(void){
 
 /* --- foreground-active: the core "a game is running" signal ---------- */
 int detect_foreground_active(void){
+    /* ShellCoreUtil dlopen works on all firmwares (libkernel exports
+     * dlopen/dlsym directly). Firmware-independent — preferred over the
+     * fragile sysctl kinfo_proc scan which assumes a hardcoded process-table
+     * layout (offset 447, recsz>=479) that differs across PS4 firmware versions. */
+    if(scu_init() && s_is_app_launched){
+        return s_is_app_launched() ? 1 : 0;   /* 0 when sitting on the home screen */
+    }
+    /* Fallback depends on toolchain capability: SDK builds scan the
+     * process table; OpenOrbis builds ask UserService for the
+     * foreground user. Both fail closed (inactive) on error. */
 #ifdef ORBISRPC_SDK_PAYLOAD
-    /* Spawned processes see no ShellCoreUtil/UserService; the eboot.bin
-     * process itself is the signal (system has no other eboot). */
     return proc_has_eboot();
 #else
-    if(scu_init() && s_is_app_launched){
-        int on = s_is_app_launched();
-        return (on != 0) ? 1 : 0;   /* 0 when sitting on the home screen */
-    }
-#endif
-    /* fallback: foreground user exists. If UserService itself failed,
-     * report inactive instead of guessing "playing". */
     if(user_init() != 0) return 0;
-#ifdef ORBISRPC_SDK_PAYLOAD
-    /* No UserService API in SDK builds (user_init always fails there,
-     * so this is unreachable); fail closed regardless. */
-    return 0;
-#else
     int32_t fg = -1;
     int32_t rc = sceUserServiceGetForegroundUser(&fg);
     if(rc != 0){ log_msg("GetForegroundUser err %d", rc); return 0; }

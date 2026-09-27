@@ -61,7 +61,7 @@ echo "ELF -> $OUT/orbisrpc.elf ($(stat -f%z "$OUT/orbisrpc.elf" 2>/dev/null || s
 MODE="${1:-all}"
 if [ "$MODE" = "fself" ] || [ "$MODE" = "all" ]; then
   "$SDK/bin/macos/create-fself-macos" -in="$OUT/orbisrpc.elf" \
-      -out="$OUT/orbisrpc.fself" --eboot "$OUT/orbisrpc-eboot.bin" --paid 0x3800000000000011 || fail "fself creation"
+      -out="$OUT/orbisrpc.fself" --eboot "$OUT/orbisrpc-eboot.bin" --paid 0x3800000000000011 --authinfo 000000000000000000000000001C004000FF000000000080000000000000000000000000000000000000008000400040000000000000008000000000000000080040FFFF000000F000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 || fail "fself creation"
   echo "FSELF -> $OUT/orbisrpc.fself"
   echo "  (GoldHEN payload to deploy is $OUT/orbisrpc.elf -> /data/GoldHEN/payloads/orbisrpc.bin)"
 fi

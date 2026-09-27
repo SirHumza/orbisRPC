@@ -15,6 +15,7 @@ TOOLCHAIN   ?= $(OO_PS4_TOOLCHAIN)
 ifeq ($(TOOLCHAIN),)
 TOOLCHAIN   := /Users/mac/PS4Toolchain/OpenOrbis/PS4Toolchain
 endif
+export OO_PS4_TOOLCHAIN := $(TOOLCHAIN)
 PROJDIR     := installer
 COMMONDIR   := $(TOOLCHAIN)/samples/_common
 INTDIR      := $(PROJDIR)/x64/Debug
@@ -48,8 +49,8 @@ installer/sce_sys/param.sfo: installer/Makefile
 	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_new $@
 	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ APP_TYPE --type Integer --maxsize 4 --value 1
 	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ APP_VER --type Utf8 --maxsize 8 --value '$(VERSION)'
-	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ ATTRIBUTE --type Integer --maxsize 4 --value 0
-	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ CATEGORY --type Utf8 --maxsize 4 --value 'gd'
+	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ ATTRIBUTE --type Integer --maxsize 4 --value 32
+	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ CATEGORY --type Utf8 --maxsize 4 --value 'gde'
 	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ CONTENT_ID --type Utf8 --maxsize 48 --value '$(CONTENT_ID)'
 	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ DOWNLOAD_DATA_SIZE --type Integer --maxsize 4 --value 0
 	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ SYSTEM_VER --type Integer --maxsize 4 --value 0
@@ -59,7 +60,7 @@ installer/sce_sys/param.sfo: installer/Makefile
 
 installer/eboot.bin: $(OBJS)
 	$(LD) $(INTDIR)/*.o -o $(INTDIR)/$(PROJDIR).elf $(LDFLAGS)
-	$(TOOLCHAIN)/bin/$(CDIR)/create-fself-macos -in=$(INTDIR)/$(PROJDIR).elf -out=$(INTDIR)/$(PROJDIR).oelf --eboot "installer/eboot.bin" --paid 0x3800000000000011
+	$(TOOLCHAIN)/bin/$(CDIR)/create-fself-macos -in=$(INTDIR)/$(PROJDIR).elf -out=$(INTDIR)/$(PROJDIR).oelf --eboot "installer/eboot.bin" --paid 0x3800000000000011 --authinfo 000000000000000000000000001C004000FF000000000080000000000000000000000000000000000000008000400040000000000000008000000000000000080040FFFF000000F000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 
 $(INTDIR)/%.o: $(PROJDIR)/%.c
 	$(CC) $(CFLAGS) -o $@ $<
