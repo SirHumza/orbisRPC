@@ -150,15 +150,28 @@ static int send_identify(discord_t *d, const char *token){
     return rc < 0 ? -1 : 0;
 }
 
+const char *discord_state_name(const discord_t *d){
+    if(!d || !d->connected) return "down";
+    switch(d->state){
+    case GW_CONNECTING: return "connecting";
+    case GW_HELLO_WAIT: return "hello_wait";
+    case GW_IDENTIFYING: return "identifying";
+    case GW_READY: return "ready";
+    default: return "down";
+    }
+}
+
 int discord_connect(discord_t *d, const char *token){
     if(!d || !token || !token[0]) return -1;
     memset(d,0,sizeof(*d));
+    d->state = GW_CONNECTING;
     strncpy(d->token, token, sizeof d->token-1);
     d->token[sizeof d->token-1] = 0;
     char key[64]=""; make_key(key);
     int rc=ws_connect(&d->ws, GW_HOST, GW_PORT, GW_PATH, key);
     if(rc){ log_msg("ws connect fail %d",rc); return -1; }
     d->connected=1;
+    d->state = GW_HELLO_WAIT;
     int64_t now=orbis_mono_s();
     d->last_heartbeat=now; d->last_ack=now;
     /* HELLO (text frame carrying {"op":10,...}) */
@@ -190,6 +203,7 @@ int discord_connect(discord_t *d, const char *token){
         ws_close(&d->ws); d->connected=0;
         return -1;
     }
+    d->state = GW_IDENTIFYING;
     log_msg("discord: identify sent, hb=%llds",(long long)(d->hb_interval_ms/1000));
     /* READY confirms the token was accepted. `op` is the WebSocket frame
      * type; the gateway event is JSON inside — parse it, don't switch on it. */
@@ -212,6 +226,7 @@ int discord_connect(discord_t *d, const char *token){
         if(go==11){ d->last_ack=orbis_mono_s(); continue; }
         if(go==0 && is_ready(buf, (size_t)nr)){
             gw_seq(d, buf, (size_t)nr);
+            d->state = GW_READY;
             log_msg("discord: gateway ready");
             return 0;
         }
@@ -426,6 +441,10 @@ int discord_clear_presence(discord_t *d){
 
 int discord_tick(discord_t *d){
     if(!d || !d->connected) return -1;
+    /* Liveness lives in connected; state records the highest phase
+     * reached. A drop leaves state at its phase with connected=0 —
+     * observers must read through discord_state_name(), which reports
+     * any !connected session as down. */
     int64_t now=orbis_mono_s();
     long hb_s=(long)(d->hb_interval_ms/1000); if(hb_s<5)hb_s=5;
     /* gateway must ack heartbeats; 2 missed intervals means it's gone */

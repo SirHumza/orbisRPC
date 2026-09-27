@@ -620,6 +620,36 @@ static void test_installer_cfg(void) {
     assert(icfg_get_str("/nonexistent/x.json", "k", st, sizeof st) != 0);
 }
 
+static void test_daemon_state(void) {
+    char dir[64], path[96], st[32];
+    FILE *f;
+    assert(make_tmpdir(dir, sizeof dir) == 0);
+    snprintf(path, sizeof path, "%s/status.json", dir);
+    /* missing file: not running */
+    assert(icfg_daemon_state(path, 1000000, 120, st, sizeof st) == 0);
+    /* fresh heartbeat: running, state copied */
+    f = fopen(path, "wb"); assert(f);
+    fputs("{\"version\":\"1.0.0\",\"state\":\"playing\",\"title\":\"Game\",\"ts\":999990}", f);
+    fclose(f);
+    assert(icfg_daemon_state(path, 1000000, 120, st, sizeof st) == 1);
+    assert(!strcmp(st, "playing"));
+    /* stale heartbeat: not running */
+    assert(icfg_daemon_state(path, 1000200, 120, st, sizeof st) == 0);
+    /* corrupt file: not running, no crash */
+    f = fopen(path, "wb"); assert(f); fputs("not json{{{", f); fclose(f);
+    assert(icfg_daemon_state(path, 1000000, 120, st, sizeof st) == 0);
+    /* future ts (clock skew): stale-safe */
+    f = fopen(path, "wb"); assert(f); fputs("{\"ts\":2000000}", f); fclose(f);
+    assert(icfg_daemon_state(path, 1000000, 120, st, sizeof st) == 0);
+    /* ts present, state absent: fresh with "" */
+    f = fopen(path, "wb"); assert(f); fputs("{\"ts\":999999}", f); fclose(f);
+    assert(icfg_daemon_state(path, 1000000, 120, st, sizeof st) == 1);
+    assert(!strcmp(st, ""));
+    /* guards */
+    assert(icfg_daemon_state(NULL, 1000000, 120, st, sizeof st) == 0);
+    assert(icfg_daemon_state(path, 1000000, -1, st, sizeof st) == 0);
+}
+
 static void test_focus(void) {
     char tid[16];
     /* last event wins; target is the TO side of -> */
@@ -706,6 +736,7 @@ int main(void) {
     test_cfg_titles();
     test_cfg_learn();
     test_installer_cfg();
+    test_daemon_state();
     test_appdb();
     test_discord_builder();
     test_focus();

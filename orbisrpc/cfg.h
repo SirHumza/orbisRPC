@@ -31,7 +31,7 @@ typedef struct {
     char title_ids[CFG_MAX_TITLES][CFG_TITLEID_LEN];
     char title_names[CFG_MAX_TITLES][CFG_TITLENAME_LEN];
     int enabled;
-    int auto_update;       /* check GitHub releases once per boot, stage newer */
+    int auto_update;       /* DORMANT (parsed for old configs, never acted on) */
     int debug;             /* verbose debug logging (per-poll detail, no secrets) */
     int poll_interval_s;   /* game-check cadence */
     char presence_state[128];  /* activity "state" line, e.g. "On PS4" */

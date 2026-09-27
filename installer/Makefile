@@ -6,7 +6,7 @@ VERSION     := 1.0.0
 TITLE_ID    := ORPC00001
 CONTENT_ID  := IV0000-ORPC00001_00-ORBISRPCSETUP000
 
-LIBS        := -lc -lkernel -lc++ -lSceMsgDialog -lSceCommonDialog -lSceImeDialog -lSceSysmodule -lSceNet -lSceUserService -lSceSystemService -lScePad
+LIBS        := -lc -lkernel -lc++ -lSDL2 -lSDL2main -lScePigletv2VSH -lSceAudioOut -lSceVideoOut -lSceCommonDialog -lSceImeDialog -lSceSysmodule -lSceNet -lSceUserService -lSceSystemService -lScePad
 
 ASSETS      := $(wildcard installer/assets/**/*)
 LIBMODULES  := $(wildcard installer/sce_module/*)
@@ -63,6 +63,13 @@ installer/eboot.bin: $(OBJS)
 	$(TOOLCHAIN)/bin/$(CDIR)/create-fself-macos -in=$(INTDIR)/$(PROJDIR).elf -out=$(INTDIR)/$(PROJDIR).oelf --eboot "installer/eboot.bin" --paid 0x3800000000000011 --authinfo 000000000000000000000000001C004000FF000000000080000000000000000000000000000000000000008000400040000000000000008000000000000000080040FFFF000000F000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 
 $(INTDIR)/%.o: $(PROJDIR)/%.c
+	$(CC) $(CFLAGS) -o $@ $<
+
+# Embedded bitmap font (build-time rasterized; checked in but regenerable).
+installer/font.h: scripts/genfont.py
+	python3 scripts/genfont.py
+
+$(INTDIR)/ui.o: installer/ui.c installer/font.h
 	$(CC) $(CFLAGS) -o $@ $<
 
 $(INTDIR)/jsonlite.o: orbisrpc/jsonlite.c

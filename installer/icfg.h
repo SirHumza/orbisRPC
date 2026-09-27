@@ -23,5 +23,9 @@ int icfg_get_str(const char *path, const char *key, char *out, size_t cap);
 int icfg_get_int(const char *path, const char *key, long *out);
 /* Count entries in the "titles" map (learned + manual). Fail-soft 0. */
 int icfg_titles_count(const char *path);
+/* Daemon liveness from status.json: 1 fresh (state_out gets "state"),
+ * 0 missing/corrupt/stale. now = time(NULL), max_age_s ~ 120. */
+int icfg_daemon_state(const char *path, long now, long max_age_s,
+                      char *state_out, size_t state_cap);
 
 #endif

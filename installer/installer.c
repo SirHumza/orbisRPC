@@ -24,6 +24,7 @@
 #define INST_DIR "/data/orbisRPC"
 #define INST_LOG "/data/orbisRPC/install.log"
 #define PAYLOAD_BIN "/data/payloads/orbisrpc.bin"
+#define STATUS_PATH "/data/orbisRPC/status.json"
 
 /* Stage log: every copy step records errno + sizes to a file we can read
  * back over FTP. The dialog alone can't say WHICH stage failed. */
@@ -222,17 +223,19 @@ static int step_files(void){
     /* Copy daemon payload. */
     ui_progress_msg("Copying payload");
     ok = copy_file(DAEMON_ELF, PAYLOAD_BIN);
-    ilog("daemon-copy", ok, 0, 0);
+    ilogv("daemon-copy", ok, 0);
     ui_progress_set(60);
-    /* Pre-save config from PKG asset so step_token() skips on fresh install.
-     * Copy config.json from /app0/assets/config.json to /data/orbisRPC/config.json. */
+    /* Pre-save config from PKG asset on FRESH installs only. A reinstall
+     * must never clobber the existing config: it holds the token and
+     * every learned title. step_token() below handles token entry. */
     ui_progress_msg("Saving config");
     {
-        FILE *src = fopen("/app0/assets/config.json", "rb");
-        if(src){
-            fclose(src);
+        if(exists(ICFG_PATH)){
+            ilogv("cfg-keep", 0, 0);
+        } else if(exists("/app0/assets/config.json")){
             int rc = copy_file("/app0/assets/config.json", ICFG_PATH);
-            ilog("cfg-copy", rc == 0 ? 0 : (errno ? errno : -1), 0, 0);
+            ilogv("cfg-copy", rc, 0);
+            if(rc == 0) chmod(ICFG_PATH, 0600);
         } else {
             ilog("cfg-noasset", errno, 0, 0);
             /* Fallback: write template with pre-set token. */
@@ -291,7 +294,7 @@ static int step_files(void){
         if(gf){
             fprintf(gf, "%ld\n", cur + 1);
             fclose(gf);
-            ilog("gen-bump", (int)(cur + 1), 0, 0);
+            ilogv("gen-bump", cur + 1, 0);
         } else {
             ilog("gen-bump", errno ? errno : -1, 0, 0);
         }
@@ -328,8 +331,13 @@ static void step_token(void){
         }
         if(r == 0) return;
         if(token_valid(tok)){
-            r = icfg_token_save(ICFG_PATH, tok);
-            ui_ok("Config saved.");
+            if(icfg_token_save(ICFG_PATH, tok) == 0){
+                ilogv("token-saved", 0, 0);
+                ui_ok("Config saved.");
+            } else {
+                ilog("token-save", errno, 0, 0);
+                ui_ok("Could not save the token.\n\nPaste it into /data/orbisRPC/config.json over FTP instead.");
+            }
             return;
         }
         ui_ok("That doesn't look like a token.\nCheck it and try again, or cancel to skip.");
@@ -346,6 +354,22 @@ static void finish(int code){
     _exit(code);
 }
 
+/* Final screen reports what is actually true: daemon liveness comes
+ * from status.json freshness, not from the copy steps succeeding. */
+static void step_done(void){
+    char st[32] = "";
+    char msg[256];
+    if(icfg_daemon_state(STATUS_PATH, (long)time(NULL), 120, st, sizeof st)){
+        snprintf(msg, sizeof msg,
+                 "Done.\n\nDaemon is alive (%s).\nLaunch orbisrpc from the payload launcher after a reboot.", st);
+    } else {
+        snprintf(msg, sizeof msg,
+                 "Done.\n\nNo live daemon seen — normal on first install.\nLaunch orbisrpc from the payload launcher.");
+    }
+    ilogv("done-shown", 0, 0);
+    ui_ok(msg);
+}
+
 int main(void){
     /* Hide the PS4 splash first — dialogs opened while the splash
      * is visible get auto-dismissed (half-second flash) or never
@@ -353,15 +377,13 @@ int main(void){
      * run with the splash already gone, so no visible lag. */
     sceSystemServiceHideSplashScreen();
     crash_guard();
-    if(ui_init() != 0) finish(1);
+    if(ui_init() != 0){ ilogv("ui-init-fail", 0, 0); finish(1); }
     ui_ok("orbisRPC");
     if(step_assets() != 0) finish(1);
     ilogv("assets-ok", 0, 0);
     if(step_files() != 0) finish(1);
     step_token();
     ilogv("post-token", 0, 0);
-    ui_ok("Done.\n\n"
-            "Payloads in /data/payloads.\n"
-            "Launch orbisrpc from the payload launcher.");
+    step_done();
     finish(0);
 }

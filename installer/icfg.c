@@ -194,3 +194,54 @@ int icfg_get_int(const char *path, const char *key, long *out){
     jl_free(r);
     return -1;
 }
+
+/* Daemon liveness from status.json (the daemon's alive tick writes
+ * {"version","state","title","ts"}). now = time(NULL) at the caller,
+ * max_age_s = freshness bound (120 covers the 60s tick plus slack).
+ * Returns 1 fresh (state_out gets "state", "" when absent),
+ * 0 missing/corrupt/stale/unreadable. Never crashes on garbage. */
+int icfg_daemon_state(const char *path, long now, long max_age_s,
+                      char *state_out, size_t state_cap){
+    FILE *f;
+    long sz;
+    char buf[1024];
+    size_t n;
+    const char *p, *q;
+    long ts;
+    if(state_out && state_cap) state_out[0] = 0;
+    if(!path || max_age_s < 0) return 0;
+    f = fopen(path, "rb");
+    if(!f) return 0;
+    if(fseek(f, 0, SEEK_END) != 0){ fclose(f); return 0; }
+    sz = ftell(f);
+    if(sz <= 0 || sz >= (long)sizeof buf){ fclose(f); return 0; }
+    if(fseek(f, 0, SEEK_SET) != 0){ fclose(f); return 0; }
+    n = fread(buf, 1, (size_t)sz, f);
+    fclose(f);
+    if(n != (size_t)sz) return 0;
+    buf[n] = 0;
+    p = strstr(buf, "\"ts\"");
+    if(!p) return 0;
+    p = strchr(p + 4, ':');
+    if(!p) return 0;
+    ts = strtol(p + 1, NULL, 10);
+    if(ts <= 0 || ts > now || now - ts > max_age_s) return 0;
+    p = strstr(buf, "\"state\"");
+    if(p){
+        p = strchr(p + 7, ':');
+        if(p){
+            p = strchr(p + 1, '"');
+            if(p){
+                p++;
+                q = strchr(p, '"');
+                if(q && state_out && state_cap){
+                    size_t len = (size_t)(q - p);
+                    if(len >= state_cap) len = state_cap - 1;
+                    memcpy(state_out, p, len);
+                    state_out[len] = 0;
+                }
+            }
+        }
+    }
+    return 1;
+}

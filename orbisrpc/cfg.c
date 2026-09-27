@@ -15,7 +15,7 @@ void cfg_defaults(cfg_t *c) {
     memset(c, 0, sizeof(*c));
     c->schema_version = CFG_SCHEMA_VERSION;
     c->enabled = 1;
-    c->auto_update = 1;
+    c->auto_update = 0; /* dormant: network self-update removed; updates via reinstall */
     c->poll_interval_s = 12;
     strncpy(c->token, "SET_ME", sizeof(c->token)-1);
     strncpy(c->presence_state, "On PS4", sizeof(c->presence_state)-1);

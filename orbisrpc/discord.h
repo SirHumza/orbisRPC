@@ -10,9 +10,21 @@ typedef struct {
     int64_t last_ack;         /* when the gateway last acked (op 11) */
     int64_t hb_interval_ms;
     int seq;                  /* last dispatch sequence (heartbeat payload) */
-    int connected;
+    int connected;            /* 1 iff state == GW_READY (derived mirror) */
     int sent_hb;              /* at least one heartbeat sent */
+    int state;                /* gw_state_t: explicit session state */
 } discord_t;
+/* Explicit gateway state machine. GW_DOWN is 0 so a zeroed struct starts
+ * DOWN; connected==1 exactly when state==GW_READY. Deliberately no
+ * RESUME state: we always fresh-IDENTIFY (simpler, stateless recovery). */
+typedef enum {
+    GW_DOWN = 0,     /* no usable session */
+    GW_CONNECTING,   /* TCP+TLS+WebSocket handshake in flight */
+    GW_HELLO_WAIT,   /* waiting for op 10 HELLO */
+    GW_IDENTIFYING,  /* IDENTIFY sent, waiting for READY */
+    GW_READY         /* live session (connected == 1) */
+} gw_state_t;
+const char *discord_state_name(const discord_t *d);
 /* Returns 0 on READY, -1 net/proto error, -2 auth-fatal (close 4004: don't
  * retry — the token is wrong and Discord bans IPs that hammer it). */
 int discord_connect(discord_t *d, const char *token);

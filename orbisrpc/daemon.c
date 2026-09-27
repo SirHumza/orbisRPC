@@ -96,12 +96,14 @@ static void sess_save(const char *tid, const char *name, int64_t started){    jl
 /* status.json heartbeat: machine-readable liveness for users and the
  * installer (FTP-readable proof the daemon is alive, no klog needed).
  * Written on state changes + every alive tick. Never fatal. */
-static void status_write(const char *state, const char *title){
+static void status_write(const char *state, const char *title,
+                         const char *gw){
     jl_val_t *r = jl_new_object();
     if(!r) return;
     jl_obj_set(r, "version", jl_new_string(ORBISRPC_VERSION));
     jl_obj_set(r, "state", jl_new_string(state ? state : "?"));
     jl_obj_set(r, "title", jl_new_string(title ? title : ""));
+    jl_obj_set(r, "gw", jl_new_string(gw ? gw : "down"));
     jl_obj_set(r, "ts", jl_new_number((double)time(NULL)));
     char *s = jl_stringify(r);
     jl_free(r);
@@ -255,7 +257,7 @@ int daemon_run(const char *fixed_game_name){
          * wait for a token to appear (FTP edit, no reboot, no exit). */
         health_mark_healthy();
         log_msg("no token in %s; waiting (edit \"token\" over FTP)", CFG_PATH);
-        status_write("waiting_token", "");
+        status_write("waiting_token", "", "down");
         for(;;){
             if(s_stop){ log_close(); return 0; }
             if(sleep_stop(15)) { log_close(); return 0; }
@@ -266,16 +268,9 @@ int daemon_run(const char *fixed_game_name){
         log_msg("token appeared; continuing boot");
     }
 
-    /* Self-update once per boot, before first connect. Never fatal:
-     * staged artifacts take effect on next launch/injection. */
-    if(g_cfg.auto_update && !safe_mode){
-        int ur = updater_check_and_stage();
-        log_msg("updater: %s (local %s)",
-                ur > 0 ? "staged newer build" : ur == 0 ? "already current" : "check failed",
-                ORBISRPC_VERSION);
-    } else if(safe_mode){
-        log_msg("updater: skipped (safe mode)");
-    }
+    /* No network self-update: new versions arrive via reinstall PKG,
+     * which bumps daemon.gen so this process supersedes cleanly. */
+    log_msg("boot: local %s (updates via reinstall)", ORBISRPC_VERSION);
 
     discord_t dc;
     memset(&dc, 0, sizeof dc); /* ws_close guards on connected; zero = safe */
@@ -301,7 +296,7 @@ int daemon_run(const char *fixed_game_name){
             long cur = gen_read();
             if(cur > boot_gen){
                 log_msg("superseded by generation %ld; exiting cleanly", cur);
-                status_write("superseded", "");
+                status_write("superseded", "", "down");
                 if(dc.connected) discord_clear_presence(&dc);
                 ws_close(&dc.ws);
                 break;
@@ -426,6 +421,7 @@ int daemon_run(const char *fixed_game_name){
         static int cand_hits = 0, miss_hits = 0;
         int64_t last_poll = 0;
         int64_t last_alive = 0;
+        int64_t last_wall = 0;
         static int healthy_marked = 0;
         /* re-post after every (re)connect so Discord never sticks on stale */
         int need_post = active && last[0];
@@ -433,12 +429,30 @@ int daemon_run(const char *fixed_game_name){
             int64_t now = orbis_mono_s();
             if(now - last_tsync >= 3600){ last_tsync = now; time_sync(); }
             if(now != last_poll){
+                /* Rest Mode / resume detection: the wall clock jumping
+                 * forward while the monotonic clock barely moved means we
+                 * slept through a suspend. Force a time re-sync and a
+                 * state reconcile so timers and presence heal instead of
+                 * posting stale epochs. */
+                {
+                    int64_t wall = (int64_t)time(NULL);
+                    if(last_wall > 0 && wall - last_wall > 900 &&
+                       now - last_poll <= 2){
+                        log_msg("wall jumped +%llds (resumed?); re-syncing",
+                                (long long)(wall - last_wall));
+                        last_tsync = 0;
+                        if(active && last[0]) need_post = 1;
+                        else home_posted = 0;
+                    }
+                    last_wall = wall;
+                }
                 last_poll = now;
                 if(now - last_alive >= 60){
                     last_alive = now;
                     log_msg("alive: %s", active ? last : "idle");
                     status_write(active ? "playing" : "idle",
-                                 active ? last : "");
+                                 active ? last : "",
+                                 discord_state_name(&dc));
                 }
                 /* State reconciliation: re-post current presence every
                  * 15 min so a silently desynced tile (dropped update,
