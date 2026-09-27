@@ -22,8 +22,8 @@ playing to Discord: name, cover art, timer. No PC at runtime.</p>
 1. Grab `OrbisRPC-Setup-1.0.0.pkg` from the
    [Releases page](https://github.com/SirHumza/orbisRPC/releases/tag/v1.0.0)
    and install it with Package Installer.
-2. Open **orbisRPC Setup**. It stages `orbisrpc.bin` + `evict.elf` in
-   `/data/payloads`, writes `/data/orbisRPC/config.json`, evicts any old
+2. Open **orbisRPC Setup**. It stages `orbisrpc.bin` in
+   `/data/payloads`, writes `/data/orbisRPC/config.json`, retires any old
    daemon, then asks for your Discord token.
 3. Open **Payloads** in GoldHEN settings, go to `orbisrpc.bin`, press
    **Square** to enable AutoRun, then **X** once to run it. Launch a

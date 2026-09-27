@@ -16,7 +16,7 @@ mkdir -p "$OUT"
 CFLAGS="-O2 -Wall -DORBISRPC_SDK_PAYLOAD -Iorbisrpc -Ithird_party/mbedtls/include -Ithird_party/sqlite/sqlite-amalgamation-3510100"
 SQLITE_DIR="third_party/sqlite/sqlite-amalgamation-3510100"
 echo "=== daemon sources (SDK) ==="
-for f in log cfg jsonlite b64 sfo tmdb_crypto tmdb updater updater_http updater_util tls ws detect discord daemon compat lock timesync art health manifest appdb main; do
+for f in log cfg jsonlite b64 sfo tmdb_crypto tmdb updater updater_http updater_util tls ws detect focus fw discord daemon compat lock timesync art health manifest appdb main; do
   # clock has no .c (header-only helper lives in compat.c); skip if missing
   [ -f "orbisrpc/$f.c" ] || continue
   "$CC" $CFLAGS -c -o "$OUT/$f.o" "orbisrpc/$f.c" || { echo "FAIL: $f"; exit 1; }

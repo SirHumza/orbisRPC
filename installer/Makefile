@@ -1,5 +1,5 @@
 # orbisRPC Setup installer (OpenOrbis app).
-# Flow: daemon payload -> evict old -> token -> done.
+# Flow: daemon payload -> token -> done (gen bump supersedes old daemon).
 # Payload Guest reads /data/payloads/ on this console.
 TITLE       := orbisRPC Setup
 VERSION     := 1.0.0
@@ -42,8 +42,8 @@ all: $(CONTENT_ID).pkg
 $(CONTENT_ID).pkg: installer/pkg.gp4
 	cd installer && $(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core pkg_build pkg.gp4 . && mv $(CONTENT_ID).pkg ..
 
-installer/pkg.gp4: installer/eboot.bin installer/assets/daemon.elf installer/assets/evict.elf installer/assets/config.json installer/sce_sys/about/right.sprx installer/sce_sys/param.sfo installer/sce_sys/icon0.png installer/sce_sys/pic1.png $(LIBMODULES) $(ASSETS)
-	cd installer && $(TOOLCHAIN)/bin/$(CDIR)/create-gp4 -out pkg.gp4 --content-id=$(CONTENT_ID) --files "eboot.bin assets/daemon.elf assets/evict.elf assets/config.json sce_sys/about/right.sprx sce_sys/param.sfo sce_sys/icon0.png sce_sys/pic1.png sce_module/libSceFios2.prx sce_module/libc.prx $(patsubst installer/%,%,$(ASSETS))"
+installer/pkg.gp4: installer/eboot.bin installer/assets/daemon.elf installer/assets/config.json installer/sce_sys/about/right.sprx installer/sce_sys/param.sfo installer/sce_sys/icon0.png installer/sce_sys/pic1.png $(LIBMODULES) $(ASSETS)
+	cd installer && $(TOOLCHAIN)/bin/$(CDIR)/create-gp4 -out pkg.gp4 --content-id=$(CONTENT_ID) --files "eboot.bin assets/daemon.elf assets/config.json sce_sys/about/right.sprx sce_sys/param.sfo sce_sys/icon0.png sce_sys/pic1.png sce_module/libSceFios2.prx sce_module/libc.prx $(patsubst installer/%,%,$(ASSETS))"
 
 installer/sce_sys/param.sfo: installer/Makefile
 	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_new $@
@@ -68,12 +68,10 @@ $(INTDIR)/%.o: $(PROJDIR)/%.c
 $(INTDIR)/jsonlite.o: orbisrpc/jsonlite.c
 	$(CC) $(CFLAGS) -o $@ $<
 
-# Stage the daemon + evict payloads + config into the app image.
+# Stage the daemon payload + config into the app image.
 # config.json carries the SET_ME placeholder; a pre-seeded valid token
 # (kept out of the repo) makes the installer skip token entry.
 installer/assets/daemon.elf: build-sdk/orbisrpc_sdk.elf
-	cp $< $@
-installer/assets/evict.elf: build-sdk/evict.elf
 	cp $< $@
 installer/assets/config.json: installer/config.json
 	cp $< $@
@@ -82,4 +80,4 @@ $(INTDIR)/%.o: $(PROJDIR)/%.cpp
 	$(CCX) $(CXXFLAGS) -o $@ $<
 
 clean:
-	rm -rf $(INTDIR) installer/eboot.bin installer/pkg.gp4 $(CONTENT_ID).pkg installer/sce_sys/param.sfo installer/assets/daemon.elf installer/assets/evict.elf installer/assets/config.json
+	rm -rf $(INTDIR) installer/eboot.bin installer/pkg.gp4 $(CONTENT_ID).pkg installer/sce_sys/param.sfo installer/assets/daemon.elf installer/assets/config.json

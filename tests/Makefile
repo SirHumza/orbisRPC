@@ -10,7 +10,7 @@ MBEDTLS_DIR := ../third_party/mbedtls/library
 # Same exclusion set as scripts/build.sh (POSIX-only modules).
 MBEDTLS_SRCS := $(filter-out $(MBEDTLS_DIR)/net_sockets.c $(MBEDTLS_DIR)/timing.c $(MBEDTLS_DIR)/entropy_poll.c,$(wildcard $(MBEDTLS_DIR)/*.c))
 
-ORBIS_SRCS := ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c ../orbisrpc/tmdb_crypto.c ../orbisrpc/updater_util.c ../orbisrpc/art.c ../orbisrpc/log.c ../orbisrpc/health.c ../orbisrpc/manifest.c ../orbisrpc/compat.c ../orbisrpc/cfg.c ../orbisrpc/appdb.c ../orbisrpc/discord.c
+ORBIS_SRCS := ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c ../orbisrpc/tmdb_crypto.c ../orbisrpc/updater_util.c ../orbisrpc/art.c ../orbisrpc/log.c ../orbisrpc/health.c ../orbisrpc/manifest.c ../orbisrpc/compat.c ../orbisrpc/cfg.c ../orbisrpc/appdb.c ../orbisrpc/discord.c ../orbisrpc/focus.c ../orbisrpc/fw.c
 INST_SRCS := ../installer/icfg.c
 # SQLite amalgamation: -O0 for host iteration speed (payload uses -O2).
 SQLITE_DIR := ../third_party/sqlite/sqlite-amalgamation-3510100

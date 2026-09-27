@@ -20,11 +20,10 @@
 #define SETUP_VERSION "1.0.0"
 #endif
 #define DAEMON_ELF "/app0/assets/daemon.elf"
-#define EVICT_ELF "/app0/assets/evict.elf"
+#define GEN_PATH "/data/orbisRPC/daemon.gen"
 #define INST_DIR "/data/orbisRPC"
 #define INST_LOG "/data/orbisRPC/install.log"
 #define PAYLOAD_BIN "/data/payloads/orbisrpc.bin"
-#define EVICT_BIN "/data/payloads/evict.elf"
 
 /* Stage log: every copy step records errno + sizes to a file we can read
  * back over FTP. The dialog alone can't say WHICH stage failed. */
@@ -217,27 +216,17 @@ static int mkdirs(const char *path){
 static int step_files(void){
     char report[512];
     int ok = -1;
-    int evict_ok = -1;
     mkdir(INST_DIR, 0777);
     mkdirs("/data/payloads");
-    /* Evict any running orbisRPC daemon before copying new payload.
-     * kill() is blocked by the sandbox (EPERM), so use
-     * sceKernelLoadStartModule to launch evict.elf as a module.
-     * evict.elf reads daemon.lock, kills the daemon, exits. */
-    {
-        evict_ok = copy_file(EVICT_ELF, EVICT_BIN);
-        ilog("evict-copy", evict_ok, 0, 0);
-        if(evict_ok == 0){
-            uint32_t rv = sceKernelLoadStartModule(EVICT_BIN, 0, NULL, 0, NULL, NULL);
-            ilog("evict-launch", rv, 0, 0);
-            sceKernelUsleep(500000);
-        }
-    }
+    ui_progress_open("Installing orbisRPC");
     /* Copy daemon payload. */
+    ui_progress_msg("Copying payload");
     ok = copy_file(DAEMON_ELF, PAYLOAD_BIN);
     ilog("daemon-copy", ok, 0, 0);
+    ui_progress_set(60);
     /* Pre-save config from PKG asset so step_token() skips on fresh install.
      * Copy config.json from /app0/assets/config.json to /data/orbisRPC/config.json. */
+    ui_progress_msg("Saving config");
     {
         FILE *src = fopen("/app0/assets/config.json", "rb");
         if(src){
@@ -251,16 +240,16 @@ static int step_files(void){
             if(f){
                 fputs("{\"schema_version\":1,\"token\":\"SET_ME\",\"presence_state\":\"On PS4\"}", f);
                 fclose(f);
+                chmod(ICFG_PATH, 0600);
             }
         }
     }
     snprintf(report, sizeof report,
-             "%s : %s%s%s%s\n"
              "%s : %s%s%s%s",
              PAYLOAD_BIN, ok == 0 ? "OK" : "denied",
-             ok == 0 ? "" : " [stage ", ok == 0 ? "" : g_stage, ok == 0 ? "" : "]",
-             EVICT_BIN, evict_ok == 0 ? "OK" : "denied",
-             evict_ok == 0 ? "" : " [stage ", evict_ok == 0 ? "" : g_stage, evict_ok == 0 ? "" : "]");
+             ok == 0 ? "" : " [stage ", ok == 0 ? "" : g_stage, ok == 0 ? "" : "]");
+    ui_progress_set(80);
+    ui_progress_close();
     ui_ok(report);
     if(ok != 0){
         ui_ok("Install failed: could not write the payload.\n\nStopping here.");
@@ -279,6 +268,7 @@ static int step_files(void){
                 if(f){
                     fputs("{\"schema_version\":1,\"token\":\"SET_ME\",\"presence_state\":\"On PS4\"}", f);
                     fclose(f);
+                    chmod(ICFG_PATH, 0600);
                 }
             } else {
                 fclose(f);
@@ -286,6 +276,26 @@ static int step_files(void){
         }
     }
     ilogv("cfg-done", 0, 0);
+    /* Generation bump: any older running daemon sees the new generation
+     * and exits cleanly so the fresh payload takes over (no evict). */
+    {
+        long cur = 0;
+        FILE *gf = fopen(GEN_PATH, "rb");
+        if(gf){
+            char gb[32];
+            size_t n = fread(gb, 1, sizeof gb - 1, gf);
+            fclose(gf);
+            if(n > 0){ gb[n] = 0; cur = atol(gb); }
+        }
+        gf = fopen(GEN_PATH, "wb");
+        if(gf){
+            fprintf(gf, "%ld\n", cur + 1);
+            fclose(gf);
+            ilog("gen-bump", (int)(cur + 1), 0, 0);
+        } else {
+            ilog("gen-bump", errno ? errno : -1, 0, 0);
+        }
+    }
     return 0;
 }
 
@@ -303,7 +313,19 @@ static void step_token(void){
     }
     for(tries = 0; tries < 3; tries++){
         r = ui_input("Discord token", "paste token, Done to save", tok, sizeof tok);
-        if(r < 0){ ui_ok("Text input failed. Skipping."); return; }
+        if(r < 0){
+            /* IME failure is transient (system dialog busy, OOM): retry
+             * instead of surrendering, and say so. Last try keeps the
+             * FTP fallback message. */
+            ilog("token-imefail", tries, 0, 0);
+            if(tries < 2){
+                ui_ok("Text input glitched. Try again.");
+                continue;
+            }
+            ui_ok("Text input failed. You can paste the token into "
+                  "/data/orbisRPC/config.json over FTP instead.");
+            return;
+        }
         if(r == 0) return;
         if(token_valid(tok)){
             r = icfg_token_save(ICFG_PATH, tok);

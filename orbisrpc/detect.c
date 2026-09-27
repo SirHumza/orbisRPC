@@ -19,6 +19,7 @@
  * foreground) is reliable via ShellCoreUtil.
  */
 #include "detect.h"
+#include "fw.h"
 #include "cfg.h"
 #include "log.h"
 #include "sfo.h"
@@ -225,7 +226,7 @@ int detect_eboot_count(void){
     while(off + 4 <= sz){
         int recsz = *(int *)(buf + off);
         if(recsz <= 0 || off + (size_t)recsz > sz) break;
-        if(recsz >= 479 && !memcmp(buf + off + 447, "eboot.bin", 10))
+        if(fw_match_eboot(buf + off, recsz))
             n++;
         off += (size_t)recsz;
     }
@@ -242,7 +243,7 @@ static int proc_has_eboot(void){
     while(off + 4 <= sz){
         int recsz = *(int *)(buf + off);
         if(recsz <= 0 || off + (size_t)recsz > sz) return -1;
-        if(recsz >= 479 && !memcmp(buf + off + 447, "eboot.bin", 10))
+        if(fw_match_eboot(buf + off, recsz))
             return 1;
         off += (size_t)recsz;
     }
@@ -510,6 +511,20 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
          * we had", never a transition. */
         int fg = detect_foreground_active();
         if(fg < 0) return -2;
+        /* Event-driven focus (kern.msgbuf AppFocusChanged): authoritative
+         * when readable — settles multi-app ambiguity and surfaces system
+         * screens. Log-only for now; snapshot probes still gate transitions
+         * until msgbuf readability is confirmed per firmware. */
+        {
+            char scr_tid[16] = "";
+            int scr = detect_system_screen(scr_tid, sizeof scr_tid);
+            static char last_scr[16] = "";
+            if(scr != FOCUS_UNKNOWN && strcmp(scr_tid, last_scr) != 0){
+                strncpy(last_scr, scr_tid, sizeof last_scr - 1);
+                log_msg("focus: %s (%s)", scr_tid,
+                        scr == FOCUS_GAME ? "game" : "system");
+            }
+        }
         if(!fg) return -1;
     }
     char titleId[16]=""; int named=0, have_tid=0;

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define ICFG_MAX (64u*1024u)
@@ -60,6 +61,8 @@ static int icfg_write(const char *path, jl_val_t *r){
     if(!s) return -1;
     f = fopen(tmp, "wb");
     if(!f){ free(s); return -1; }
+    /* token lives in this file: owner-only before bytes hit disk */
+    { int fd0 = fileno(f); if(fd0 >= 0) fchmod(fd0, 0600); }
     if(fputs(s, f) < 0) ok = 0;
     if(ok){
         int fd = fileno(f);

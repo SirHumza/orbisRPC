@@ -10,6 +10,8 @@
 #include "../orbisrpc/appdb.h"
 #include "../orbisrpc/discord.h"
 #include "../orbisrpc/detect.h"
+#include "../orbisrpc/focus.h"
+#include "../orbisrpc/fw.h"
 #include "../installer/icfg.h"
 #include "sqlite3.h"
 #include <string.h>
@@ -618,6 +620,75 @@ static void test_installer_cfg(void) {
     assert(icfg_get_str("/nonexistent/x.json", "k", st, sizeof st) != 0);
 }
 
+static void test_focus(void) {
+    char tid[16];
+    /* last event wins; target is the TO side of -> */
+    const char *b1 = "boot\nAppFocusChanged [CUSA00001] -> [CUSA00740]\n"
+                     "noise\nAppFocusChanged [CUSA00740] -> [NPXS20001]\n";
+    assert(focus_parse_appfocus(b1, strlen(b1), tid, sizeof tid) == 0);
+    assert(!strcmp(tid, "NPXS20001"));
+    /* single event without arrow: the bracketed id itself */
+    const char *b2 = "xx AppFocusChanged [PPSA12345] yy";
+    assert(focus_parse_appfocus(b2, strlen(b2), tid, sizeof tid) == 0);
+    assert(!strcmp(tid, "PPSA12345"));
+    /* no event */
+    assert(focus_parse_appfocus("nothing here", 12, tid, sizeof tid) == -1);
+    /* guards */
+    assert(focus_parse_appfocus(NULL, 10, tid, sizeof tid) == -1);
+    assert(focus_parse_appfocus(b2, strlen(b2), NULL, sizeof tid) == -1);
+    assert(focus_parse_appfocus(b2, strlen(b2), tid, 0) == -1);
+    /* classify */
+    assert(focus_classify("CUSA00740") == FOCUS_GAME);
+    assert(focus_classify("PPSA12345") == FOCUS_GAME);
+    assert(focus_classify("NPXS20001") == FOCUS_SYSTEM);
+    assert(focus_classify("XXXX00000") == FOCUS_UNKNOWN);
+    assert(focus_classify(NULL) == FOCUS_UNKNOWN);
+}
+
+static void test_fw(void) {
+    int off = -1, minrec = -1;
+    /* verified table entry */
+    assert(fw_kinfo_for("9.00", &off, &minrec) == 0);
+    assert(off == 447 && minrec == 479);
+    /* unknown FW: no promise */
+    assert(fw_kinfo_for("13.52", &off, &minrec) == -1);
+    assert(fw_kinfo_for(NULL, &off, &minrec) == -1);
+    assert(fw_kinfo_for("bogus", &off, &minrec) == -1);
+    /* version string always well-formed */
+    char ver[16];
+    fw_version(ver, sizeof ver);
+    assert(ver[0] != 0);
+    /* exact-offset match on a synthetic 9.00-style record */
+    unsigned char rec[512];
+    memset(rec, 0, sizeof rec);
+    memcpy(rec + 447, "eboot.bin", 10);
+    (void)ver;
+    /* NOTE: fw_match_* use the live platform table; on non-9.00 hosts
+     * they take the bounded-scan path, which must also match here. */
+    assert(fw_match_eboot(rec, sizeof rec) == 1);
+    /* no name, no match */
+    unsigned char blank[512];
+    memset(blank, 0, sizeof blank);
+    assert(fw_match_eboot(blank, sizeof blank) == 0);
+    /* guards: NULL, empty, truncated */
+    assert(fw_match_eboot(NULL, 512) == 0);
+    assert(fw_match_eboot(rec, 0) == 0);
+    assert(fw_match_eboot(rec, 5) == 0);
+    /* unterminated needle: "eboot.binX" must not match */
+    unsigned char evil[64];
+    memset(evil, 0, sizeof evil);
+    memcpy(evil + 10, "eboot.binX", 10);
+    assert(fw_match_eboot(evil, sizeof evil) == 0);
+    /* payload pid match: name present (pid path is FW-gated) */
+    unsigned char pl[512];
+    memset(pl, 0, sizeof pl);
+    memcpy(pl + 100, "Payload", 8);
+    assert(fw_match_payload_pid(pl, sizeof pl, 1234) == 1);
+    assert(fw_match_payload_pid(pl, sizeof pl, 0) == 0);
+    assert(fw_match_payload_pid(blank, sizeof blank, 1234) == 0);
+    assert(fw_match_payload_pid(NULL, 512, 1234) == 0);
+}
+
 int main(void) {
     test_json();
     test_gateway_op_spoof();
@@ -637,6 +708,8 @@ int main(void) {
     test_installer_cfg();
     test_appdb();
     test_discord_builder();
+    test_focus();
+    test_fw();
     puts("utility tests passed");
     return 0;
 }

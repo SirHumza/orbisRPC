@@ -2,6 +2,7 @@
  * so use atomic create (O_CREAT|O_EXCL) + process-table liveness
  * (sysctl, no signals needed in spawned context). */
 #include "lock.h"
+#include "fw.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -24,10 +25,10 @@ static int pid_live(int pid){
         if(recsz <= 0 || off + (size_t)recsz > sz) break;
         /* A recycled PID owned by a system daemon must not block us:
          * only a live payload process counts as a peer. Spawned
-         * payloads (elfldr/GoldHEN) show up as "Payload". */
-        if(recsz >= 479 && *(int *)(buf + off + 72) == pid)
-            return !memcmp(buf + off + 447, "Payload", 8) &&
-                   buf[off + 455] == 0;
+         * payloads (elfldr/GoldHEN) show up as "Payload". Offsets are
+         * per-FW (see fw.h); unknown FWs fail closed. */
+        if(fw_match_payload_pid(buf + off, recsz, pid))
+            return 1;
         off += (size_t)recsz;
     }
     return 0;

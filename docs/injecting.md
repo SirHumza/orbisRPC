@@ -1,12 +1,18 @@
 # Injecting OrbisRPC into the PS4 — the complete guide
 
 This exists because getting a payload to *execute* took longer than
-writing the payload. Everything below was learned on a real 9.00 console.
+writing the payload. Everything below was learned on real consoles
+(9.00 primary). The flow is firmware-independent: the payload resolves
+its symbols at runtime and probes firmware-specific details (kinfo
+layout via a version table with a bounded-scan fallback), so the same
+binary runs anywhere you can get a loader listening.
 
 ## You need first
 
-- PS4 on 9.00, jailbroken with GoldHEN (2.4b18+ recommended — older
-  payloader builds segfault on ELF files, see below).
+- PS4 on a jailbreakable firmware (9.00 via pOOBs4 is the proven path;
+  newer firmwares need their own entry point, e.g. lapse-based hosts —
+  once jailbroken the steps below are identical), GoldHEN 2.4b18+
+  recommended (older payloader builds segfault on ELF files, see below).
 - Console and computer on the same network. Find the PS4 IP:
   Settings → Network → View Connection Status (ours is `192.168.1.136`).
 - The payload file: `build-sdk/orbisrpc_sdk.elf` (built via
@@ -14,7 +20,8 @@ writing the payload. Everything below was learned on a real 9.00 console.
 
 ## Method 1 — elfldr (recommended)
 
-elfldr is a proper ELF loader that runs payloads as separate processes.
+elfldr (ps4-payload-dev's `ps4-payload-elfldr`) is a proper ELF loader
+that runs payloads as separate processes with runtime symbol resolution.
 
 1. Get it listening. Either load `elfldr.elf` through GoldHEN's payloader
    page once, or keep it running — it serves on **port 9021** until reboot.
@@ -88,8 +95,8 @@ the result on screen.
 | `Connection refused` on 9021/9020 | No listener armed | Tap BinLoader / open payloader page, retry instantly |
 | `payload launched successfully` then silence, no log | Loader segfault (see above) | Update GoldHEN ≥ v2.4b18.5, use BinLoader server |
 | `Error handling payload` | Loader rejected the bytes | Re-check file integrity (`shasum`), resend |
-| Log exists but `FATAL: token rejected (4004)` | Token rotated/dead | Fresh token into `/data/orbisRPC/config.json`, relaunch |
-| Multiple `Payload` processes in process list | Old instances piled up | Reboot clears them; the daemon's lock prevents recurrence |
+| Log shows `token rejected (4004)` | Token rotated/dead | Fresh token into `/data/orbisRPC/config.json` — the daemon picks it up alone, no relaunch needed |
+| Multiple `Payload` processes in process list | Old instances piled up | Reinstall: the `daemon.gen` bump retires them; reboot clears stragglers |
 
 ## Watching it work
 

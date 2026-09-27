@@ -2,6 +2,7 @@
 #ifndef DETECT_H
 #define DETECT_H
 #include <stddef.h>
+#include "focus.h"
 /* Returns 0 and writes a display name when a foreground game is found.
  * Returns -1 when no game is active or the arguments are invalid.
  * out_path is optional and receives the per-title cache path when provided. */

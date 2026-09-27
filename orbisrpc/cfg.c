@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 cfg_t g_cfg;
@@ -191,6 +192,8 @@ int cfg_save(const char *path, const cfg_t *c) {
     FILE *f = fopen(tmp, "wb");
     int ok = 0;
     if (f) {
+        /* token lives in this file: owner-only before bytes hit disk */
+        { int fd0 = fileno(f); if(fd0 >= 0) fchmod(fd0, 0600); }
         ok = (fputs(s, f) >= 0);
         if(fflush(f) != 0) ok = 0;
         /* force bytes to disk before rename */

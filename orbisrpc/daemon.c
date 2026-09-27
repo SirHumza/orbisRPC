@@ -93,6 +93,47 @@ static void sess_save(const char *tid, const char *name, int64_t started){    jl
     free(s);
 }
 
+/* status.json heartbeat: machine-readable liveness for users and the
+ * installer (FTP-readable proof the daemon is alive, no klog needed).
+ * Written on state changes + every alive tick. Never fatal. */
+static void status_write(const char *state, const char *title){
+    jl_val_t *r = jl_new_object();
+    if(!r) return;
+    jl_obj_set(r, "version", jl_new_string(ORBISRPC_VERSION));
+    jl_obj_set(r, "state", jl_new_string(state ? state : "?"));
+    jl_obj_set(r, "title", jl_new_string(title ? title : ""));
+    jl_obj_set(r, "ts", jl_new_number((double)time(NULL)));
+    char *s = jl_stringify(r);
+    jl_free(r);
+    if(!s) return;
+    FILE *f = fopen("/data/orbisRPC/status.json.new", "wb");
+    if(f){
+        int ok = (fputs(s, f) >= 0) && (fflush(f) == 0);
+        if(ok){ int fd = fileno(f); if(fd < 0 || fsync(fd) != 0) ok = 0; }
+        if(fclose(f) != 0) ok = 0;
+        if(ok) rename("/data/orbisRPC/status.json.new",
+                      "/data/orbisRPC/status.json");
+        else remove("/data/orbisRPC/status.json.new");
+    }
+    free(s);
+}
+
+/* Generation protocol (replaces evict.elf): the installer bumps
+ * daemon.gen on every install; an older running daemon that sees a newer
+ * generation exits cleanly so the fresh payload takes over. No signals,
+ * no module loading, no sandbox fights. Missing file = generation 0. */
+static long gen_read(void){
+    FILE *f = fopen("/data/orbisRPC/daemon.gen", "rb");
+    if(!f) return 0;
+    char b[32];
+    size_t n = fread(b, 1, sizeof b - 1, f);
+    fclose(f);
+    if(n == 0) return 0;
+    b[n] = 0;
+    long v = atol(b);
+    return v < 0 ? 0 : v;
+}
+
 /* Playtime ledger: append-only "<title_id> <name> <seconds>" per finished
  * session. Totals are computed by readers (app/docs); the daemon only
  * appends, so a corrupt ledger can never break the runtime. */
@@ -210,11 +251,19 @@ int daemon_run(const char *fixed_game_name){
     time_sync_all();
     if(!have_token(&g_cfg)){
         /* Waiting for configuration is a HEALTHY boot, not a crash:
-         * mark clean so token-less boots never trip safe mode. */
+         * mark clean so token-less boots never trip safe mode, then
+         * wait for a token to appear (FTP edit, no reboot, no exit). */
         health_mark_healthy();
-        log_msg("FATAL: put your Discord user token in %s as \"token\":\"...\"", CFG_PATH);
-        log_close();
-        return 1;
+        log_msg("no token in %s; waiting (edit \"token\" over FTP)", CFG_PATH);
+        status_write("waiting_token", "");
+        for(;;){
+            if(s_stop){ log_close(); return 0; }
+            if(sleep_stop(15)) { log_close(); return 0; }
+            cfg_t next = g_cfg;
+            if(cfg_load(CFG_PATH, &next) == 0) g_cfg = next;
+            if(have_token(&g_cfg)) break;
+        }
+        log_msg("token appeared; continuing boot");
     }
 
     /* Self-update once per boot, before first connect. Never fatal:
@@ -229,6 +278,8 @@ int daemon_run(const char *fixed_game_name){
     }
 
     discord_t dc;
+    memset(&dc, 0, sizeof dc); /* ws_close guards on connected; zero = safe */
+    long boot_gen = gen_read();
     int base_poll = g_cfg.poll_interval_s;
     if(base_poll < 5) base_poll = 5;
     if(base_poll > 60) base_poll = 60;
@@ -244,6 +295,18 @@ int daemon_run(const char *fixed_game_name){
     int64_t last_health = 0;
     for(;;){ /* outer: connect cycles with backoff on failure */
         if(s_stop) break;
+        /* Superseded by a newer install: exit cleanly (presence cleared
+         * below when connected) so the fresh payload takes over. */
+        {
+            long cur = gen_read();
+            if(cur > boot_gen){
+                log_msg("superseded by generation %ld; exiting cleanly", cur);
+                status_write("superseded", "");
+                if(dc.connected) discord_clear_presence(&dc);
+                ws_close(&dc.ws);
+                break;
+            }
+        }
         /* re-read config every cycle so token edits land without a reboot.
          * On parse failure keep last-good config instead of stale defaults. */
         {
@@ -374,6 +437,8 @@ int daemon_run(const char *fixed_game_name){
                 if(now - last_alive >= 60){
                     last_alive = now;
                     log_msg("alive: %s", active ? last : "idle");
+                    status_write(active ? "playing" : "idle",
+                                 active ? last : "");
                 }
                 /* State reconciliation: re-post current presence every
                  * 15 min so a silently desynced tile (dropped update,
