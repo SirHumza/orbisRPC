@@ -5,7 +5,7 @@
 # orbisRPC — Discord Rich Presence for PS4 (GoldHEN RPC)
 
 <p align="center">
-  <a href="https://github.com/SirHumza/orbisRPC/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/version-1.0.0-ffd800?style=flat-square" alt="version"></a>
+  <a href="https://github.com/SirHumza/orbisRPC/releases/tag/v1.1.0"><img src="https://img.shields.io/badge/version-1.1.0-ffd800?style=flat-square" alt="version"></a>
   <img src="https://img.shields.io/badge/PS4-GoldHEN-003791?style=flat-square" alt="PS4 GoldHEN">
   <img src="https://img.shields.io/badge/Discord-Rich%20Presence-5865F2?style=flat-square" alt="Discord">
   <img src="https://img.shields.io/badge/tables-none-brightgreen?style=flat-square" alt="no tables">
@@ -19,8 +19,8 @@ playing to Discord: name, cover art, timer. No PC at runtime.</p>
 
 ## Install (5 minutes)
 
-1. Grab `OrbisRPC-Setup-1.0.0.pkg` from the
-   [Releases page](https://github.com/SirHumza/orbisRPC/releases/tag/v1.0.0)
+1. Grab `OrbisRPC-Setup-1.1.0.pkg` from the
+   [Releases page](https://github.com/SirHumza/orbisRPC/releases/tag/v1.1.0)
    and install it with Package Installer.
 2. Open **orbisRPC Setup**. It stages `orbisrpc.bin` in
    `/data/payloads`, writes `/data/orbisRPC/config.json`, retires any old

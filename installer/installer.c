@@ -17,7 +17,7 @@
 #include "icfg.h"
 
 #ifndef SETUP_VERSION
-#define SETUP_VERSION "1.0.0"
+#define SETUP_VERSION "1.1.0"
 #endif
 #define DAEMON_ELF "/app0/assets/daemon.elf"
 #define GEN_PATH "/data/orbisRPC/daemon.gen"
