@@ -22,4 +22,7 @@ int focus_classify(const char *tid);
  * Returns FOCUS_* class, writes tid when parsed. Never crashes, never
  * blocks: unreadable buffer just means FOCUS_UNKNOWN. */
 int detect_system_screen(char *out_tid, size_t cap);
+/* Reachability probe for the census: 1 if any candidate msgbuf path
+ * opens, 0 otherwise. No parsing, no logging, no sticky state. */
+int focus_msgbuf_ok(void);
 #endif

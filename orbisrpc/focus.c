@@ -133,3 +133,11 @@ int detect_system_screen(char *out_tid, size_t cap){
     }
     return FOCUS_UNKNOWN;
 }
+
+int focus_msgbuf_ok(void){
+    for(int i = 0; kPaths[i]; i++){
+        int fd = open(kPaths[i], O_RDONLY);
+        if(fd >= 0){ close(fd); return 1; }
+    }
+    return 0;
+}

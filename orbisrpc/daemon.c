@@ -17,11 +17,15 @@
 #include "ws.h"
 #include "discord.h"
 #include "detect.h"
+#include "focus.h"
+#include "fw.h"
 #include "updater.h"
 #include "version.h"
 #include "jsonlite.h"
 #include "art.h"
 #include <sys/stat.h>
+#include <dirent.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
@@ -181,6 +185,51 @@ static void pres_set(pres_state_t *cur, pres_state_t next){
     log_msg("STATE: presence %s -> %s", pres_name(*cur), pres_name(next));
     *cur = next;
 }
+/* diag.json: one boot-time signal census for the firmware matrix.
+ * Users paste this single file instead of "it doesn't work": daemon
+ * version, firmware, and which of the four focus signals this box
+ * actually has. Read-only probes, never fatal. */
+extern void *dlopen(const char *filename, int flags);
+extern int dlclose(void *handle);
+static void diag_write(void){
+    char fw[16] = "";
+    int noff = 0, mrec = 0;
+    fw_version(fw, sizeof fw);
+    int kinfo_known = (fw_kinfo(&noff, &mrec) == 0);
+    int msgbuf = focus_msgbuf_ok();
+    int sandbox = 0;
+    {
+        DIR *d = opendir("/mnt/sandbox");
+        if(d){ sandbox = 1; closedir(d); }
+    }
+    int scu = 0;
+    {
+        void *h = dlopen("libSceShellCoreUtil.sprx", 0);
+        if(h){ scu = 1; dlclose(h); }
+    }
+    jl_val_t *r = jl_new_object();
+    if(!r) return;
+    jl_obj_set(r, "version", jl_new_string(ORBISRPC_VERSION));
+    jl_obj_set(r, "fw", jl_new_string(fw));
+    jl_obj_set(r, "kinfo_table", jl_new_number((double)kinfo_known));
+    jl_obj_set(r, "msgbuf", jl_new_number((double)msgbuf));
+    jl_obj_set(r, "sandbox", jl_new_number((double)sandbox));
+    jl_obj_set(r, "shellcore", jl_new_number((double)scu));
+    jl_obj_set(r, "ts", jl_new_number((double)time(NULL)));
+    char *s = jl_stringify(r);
+    jl_free(r);
+    if(!s) return;
+    FILE *f = fopen("/data/orbisRPC/diag.json.new", "wb");
+    if(f){
+        int ok = (fputs(s, f) >= 0) && (fflush(f) == 0);
+        if(ok){ int fd = fileno(f); if(fd < 0 || fsync(fd) != 0) ok = 0; }
+        if(fclose(f) != 0) ok = 0;
+        if(ok) rename("/data/orbisRPC/diag.json.new",
+                      "/data/orbisRPC/diag.json");
+        else remove("/data/orbisRPC/diag.json.new");
+    }
+    free(s);
+}
 /* fixed_game_name != NULL -> post presence for that game only, no detection.
  * NULL -> poll the foreground app like the payload daemon does.
  * Returns 0 normal stop, 1 config error, 2 auth-fatal (bad token). */
@@ -204,6 +253,7 @@ int daemon_run(const char *fixed_game_name){
     }
     log_init(LOG_PATH);
     log_msg("orbisRPC daemon start — build %s %s", __DATE__, __TIME__);
+    diag_write();
     /* Single writer: a second launch (or a stale pileup from repeated
      * injections) stands down instead of fighting over the gateway. */
     {

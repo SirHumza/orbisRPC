@@ -673,6 +673,8 @@ static void test_focus(void) {
     assert(focus_classify("NPXS20001") == FOCUS_SYSTEM);
     assert(focus_classify("XXXX00000") == FOCUS_UNKNOWN);
     assert(focus_classify(NULL) == FOCUS_UNKNOWN);
+    /* no msgbuf device on the host: reachability must report 0, no crash */
+    assert(focus_msgbuf_ok() == 0);
 }
 
 static void test_fw(void) {

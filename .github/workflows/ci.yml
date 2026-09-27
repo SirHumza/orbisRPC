@@ -38,3 +38,14 @@ jobs:
           echo "$NEEDED" | grep -q libSceNet.sprx || { echo "missing libSceNet"; exit 1; }
           if echo "$NEEDED" | grep -q 'libkernel\.so'; then echo "FORBIDDEN: app-world libkernel.so"; exit 1; fi
           echo "linkage OK"
+  consistency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: version parity (version.h vs installer Makefile)
+        run: |
+          V_H=$(grep -oE '#define ORBISRPC_VERSION "[^"]+"' orbisrpc/version.h | cut -d'"' -f2)
+          V_MK=$(grep -oE '^VERSION[[:space:]]*:=.*' installer/Makefile | sed 's/.*:= *//')
+          echo "version.h=$V_H Makefile=$V_MK"
+          [ -n "$V_H" ] && [ "$V_H" = "$V_MK" ] || { echo "VERSION MISMATCH"; exit 1; }
+          echo "versions match"

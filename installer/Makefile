@@ -2,7 +2,7 @@
 # Flow: daemon payload -> token -> done (gen bump supersedes old daemon).
 # Payload Guest reads /data/payloads/ on this console.
 TITLE       := orbisRPC Setup
-VERSION     := 1.0.0
+VERSION     := 1.1.0
 TITLE_ID    := ORPC00001
 CONTENT_ID  := IV0000-ORPC00001_00-ORBISRPCSETUP000
 
