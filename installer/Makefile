@@ -6,6 +6,18 @@ VERSION     := 1.1.0
 TITLE_ID    := ORPC00001
 CONTENT_ID  := IV0000-ORPC00001_00-ORBISRPCSETUP000
 
+# Packaging knobs under experiment (see the note above param.sfo).
+#   PKG_ATTR=32 PKG_CATEGORY=gde AUTHINFO=1  -> Apollo-parity build
+PKG_ATTR    ?= 0
+PKG_CATEGORY ?= gd
+AUTHINFO    ?= 0
+AUTHINFO_BLOB := 000000000000000000000000001C004000FF000000000080000000000000000000000000000000000000008000400040000000000000008000000000000000080040FFFF000000F000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+ifeq ($(AUTHINFO),1)
+AUTHINFO_FLAG := --authinfo $(AUTHINFO_BLOB)
+else
+AUTHINFO_FLAG :=
+endif
+
 LIBS        := -lc -lkernel -lc++ -lSceMsgDialog -lSceCommonDialog -lSceImeDialog -lSceSysmodule -lSceNet -lSceUserService -lSceSystemService -lScePad
 
 ASSETS      := $(wildcard installer/assets/**/*)
@@ -45,21 +57,30 @@ $(CONTENT_ID).pkg: installer/pkg.gp4
 installer/pkg.gp4: installer/eboot.bin installer/assets/daemon.elf installer/assets/config.json installer/sce_sys/about/right.sprx installer/sce_sys/param.sfo installer/sce_sys/icon0.png installer/sce_sys/pic1.png $(LIBMODULES) $(ASSETS)
 	cd installer && $(TOOLCHAIN)/bin/$(CDIR)/create-gp4 -out pkg.gp4 --content-id=$(CONTENT_ID) --files "eboot.bin assets/daemon.elf assets/config.json sce_sys/about/right.sprx sce_sys/param.sfo sce_sys/icon0.png sce_sys/pic1.png sce_module/libSceFios2.prx sce_module/libc.prx $(patsubst installer/%,%,$(ASSETS))"
 
-# ATTRIBUTE=0 / CATEGORY=gd are the ONLY values verified to launch on real
-# hardware. A long-standing theory said Apollo's gde/32 + --authinfo were the
-# "universal" combo, but every build carrying them died silently pre-logging on
-# a real console (4/4), while 0/gd launched fine. Isolation order was:
-# authinfo (2 builds), SDL UI, native UI - all still crashed. Same LIBS, same
-# object set, and all installer.c deltas provably safe before the first log
-# call, which leaves param.sfo as the only variable present in 4/4 crashes and
-# absent from the one success. Empirical beats theory: keep 0/gd, no authinfo.
-# Change here only with a console test to back it up.
+# PACKAGING IS AN OPEN EXPERIMENT, NOT A SETTLED ANSWER.
+#
+# History: v1.0.0 shipped ATTRIBUTE=0 / CATEGORY=gd and launched on real
+# hardware. A "universal packaging" theory (borrowed from Apollo Save
+# Tool) changed these to 32 / gde and added --authinfo; every build
+# carrying those values died silently pre-logging on a real console (4/4).
+# Isolation ruled out --authinfo (2 builds without it, still crashed), the
+# SDL UI, and the native UI. LIBS, the object set, sce_module, and
+# installer/ui.c are identical to the working v1.0.0 build, and every
+# installer.c / icfg.c delta is provably safe before the first log call.
+# That leaves param.sfo as the only untested variable.
+#
+# COUNTER-EVIDENCE (do not delete without reading): Apollo's current main
+# (v02.32) ships ATTRIBUTE=32 / CATEGORY=gde / --authinfo and is a proven
+# universal PS4 app. So 0/gd is very likely innocent too, and the real
+# cause is still unknown. The 0/gd build is a TEST, not a conclusion.
+# Whichever value survives a console test wins; switch with:
+#   make -f installer/Makefile PKG_ATTR=32 PKG_CATEGORY=gde AUTHINFO=1
 installer/sce_sys/param.sfo: installer/Makefile
 	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_new $@
 	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ APP_TYPE --type Integer --maxsize 4 --value 1
 	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ APP_VER --type Utf8 --maxsize 8 --value '$(VERSION)'
-	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ ATTRIBUTE --type Integer --maxsize 4 --value 0
-	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ CATEGORY --type Utf8 --maxsize 4 --value 'gd'
+	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ ATTRIBUTE --type Integer --maxsize 4 --value $(PKG_ATTR)
+	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ CATEGORY --type Utf8 --maxsize 4 --value '$(PKG_CATEGORY)'
 	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ CONTENT_ID --type Utf8 --maxsize 48 --value '$(CONTENT_ID)'
 	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ DOWNLOAD_DATA_SIZE --type Integer --maxsize 4 --value 0
 	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ SYSTEM_VER --type Integer --maxsize 4 --value 0
@@ -69,7 +90,7 @@ installer/sce_sys/param.sfo: installer/Makefile
 
 installer/eboot.bin: $(OBJS)
 	$(LD) $(INTDIR)/*.o -o $(INTDIR)/$(PROJDIR).elf $(LDFLAGS)
-	$(TOOLCHAIN)/bin/$(CDIR)/create-fself-macos -in=$(INTDIR)/$(PROJDIR).elf -out=$(INTDIR)/$(PROJDIR).oelf --eboot "installer/eboot.bin" --paid 0x3800000000000011
+	$(TOOLCHAIN)/bin/$(CDIR)/create-fself-macos -in=$(INTDIR)/$(PROJDIR).elf -out=$(INTDIR)/$(PROJDIR).oelf --eboot "installer/eboot.bin" --paid 0x3800000000000011 $(AUTHINFO_FLAG)
 
 $(INTDIR)/%.o: $(PROJDIR)/%.c
 	$(CC) $(CFLAGS) -o $@ $<
