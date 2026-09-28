@@ -30,6 +30,30 @@
  * back over FTP. The dialog alone can't say WHICH stage failed. */
 static const char *g_stage = "-";
 
+/* --- pre-main boot marker ------------------------------------------
+ * The wizard died before main() on every packaging experiment, leaving
+ * install.log untouched and the crash handler (installed inside main)
+ * never armed. A constructor runs before main, so it separates the two
+ * failure classes for good:
+ *   no BOOT line at all  -> the loader/SELF never got control (packaging,
+ *                           authinfo, SIGSYS) or a pre-main fault
+ *   BOOT but no stage    -> main started, died before the first ilog()
+ * Async-signal-safe only: raw open/write, no stdio, no malloc. */
+__attribute__((constructor))
+static void boot_marker(void){
+    static const char msg[] = "BOOT installer entered pre-main\n";
+    const char *paths[2];
+    size_t i;
+    paths[0] = "/data/install.log";
+    paths[1] = INST_LOG;
+    for(i = 0; i < 2; i++){
+        int fd = open(paths[i], O_WRONLY | O_APPEND | O_CREAT, 0666);
+        if(fd < 0) continue;
+        { ssize_t w = write(fd, msg, sizeof msg - 1); (void)w; }
+        close(fd);
+    }
+}
+
 static void ilog(const char *tag, int err, long expect, long got){
     FILE *f;
     g_stage = tag;
