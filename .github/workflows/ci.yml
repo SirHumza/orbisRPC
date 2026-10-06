@@ -7,7 +7,7 @@ jobs:
   host:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: host unit tests
         run: make -C tests clean && make -C tests test
       - name: ASan/UBSan
@@ -19,14 +19,14 @@ jobs:
   sdk-payload:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # The release ZIP (v0.9) predates the SDK's 13.52 offsets, and the SDK's
       # crt/patch.c makes _start() terminate before main() for unlisted
       # firmware -- so a ZIP-built payload dies silently on 13.52. Build from
       # git instead. Recipe from drakmor/nanoDNS's ps4 workflow, which ships a
       # working 13.52 payload over the same elfldr path.
       - name: checkout ps4-payload-sdk
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: ps4-payload-dev/sdk
           path: sdk
