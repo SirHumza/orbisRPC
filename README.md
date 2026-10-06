@@ -37,8 +37,15 @@ playing to Discord: name, cover art, timer. No PC at runtime.</p>
 4. After setting the token, re-run the payload. Launch a game and watch
    Discord. Give feedback in `testers-chat`.
 
-After a reboot: re-jailbreak, then enable AutoRun for `orbisrpc` in
-Payload Guest once — it starts itself on every jailbreak after that.
+After a reboot just re-jailbreak and re-send the payload — don't use
+Payload Guest for this.
+
+**Auto-run (not recommended on test builds):** you can drop the `.elf` in
+`/data/payloads` and add it to the autorun queue in GoldHEN settings, but
+test builds change fast — stick to manual runs for now.
+
+**Official release:** will ship a PKG installer that sets everything up
+for you.
 ✅ Firmware: confirmed working on 9.00 through 13.52.
 
 **Upgrading test builds:** as usual, delete the `/data/orbisRPC` folder
