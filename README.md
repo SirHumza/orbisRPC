@@ -134,7 +134,8 @@ for you — including autorun and the nanoDNS exception fix.
 |---|---|
 | In a game | `Playing <Game>` + cover + elapsed timer (+ firmware line) |
 | Home screen | `PlayStation 4` + logo (`Idling on Home Menu`) |
-| Settings / browser | `In Settings` (game timer underneath is kept) |
+| Settings | `PlayStation 4` + `In Settings` (game timer underneath is kept) |
+| Browser | `PlayStation 4` + `Using Web Browser` (game timer underneath is kept) |
 | Netflix & co. | `Watching <App>` |
 | Nothing to show | Presence clears |
 

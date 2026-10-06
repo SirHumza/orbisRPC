@@ -97,6 +97,6 @@ the result on screen.
 - Kernel log (loader events, faults): TCP `192.168.1.136:3232`, raw stream.
 - Daemon log: `/data/orbisRPC/log.txt` via FTP (`192.168.1.136:2121`,
   anonymous). Absent file = payload never executed, full stop.
-- Process list: `sysctl kern.proc` (see `scripts/ps4_watch.py`) — look
+- Process list: `sysctl kern.proc` — look
   for `Payload` and `eboot.bin` entries.
 - Final proof: Discord profile shows the game + ticking timer.
