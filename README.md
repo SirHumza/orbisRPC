@@ -8,8 +8,11 @@
   <a href="https://github.com/SirHumza/orbisRPC/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/version-1.0.0-ffd800?style=flat-square" alt="version"></a>
   <img src="https://img.shields.io/badge/PS4-GoldHEN-003791?style=flat-square" alt="PS4 GoldHEN">
   <img src="https://img.shields.io/badge/Discord-Rich%20Presence-5865F2?style=flat-square" alt="Discord">
+  <a href="https://discord.gg/BWEyfcT7ZQ"><img src="https://img.shields.io/badge/Discord-Join%20the%20server-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Join the Discord"></a>
   <img src="https://img.shields.io/badge/tables-none-brightgreen?style=flat-square" alt="no tables">
 </p>
+
+<p align="center">by <b>CyberMask367</b> · <a href="https://discord.gg/BWEyfcT7ZQ">discord.gg/BWEyfcT7ZQ</a></p>
 
 <p align="center"><b>Discord Rich Presence for the jailbroken PS4 — every game, zero setup.</b><br>
 A background daemon that lives entirely on your console and posts what you're
@@ -30,7 +33,38 @@ playing to Discord: name, cover art, timer. No PC at runtime.</p>
 
 After a reboot: re-jailbreak, then enable AutoRun for `orbisrpc` in
 Payload Guest once — it starts itself on every jailbreak after that.
-⚠️Firmware note: Currently tested only on PS4 firmware 9.00. Other firmware versions are not yet confirmed.
+✅ Firmware: confirmed working on 9.00 through 13.52.
+
+**Upgrading test builds:** delete the `/data/orbisRPC` folder from your PS4
+first, then launch the new payload once — it writes a fresh `config.json`.
+Open `/data/orbisRPC/config.json`, put your Discord token in the
+`"token": "SET_ME"` slot, and re-run the payload.
+
+## Support / Community
+
+Questions, test-build feedback, bug reports: join the Discord —
+**[discord.gg/BWEyfcT7ZQ](https://discord.gg/BWEyfcT7ZQ)** — and post in
+`testers-chat`. No need to hunt for the link; this is it.
+
+⚠️ **This is a beta.** Test builds are handed out on the Discord — join the
+server to get beta access.
+
+**Game not showing on Discord?** Your DNS blocker is likely eating Sony's
+TMDB host. Either disable it or add an exception in
+`/data/nanodns/nanodns.ini`:
+
+```ini
+[exceptions]
+tmdb.np.dl.playstation.net
+feature.api.playstation.com
+.stun.playstation.net
+stun..playstation.net
+ena.net.playstation.net
+post.net.playstation.net
+gst.prod.dl.playstation.net
+```
+
+Save, then restart the console.
 ## What you get
 
 | | |

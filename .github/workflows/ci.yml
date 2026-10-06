@@ -59,3 +59,36 @@ jobs:
           echo "$NEEDED" | grep -q libSceSystemService.sprx || { echo "missing libSceSystemService (foreground detection)"; exit 1; }
           if echo "$NEEDED" | grep -q 'libkernel\.so'; then echo "FORBIDDEN: app-world libkernel.so"; exit 1; fi
           echo "linkage OK"
+  notify:
+    # Post-push Discord ping via webhook. The webhook URL lives in the
+    # DISCORD_WEBHOOK_URL repo secret (never in the tree); forks without
+    # the secret skip silently instead of failing.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    needs: [host, sdk-payload]
+    steps:
+      - name: notify discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "no DISCORD_WEBHOOK_URL secret; skipping notify"
+            exit 0
+          fi
+          python3 - "$DISCORD_WEBHOOK_URL" <<'EOF'
+          import json, os, urllib.request
+          url = os.environ["DISCORD_WEBHOOK_URL"]
+          msg = os.environ.get("COMMIT_MSG", "")[:1500]
+          content = (
+              f"🚀 **orbisRPC** new commit on `{os.environ['GITHUB_REF_NAME']}` "
+              f"by {os.environ['GITHUB_ACTOR']}: {os.environ['GITHUB_SHA'][:7]}\n"
+              f"```\n{msg}\n```\n"
+              f"<https://github.com/{os.environ['GITHUB_REPOSITORY']}/commit/{os.environ['GITHUB_SHA']}>"
+          )
+          req = urllib.request.Request(
+              url, data=json.dumps({"content": content}).encode(),
+              headers={"Content-Type": "application/json"})
+          urllib.request.urlopen(req, timeout=30).read()
+          print("discord notified")
+          EOF
