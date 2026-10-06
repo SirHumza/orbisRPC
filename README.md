@@ -183,7 +183,7 @@ server to get beta access.
 Short version here; the full symptom-first guide is
 [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
 
-**Game not showing on Discord?** It's your DNS blocker. Disable it, or use
+**Game cover not showing on Discord?** It's your DNS blocker. Disable it, or use
 [nanoDNS](https://github.com/drakmor/nanoDNS) with an exception.
 
 To add the exception, open the nanoDNS config at

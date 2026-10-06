@@ -24,7 +24,7 @@ Discord (`testers-chat`) — see the repo README for the invite.
 3. Hotspot/mobile connections have caused oversized frames Discord
    rejects — prefer stable Wi-Fi/LAN.
 
-## Game not showing (presence never leaves idle/home)
+## Game cover not showing (name + timer fine, no art)
 
 Your DNS blocker is eating Sony's TMDB host. Either disable it or use
 [nanoDNS](https://github.com/drakmor/nanoDNS) with an exception:
