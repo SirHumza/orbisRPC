@@ -22,25 +22,37 @@ playing to Discord: name, cover art, timer. No PC at runtime.</p>
 
 ## Install (5 minutes)
 
-> ⚠️ **No PKG yet — beta installs via payload.** Grab the latest test-build
-> `.elf` from the Discord (**[discord.gg/BWEyfcT7ZQ](https://discord.gg/BWEyfcT7ZQ)**).
+> ⚠️ **No PKG — beta is `.elf` only.** Grab the latest test build
+> (`orbisrpc_test-build-*.elf`) from the Discord
+> (**[discord.gg/BWEyfcT7ZQ](https://discord.gg/BWEyfcT7ZQ)**). This is still
+> a test build, not a full release — expect bugs, report them in
+> `testers-chat`.
 
-1. If an old test build is on the console, delete the `/data/orbisRPC`
-   folder first.
-2. Send the payload to the PS4 (elfldr / Payload Guest) and run it once —
-   it writes a fresh `/data/orbisRPC/config.json`.
-3. Open `/data/orbisRPC/config.json`, put your Discord token in the
-   `"token": "SET_ME"` slot, then re-run the payload.
-4. Launch a game and watch Discord.
+1. Before launching, delete the `/data/orbisRPC` folder from your PS4 if
+   you have one there from an earlier build.
+2. Run the payload first time — it'll create the config file, then say
+   there's no token yet.
+3. Open `/data/orbisRPC/config.json` and add your account token in the
+   `"token": "SET_ME"` slot.
+4. After setting the token, re-run the payload. Launch a game and watch
+   Discord. Give feedback in `testers-chat`.
 
 After a reboot: re-jailbreak, then enable AutoRun for `orbisrpc` in
 Payload Guest once — it starts itself on every jailbreak after that.
 ✅ Firmware: confirmed working on 9.00 through 13.52.
 
-**Upgrading test builds:** delete the `/data/orbisRPC` folder from your PS4
-first, then launch the new payload once — it writes a fresh `config.json`.
-Open `/data/orbisRPC/config.json`, put your Discord token in the
-`"token": "SET_ME"` slot, and re-run the payload.
+**Upgrading test builds:** as usual, delete the `/data/orbisRPC` folder
+before using a new test build — and you'll have to re-add your token in
+the config.
+
+### What's in the latest test build (0.60)
+
+- Fixed firmware string parsing — older firmware numbers like 9.00 now
+  show properly.
+- Homebrew apps resolve via pkg-zone.
+- Retro games (PS1/PS2/PSP) resolve via a custom list.
+- Optional presence flags, all `true` by default:
+  `show_firmware`, `show_idle`, `show_media`, `show_homebrew`.
 
 ## Support / Community
 
@@ -51,9 +63,23 @@ Questions, test-build feedback, bug reports: join the Discord —
 ⚠️ **This is a beta.** Test builds are handed out on the Discord — join the
 server to get beta access.
 
-**Game not showing on Discord?** Your DNS blocker is likely eating Sony's
-TMDB host. Either disable it or add an exception in
-`/data/nanodns/nanodns.ini`:
+**Game not showing on Discord?** It's your DNS blocker. Disable it, or use
+[nanoDNS](https://github.com/drakmor/nanoDNS) with an exception.
+
+To add the exception, open the nanoDNS config at
+`/data/nanodns/nanodns.ini` and find the exceptions list:
+
+```ini
+[exceptions]
+feature.api.playstation.com
+.stun.playstation.net
+stun..playstation.net
+ena.net.playstation.net
+post.net.playstation.net
+gst.prod.dl.playstation.net
+```
+
+Add `tmdb.np.dl.playstation.net` so it looks like this:
 
 ```ini
 [exceptions]
@@ -66,7 +92,7 @@ post.net.playstation.net
 gst.prod.dl.playstation.net
 ```
 
-Save, then restart the console.
+Once you're done, save and restart your console.
 ## What you get
 
 | | |
@@ -76,7 +102,7 @@ Save, then restart the console.
 | ⏱️ **True timers** | Survive reconnects and restarts, resume across quick game switches. |
 | 🧠 **Self-learning** | First-seen titles are remembered, so later boots resolve instantly. |
 | 🔄 **Self-updating** | Daemon updates land from GitHub releases with automatic rollback. No reinstall treadmill. |
-| 📦 **Simple install** | Payload install → token → presence. (Setup PKG coming later.) |
+| 📦 **Simple install** | Payload (`.elf`) install → token → presence. |
 
 ## How it works
 
