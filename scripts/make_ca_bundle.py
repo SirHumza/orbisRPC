@@ -15,6 +15,14 @@ WANT = [
     "Sectigo Public Server Authentication Root R46",
     "USERTrust ECC Certification Authority",
     "USERTrust RSA Certification Authority",
+    # Sony TMDB serves through a DigiCert TLS RSA4096 chain. Verified against
+    # the live host 2026-10-03:
+    #   tmdb.np.dl.playstation.net -> DigiCert G5 TLS RSA4096 SHA384 2021 CA1
+    #                                 -> DigiCert TLS RSA4096 Root G5
+    # "DigiCert Trusted Root G4" does NOT cover this: G5 is a separate root
+    # that cross-signs to GlobalSign, so a bundle holding only G4 fails the
+    # handshake with ORX-TLS-003 and TMDB silently never resolves a name.
+    "DigiCert TLS RSA4096 Root G5",
     "DigiCert Global Root CA",
     "DigiCert Global Root G2",
     "DigiCert Global Root G3",
@@ -29,6 +37,12 @@ WANT = [
     "Baltimore CyberTrust Root",
     "Starfield Services Root Certificate Authority - G2",
     "GlobalSign Root CA",
+    # pkg-zone.com (homebrew metadata) chains through Let's Encrypt's new
+    # generation. Verified against the live host 2026-10-03:
+    #   pkg-zone.com -> Let's Encrypt YE1 -> ISRG Root YE -> ISRG Root X2
+    # The bundle already had ISRG Root X1, which covers the *previous* LE
+    # chain but not this one -- another silent ORX-TLS-003.
+    "ISRG Root X2",
 ]
 
 

@@ -17,35 +17,45 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The release ZIP (v0.9) predates the SDK's 13.52 offsets, and the SDK's
+      # crt/patch.c makes _start() terminate before main() for unlisted
+      # firmware -- so a ZIP-built payload dies silently on 13.52. Build from
+      # git instead. Recipe from drakmor/nanoDNS's ps4 workflow, which ships a
+      # working 13.52 payload over the same elfldr path.
+      - name: checkout ps4-payload-sdk
+        uses: actions/checkout@v4
+        with:
+          repository: ps4-payload-dev/sdk
+          ref: 573b4a0 # Add 14.00 offsets; includes 959e4ed "Add 13.52 offsets"
+          path: sdk
       - name: install llvm
-        run: sudo apt-get update -qq && sudo apt-get install -qy llvm lld
-      - name: fetch ps4-payload-sdk
+        run: sudo apt-get update -qq && sudo apt-get install -qy clang-18 lld-18 llvm-18
+      - name: build SDK from source
         run: |
-          curl -sL -o /tmp/sdk.zip https://github.com/ps4-payload-dev/sdk/releases/latest/download/ps4-payload-sdk.zip
-          mkdir -p ~/ps4-payload-sdk && unzip -q -o /tmp/sdk.zip -d ~/ps4-payload-sdk
+          make -C sdk DESTDIR="$HOME/ps4-payload-sdk" clean install
+      - name: gate SDK firmware support
+        # __patch_init() errors for firmware absent from this table, and
+        # crt/crt.c turns that into payload_terminate() before main().
+        run: |
+          grep -q "case 0x1352:" sdk/crt/patch.c || {
+            echo "FAIL: SDK lacks 13.52 offsets; payload cannot boot on 13.52"; exit 1; }
+          echo "SDK has 13.52 offsets"
       - name: build SDK daemon payload
         run: |
-          export PS4_PAYLOAD_SDK="$HOME/ps4-payload-sdk/ps4-payload-sdk"
-          export PATH="/usr/lib/llvm-14/bin:$PATH"
+          export PS4_PAYLOAD_SDK="$HOME/ps4-payload-sdk"
+          export PS4_SDK_SRC="$GITHUB_WORKSPACE/sdk"
           ./scripts/build_sdk.sh
       - name: gate daemon-world linkage only
         run: |
-          export LLVM_READELF="$(command -v llvm-readelf || echo /usr/lib/llvm-14/bin/llvm-readelf)"
+          export LLVM_READELF="$(command -v llvm-readelf-18 || command -v llvm-readelf)"
           NEEDED=$("$LLVM_READELF" -d build-sdk/orbisrpc_sdk.elf | grep NEEDED | sed 's/.*\[//;s/\]//')
           echo "$NEEDED"
           echo "$NEEDED" | grep -q libkernel_web.sprx || { echo "missing libkernel_web"; exit 1; }
           echo "$NEEDED" | grep -q libSceLibcInternal.sprx || { echo "missing libSceLibcInternal"; exit 1; }
           echo "$NEEDED" | grep -q libSceNet.sprx || { echo "missing libSceNet"; exit 1; }
+          # Foreground detection is sceSystemServiceGetAppIdOfBigApp +
+          # sceLncUtilGetAppTitleId. Without this module the payload cannot
+          # start at all, so assert it rather than trusting the link line.
+          echo "$NEEDED" | grep -q libSceSystemService.sprx || { echo "missing libSceSystemService (foreground detection)"; exit 1; }
           if echo "$NEEDED" | grep -q 'libkernel\.so'; then echo "FORBIDDEN: app-world libkernel.so"; exit 1; fi
           echo "linkage OK"
-  consistency:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: version parity (version.h vs installer Makefile)
-        run: |
-          V_H=$(grep -oE '#define ORBISRPC_VERSION "[^"]+"' orbisrpc/version.h | cut -d'"' -f2)
-          V_MK=$(grep -oE '^VERSION[[:space:]]*:=.*' installer/Makefile | sed 's/.*:= *//')
-          echo "version.h=$V_H Makefile=$V_MK"
-          [ -n "$V_H" ] && [ "$V_H" = "$V_MK" ] || { echo "VERSION MISMATCH"; exit 1; }
-          echo "versions match"

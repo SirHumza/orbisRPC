@@ -19,12 +19,14 @@
  * foreground) is reliable via ShellCoreUtil.
  */
 #include "detect.h"
-#include "fw.h"
 #include "cfg.h"
 #include "log.h"
-#include "sfo.h"
 #include "tmdb.h"
 #include "clock.h"
+#include "procwalk.h"
+#include "bigapp.h"
+#include "pkgzone.h"
+#include "gamecache.h"
 #ifdef ORBISRPC_SDK_PAYLOAD
 /* Payload-SDK build: dlopen/dlsym come from the SDK libc (dlfcn);
  * there is no UserService here — user_init() below degrades. */
@@ -46,212 +48,203 @@
 #ifdef ORBISRPC_SDK_PAYLOAD
 #include <sys/types.h>
 #include <sys/sysctl.h>
+#include <sys/mman.h>
 
+#ifndef ORBISRPC_SDK_PAYLOAD
 static int is_title_prefix(const char *n);
+#endif
 
-/* --- SDK-build foreground/title signals (no ShellCoreUtil/UserService) ---
- * A launched game shows up as an "eboot.bin" process; its identity comes
- * from the freshest savedata dir (gameplay writes saves continuously).
- * Both facts verified live via probes before wiring them in. */
-/* Count eboot.bin processes etc. live below (shared sysctl fallback,
- * outside the SDK-only ifdef so both builds probe identically). */
+/* --- payload-build foreground, identity and screen --------------------
+ * Everything below asks the OS a direct question. None of it reads a struct
+ * offset, scans a directory for the "newest" title, or infers activity from
+ * file mtimes -- so none of it can be invalidated by a firmware that moves
+ * things around, which is what made the previous heuristics unusable past
+ * 9.00.
+ *
+ * Foreground + title id: sceSystemServiceGetAppIdOfBigApp() names the app in
+ * front, sceLncUtilGetAppTitleId() turns that app id into a TITLEID. Both come
+ * from libSceSystemService.sprx, so the payload now links it.
+ *
+ * Screen: the kernel logs every ShellUI scene change into kern.msgbuf, so
+ * "am I looking at Settings right now" is answerable without inference.
+ *
+ * Prototypes are local because this file also builds for the OpenOrbis app,
+ * where these symbols arrive via <orbis/...> headers. */
+int32_t sceSystemServiceGetAppIdOfBigApp(void);
+int sceLncUtilGetAppTitleId(uint32_t app_id, char *title_id);
 
-/* Sandbox mounts: /mnt/sandbox/<TITLE>_000 exists exactly while that
- * title's game process lives. This is authoritative foreground identity
- * straight from the OS — no heuristics, no races, no sync pollution.
- * Verified live: only the running game's mount is listed. */
-static int scan_sandbox_mount(char *out, size_t cap){
-    if(!out || cap < 10) return -1;
-    DIR *d = opendir("/mnt/sandbox");
-    if(!d) return -1;
-    struct dirent *e;
-    int found = 0;
-    char best[16] = "";
-    while((e = readdir(d))){
-        const char *n = e->d_name;
-        if(strlen(n) != 13) continue; /* TITLEID_000 */
-        if(n[9] != '_' || n[10] != '0' || n[11] != '0' || n[12] != '0') continue;
-        char tid[16];
-        memcpy(tid, n, 9);
-        tid[9] = 0;
-        if(!is_title_prefix(tid)) continue;
-        if(!found){
-            strncpy(best, tid, sizeof best - 1);
-            found = 1;
-        }
+#define TITLEID_LEN 9
+/* Buffer handed to the OS for the title id. Sony writes a fixed-width field,
+ * so size it wider than the 9 valid characters and terminate before use. */
+#define TITLEID_BUF 16
+
+/* Classify what is in the foreground.
+ *   1  a game: TITLEID written to out
+ *   0  no big app at all (home screen)
+ *   2  a system app is in front (app id 0, or an NPXS id)
+ *  -1  the read failed; the caller must treat this as "unknown"
+ *
+ * The 0/2/-1 split is the load-bearing part. A system app in front is not a
+ * closed game, and a failed read is not a closed game either; collapsing
+ * either into "gone" is how presence got cleared while a game was running. */
+static int read_big_app(char *out, size_t cap){
+    if(!out || cap < TITLEID_LEN + 1) return -1;
+    out[0] = 0;
+    int32_t app_id = sceSystemServiceGetAppIdOfBigApp();
+    /* The decision lives in bigapp.c so it can be unit-tested off-console. */
+    char raw[TITLEID_BUF];
+    memset(raw, 0, sizeof raw);
+    int rc = 0;
+    if(app_id > 0) rc = sceLncUtilGetAppTitleId((uint32_t)app_id, raw);
+    raw[TITLEID_BUF - 1] = 0;
+    return bigapp_classify(app_id, rc, raw, out, cap);
+}
+
+/* --- Settings screen, read from the kernel's own scene log ------------
+ * ShellUI logs a line per scene change; the newest one is the current scene.
+ * Scenes that matter carry ": SettingPage" (verified against a real console
+ * capture: settings_root, storage_data#storage, id_goldhen_menu). */
+
+/* kern.msgbuf is a fixed ring and sysctlbyname() fails with ENOMEM when the
+ * supplied buffer is smaller than it, so the size is taken from the kernel's
+ * own answer rather than hardcoded. A fixed 128 KB read fails on every poll
+ * against a larger ring, which leaves the feature permanently dead while
+ * still looking configured. */
+#define MSGBUF_MIN (64u * 1024u)
+#define MSGBUF_MAX (2u * 1024u * 1024u)
+#define SCENE_MAX  192
+
+static char *g_msgbuf = NULL;
+static size_t g_msgbuf_sz = 0;
+static int g_msgbuf_state = 0;     /* 0 untried, 1 ready, -1 unavailable */
+static int g_msgbuf_logged = 0;
+
+static void settings_msgbuf_failed(const char *why){
+    if(g_msgbuf_logged) return;
+    g_msgbuf_logged = 1;
+    log_msg("settings probe unavailable: %s (screen state text disabled)", why);
+}
+
+static int settings_msgbuf_acquire(void){
+    if(g_msgbuf_state) return g_msgbuf_state > 0 ? 0 : -1;
+    size_t need = 0;
+    if(sysctlbyname("kern.msgbuf", NULL, &need, NULL, 0) != 0 || need == 0){
+        settings_msgbuf_failed("kern.msgbuf size query failed");
+        g_msgbuf_state = -1;
+        return -1;
     }
-    closedir(d);
-    if(!found) return -1;
-    strncpy(out, best, cap - 1);
-    out[cap - 1] = 0;
+    if(need < MSGBUF_MIN) need = MSGBUF_MIN;
+    if(need > MSGBUF_MAX){
+        settings_msgbuf_failed("kern.msgbuf exceeds the 2 MB cap");
+        g_msgbuf_state = -1;
+        return -1;
+    }
+    /* Round up: mmap does not require the exact length to be page sized. */
+    size_t page = 4096;
+    size_t rounded = (need + page - 1) & ~(page - 1);
+    void *p = mmap(NULL, rounded, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANON, -1, 0);
+    if(p == MAP_FAILED){
+        settings_msgbuf_failed("mmap failed");
+        g_msgbuf_state = -1;
+        return -1;
+    }
+    /* Prove the buffer really is large enough before committing to it. */
+    size_t probe = rounded;
+    if(sysctlbyname("kern.msgbuf", p, &probe, NULL, 0) != 0){
+        settings_msgbuf_failed("kern.msgbuf read failed at the queried size");
+        munmap(p, rounded);
+        g_msgbuf_state = -1;
+        return -1;
+    }
+    g_msgbuf = (char *)p;
+    g_msgbuf_sz = rounded;
+    g_msgbuf_state = 1;
+    log_msg("settings probe: kern.msgbuf %zu bytes", g_msgbuf_sz);
     return 0;
 }
 
-static long scan_newest_save(char *out, size_t cap){    static const char *users[] = { "1898cd02", "1898cd03", NULL };
-    /* user dirs vary per console; probe the known ones plus a scan of
-     * /user/home for anything looking like a user id dir. */
-    char udirs[8][32];
-    int ndirs = 0;
-    DIR *hd = opendir("/user/home");
-    if(hd){
-        struct dirent *e;
-        while((e = readdir(hd)) && ndirs < 8){
-            if(e->d_name[0] == '.') continue;
-            strncpy(udirs[ndirs], e->d_name, 31);
-            udirs[ndirs][31] = 0;
-            ndirs++;
-        }
-        closedir(hd);
-    }
-    for(int i = 0; users[i] && ndirs < 8; i++){
-        int dup = 0;
-        for(int k = 0; k < ndirs; k++) if(!strcmp(udirs[k], users[i])) dup = 1;
-        if(!dup){ strncpy(udirs[ndirs], users[i], 31); udirs[ndirs][31] = 0; ndirs++; }
-    }
-    long best = -1;
+/* Newest focused scene out of the kernel ring: 1 + fills out, 0 when the ring
+ * holds no scene change yet, -1 when the probe is unavailable.
+ *
+ * Shared by the settings and browser matchers so both always agree on which
+ * event is current. If they disagreed, one would post its presence while the
+ * other believed it owned the screen. */
+static int last_focused_scene(char *out, size_t cap){
+    if(!out || cap == 0) return -1;
     out[0] = 0;
-    const char *best_src = "none";
-    /* Per-title activity = max(savedata writes, app.pkg access time).
-     * app.pkg atime is the sharper signal: the running game streams its
-     * own package continuously, while save mtimes get bulk-touched by
-     * cloud sync (proven: all 28 titles sharing one mtime). atime wins
-     * ties because only gameplay advances it. */
-    for(int u = 0; u < ndirs; u++){
-        char spath[96];
-        snprintf(spath, sizeof spath, "/user/home/%s/savedata", udirs[u]);
-        DIR *sd = opendir(spath);
-        if(!sd) continue;
-        struct dirent *e;
-        while((e = readdir(sd))){
-            if(e->d_name[0] == '.') continue;
-            if(strlen(e->d_name) != 9 || !is_title_prefix(e->d_name)) continue;
-            char tp[160];
-            snprintf(tp, sizeof tp, "%s/%s", spath, e->d_name);
-            /* newest write inside the title dir wins */
-            DIR *td = opendir(tp);
-            long tb = -1;
-            if(td){
-                struct dirent *f;
-                while((f = readdir(td))){
-                    if(f->d_name[0] == '.') continue;
-                    /* d_name can be up to 255 chars; tp already holds up
-                     * to ~150 — skip overlong names instead of overflowing. */
-                    if(strlen(f->d_name) > 64) continue;
-                    char fp[256];
-                    int wn = snprintf(fp, sizeof fp, "%s/%s", tp, f->d_name);
-                    if(wn <= 0 || (size_t)wn >= sizeof fp) continue;
-                    struct stat fs;
-                    if(stat(fp, &fs) == 0 && fs.st_mtime > tb) tb = fs.st_mtime;
-                }
-                closedir(td);
-            }
-            if(tb < 0){
-                struct stat ds;
-                if(stat(tp, &ds) == 0) tb = ds.st_mtime;
-            }
-            if(tb > best){ best = tb; strncpy(out, e->d_name, cap-1); out[cap-1] = 0; best_src = "save"; }
-        }
-        closedir(sd);
+#ifdef ORBISRPC_SDK_PAYLOAD
+    if(settings_msgbuf_acquire() != 0) return -1;
+    size_t len = g_msgbuf_sz;
+    if(sysctlbyname("kern.msgbuf", g_msgbuf, &len, NULL, 0) != 0){
+        settings_msgbuf_failed("kern.msgbuf read failed");
+        return -1;
     }
-    /* Second signal: /user/app/<TITLE> dir mtime. Launches touch the app
-     * dir even when the game hasn't saved yet (the exact hole that showed
-     * a stale title for a freshly launched game), and it covers titles
-     * with no savedata at all. */
-    {
-        DIR *ad = opendir("/user/app");
-        if(ad){
-            struct dirent *e;
-            while((e = readdir(ad))){
-                if(strlen(e->d_name) != 9 || !is_title_prefix(e->d_name)) continue;
-                char ap[64];
-                snprintf(ap, sizeof ap, "/user/app/%s", e->d_name);
-                struct stat st;
-                if(stat(ap, &st) == 0 && st.st_mtime > best){
-                    best = st.st_mtime;
-                    strncpy(out, e->d_name, cap-1);
-                    out[cap-1] = 0;
-                    best_src = "appdir";
-                }
-            }
-            closedir(ad);
-        }
+    if(len >= g_msgbuf_sz) len = g_msgbuf_sz - 1;
+    g_msgbuf[len] = 0;
+    /* The ring is chronological, so the newest entry is the live scene. */
+    const char *cur = g_msgbuf;
+    const char *last = NULL;
+    while((cur = strstr(cur, "OnFocusActiveSceneChanged")) != NULL){
+        last = cur;
+        cur += sizeof("OnFocusActiveSceneChanged") - 1;
     }
-    /* Third signal (strongest): app.pkg ACCESS time. The running game
-     * streams its own package, so its atime is the freshest on the box;
-     * cloud sync touches mtimes, never atimes. Verified live: the
-     * foreground title's atime beats every idle title by days. */
-    {
-        DIR *ad = opendir("/user/app");
-        if(ad){
-            struct dirent *e;
-            while((e = readdir(ad))){
-                if(strlen(e->d_name) != 9 || !is_title_prefix(e->d_name)) continue;
-                char pp[96];
-                int wn = snprintf(pp, sizeof pp, "/user/app/%s/app.pkg",
-                                  e->d_name);
-                if(wn <= 0 || (size_t)wn >= sizeof pp) continue;
-                struct stat st;
-                if(stat(pp, &st) == 0 && (long)st.st_atime > best){
-                    best = (long)st.st_atime;
-                    strncpy(out, e->d_name, cap-1);
-                    out[cap-1] = 0;
-                    best_src = "pkg-atime";
-                }
-            }
-            closedir(ad);
-        }
-    }
-    if(out[0]) log_dbg("title scan: %s via %s", out, best_src);
-    return out[0] ? 0 : -1;
+    if(!last) return 0;
+    const char *target = strstr(last, "-> [");
+    if(!target) return 0;
+    const char *end = strchr(target + 4, ']');
+    if(!end) return 0;
+    size_t n = (size_t)(end - (target + 4));
+    if(n >= cap) return 0;             /* implausible; stay honest */
+    memcpy(out, target + 4, n);
+    out[n] = 0;
+    return 1;
+#else
+    return -1;   /* app build: no kern.msgbuf story */
+#endif
 }
 #endif
 
-/* --- shared sysctl fallback (payload-SDK builds only) ------------------ */
-/* OpenOrbis SDK ships no <sys/sysctl.h>, so this probe lives in SDK builds;
- * OpenOrbis builds fall back to the UserService foreground user instead.
- * Both builds probe ShellCoreUtil first (see detect_foreground_active). */
-#ifdef ORBISRPC_SDK_PAYLOAD
+/* Defined outside the payload block so the app build links too; it has no
+ * kern.msgbuf story there and reports unknown rather than guessing.
+ *
+ * 1 = Settings in front, 0 = a different scene, -1 = unknown.
+ *
+ * -1 means "no opinion" and must never be folded into 0: the probe being
+ * unavailable is not evidence that Settings closed. It also covers "the ring
+ * holds no scene change yet", which resolves on its own once the user moves
+ * around the UI. */
+int detect_settings_active(void){
+#ifndef ORBISRPC_SDK_PAYLOAD
+    return -1;   /* not wired for the app build */
+#else
+    char scene[SCENE_MAX];
+    if(last_focused_scene(scene, sizeof scene) != 1) return -1;
+    return strstr(scene, "SettingPage") != NULL ? 1 : 0;
 
-/* Count eboot.bin processes. A change means launch/close: callers drop
- * stale state immediately instead of waiting out debounce windows. */
-int detect_eboot_count(void){
-    int mib[4] = { 1, 14, 8, 0 };
-    size_t sz = 0;
-    int n = 0;
-    if(sysctl(mib, 4, NULL, &sz, NULL, 0) != 0) return -1;
-    static unsigned char buf[256*1024];
-    if(sz > sizeof buf) return -1;
-    if(sysctl(mib, 4, buf, &sz, NULL, 0) != 0) return -1;
-    size_t off = 0;
-    while(off + 4 <= sz){
-        int recsz = *(int *)(buf + off);
-        if(recsz <= 0 || off + (size_t)recsz > sz) break;
-        if(fw_match_eboot(buf + off, recsz))
-            n++;
-        off += (size_t)recsz;
-    }
-    return n;
+#endif
 }
-static int proc_has_eboot(void){
-    int mib[4] = { 1, 14, 8, 0 };
-    size_t sz = 0;
-    if(sysctl(mib, 4, NULL, &sz, NULL, 0) != 0) return -1;
-    static unsigned char buf[256*1024];
-    if(sz > sizeof buf) return -1;
-    if(sysctl(mib, 4, buf, &sz, NULL, 0) != 0) return -1;
-    size_t off = 0;
-    while(off + 4 <= sz){
-        int recsz = *(int *)(buf + off);
-        if(recsz <= 0 || off + (size_t)recsz > sz) return -1;
-        if(fw_match_eboot(buf + off, recsz))
-            return 1;
-        off += (size_t)recsz;
-    }
+
+/* Web browser. Scene names verified on console 2026-10-04 from a live klog:
+ *   [] -> [WebBrowserScene : WebBrowserScene]    browser opens
+ *   [SettingsScene] -> [WebViewDialog : ...]    login popup over the page
+ *   [WebViewDialog] -> [BrowserMain : MainScene] page loaded
+ *   [BrowserMain] -> [ContentAreaScene]           browser closed
+ * "WebBrowserPlugin" is a plugin load, not a focus target, so it never reaches
+ * this matcher; including "WebBrowser" costs nothing either way. */
+int detect_browser_active(void){
+#ifndef ORBISRPC_SDK_PAYLOAD
+    return -1;   /* not wired for the app build */
+#else
+    char scene[SCENE_MAX];
+    if(last_focused_scene(scene, sizeof scene) != 1) return -1;
+    if(strstr(scene, "WebBrowser") || strstr(scene, "BrowserMain") ||
+       strstr(scene, "WebViewDialog")) return 1;
     return 0;
+#endif
 }
 
-#endif /* ORBISRPC_SDK_PAYLOAD (sysctl fallback) */
-
+#ifndef ORBISRPC_SDK_PAYLOAD
 static int s_user_inited = 0;
 static int s_user_ok = 0;
 static int user_init(void){
@@ -285,27 +278,25 @@ static int scu_init(void){
     if(s_scu_tried) return s_is_app_launched != NULL;
     s_scu_tried = 1;
     void *h = dlopen("libSceShellCoreUtil.sprx", 0);
-    if(!h){ log_msg("ShellCoreUtil unavailable (dlopen fail); using sysctl eboot scan"); return 0; }
+    if(!h){ log_msg("ShellCoreUtil unavailable (dlopen fail); using foreground-user fallback"); return 0; }
     s_is_app_launched = (shellcore_isapplaunched_fn)(uintptr_t)dlsym(h, "sceShellCoreUtilIsAppLaunched");
     log_msg("ShellCoreUtil IsAppLaunched %s", s_is_app_launched ? "resolved" : "unavailable (dlsym fail)");
     return s_is_app_launched != NULL;
 }
+#endif
 
 /* --- foreground-active: the core "a game is running" signal ---------- */
 int detect_foreground_active(void){
-    /* ShellCoreUtil dlopen works on all firmwares (libkernel exports
-     * dlopen/dlsym directly). Firmware-independent — preferred over the
-     * fragile sysctl kinfo_proc scan which assumes a hardcoded process-table
-     * layout (offset 447, recsz>=479) that differs across PS4 firmware versions. */
-    if(scu_init() && s_is_app_launched){
-        return s_is_app_launched() ? 1 : 0;   /* 0 when sitting on the home screen */
-    }
-    /* Fallback depends on toolchain capability: SDK builds scan the
-     * process table; OpenOrbis builds ask UserService for the
-     * foreground user. Both fail closed (inactive) on error. */
 #ifdef ORBISRPC_SDK_PAYLOAD
-    return proc_has_eboot();
+    char tid[16];
+    return read_big_app(tid, sizeof tid);
 #else
+    if(scu_init() && s_is_app_launched){
+        int on = s_is_app_launched();
+        return (on != 0) ? 1 : 0;   /* 0 when sitting on the home screen */
+    }
+    /* fallback: foreground user exists. If UserService itself failed,
+     * report inactive instead of guessing "playing". */
     if(user_init() != 0) return 0;
     int32_t fg = -1;
     int32_t rc = sceUserServiceGetForegroundUser(&fg);
@@ -315,12 +306,14 @@ int detect_foreground_active(void){
 }
 
 /* --- title naming ---------------------------------------------------- */
+#ifndef ORBISRPC_SDK_PAYLOAD
 static int is_title_prefix(const char *n){
     /* CUSA (PS4) + PPSA (PS5-backport) + EU/JP/indie variants */
     return strncmp(n,"CUSA",4)==0 || strncmp(n,"PPSA",4)==0 ||
            strncmp(n,"PCSE",4)==0 || strncmp(n,"PCSB",4)==0 ||
            strncmp(n,"PCSG",4)==0 || strncmp(n,"EPSA",4)==0;
 }
+#endif
 /* last resolved titleId (for Discord asset key); valid after a successful
  * detect_current_game / detect_name_for_title. */
 static char s_last_titleid[16] = "";
@@ -336,9 +329,21 @@ static char s_rs_art[256] = "";
  * resolves reuse indefinitely; raw fallbacks re-resolve after 5 min. */
 static int s_rs_ok = 0;
 static int64_t s_rs_at = 0;
-static int resolve_reuse(const char *ti, char *out_name, size_t cap){
+static int resolve_reuse(const char *ti, char *out_name, size_t cap, int *was_resolved){
+    if(was_resolved) *was_resolved = 0;
     if(!ti || !ti[0] || strcmp(ti, s_rs_tid) != 0 || !s_rs_name[0]) return 0;
-    if(!s_rs_ok && orbis_mono_s() - s_rs_at > 300) return 0;
+    if(!s_rs_ok){
+        /* Inside the grace window the raw id is the best thing we have, so
+         * show it -- but do not claim it was a resolve. */
+        if(orbis_mono_s() - s_rs_at <= 300){
+            strncpy(out_name, s_rs_name, cap - 1);
+            out_name[cap - 1] = 0;
+            return 1;
+        }
+        log_dbg("name: cached raw id for %s expired; re-resolving", ti);
+        return 0;   /* expired: the network sources get another turn */
+    }
+    if(was_resolved) *was_resolved = 1;
     strncpy(out_name, s_rs_name, cap - 1);
     out_name[cap - 1] = 0;
     strncpy(s_last_art, s_rs_art, sizeof s_last_art - 1);
@@ -380,6 +385,7 @@ static void remember_titleid(const char *ti){
     strncpy(s_last_titleid, ti, sizeof s_last_titleid - 1);
     s_last_titleid[sizeof s_last_titleid - 1] = 0;
 }
+#ifndef ORBISRPC_SDK_PAYLOAD
 static long scan_one_appdir(const char *base, char *out, size_t cap, long best){
     if(!base || !out || cap < 2) return best;
     DIR *d = opendir(base);
@@ -401,6 +407,7 @@ static long scan_one_appdir(const char *base, char *out, size_t cap, long best){
     closedir(d);
     return best;
 }
+#endif
 #ifndef ORBISRPC_SDK_PAYLOAD
 static long scan_recent_titleid(char *out, size_t cap){
     out[0]=0;
@@ -410,137 +417,39 @@ static long scan_recent_titleid(char *out, size_t cap){
 }
 #endif /* scan_recent_titleid unused in SDK builds */
 
-/* Best name on the box: /user/appmeta/<id>/pronunciation.xml holds the
- * display title in its first <text> element (works for every game that
- * ships speech data, e.g. Terraria). Small file, single read. */
-static int pronunc_title(const char *titleId, char *out, size_t cap){
-    char path[256]; snprintf(path,sizeof path,"/user/appmeta/%s/pronunciation.xml",titleId);
-    int fd=open(path,O_RDONLY);
-    if(fd<0){ log_msg("appmeta open fail %s err=%d", path, errno); return -1; }
-    char buf[2048]; ssize_t n=read(fd,buf,sizeof buf-1); close(fd);
-    if(n<=0) return -1; buf[n]=0;
-    const char *p=strstr(buf,"<text>");
-    if(!p) return -1;
-    p+=6;
-    while(*p==' '||*p=='\t'||*p=='\r'||*p=='\n') p++;
-    size_t i=0;
-    while(*p && *p!='<' && *p!='\n' && *p!='\r' && i<cap-1){ out[i++]=*p++; }
-    out[i]=0;
-    while(i>0 && (out[i-1]==' '||out[i-1]=='\t')) out[--i]=0;
-    return (i>1)?0:-1;
-}
-
-/* Game-process-safe TITLE read: the running game's own param.sfo via the
- * app0 mount plus on-disc sce_sys copies. Small single read, works on ANY
- * console with zero setup. Returns 0 on success. */
-static int sfo_file_title(const char *titleId, char *out, size_t cap){
-    char path[256];
-    /* Running game's own sandbox mount first: the payload process can
-     * already list /mnt/sandbox (that is where the title ID comes from),
-     * and the live mount carries the game's own sce_sys/param.sfo with
-     * its TITLE field. Fails soft when untraversable. */
-    if(titleId && titleId[0]){
-        snprintf(path, sizeof path, "/mnt/sandbox/%s_000/sce_sys/param.sfo", titleId);
-        int sfd = open(path, O_RDONLY);
-        if(sfd >= 0){
-            unsigned char buf[4096];
-            ssize_t n = read(sfd, buf, sizeof buf);
-            close(sfd);
-            if(n > 0 && sfo_title(buf, (size_t)n, out, cap) == 0) return 0;
-        }
-    }
-    const char *fixed[] = { "app0/sce_sys/param.sfo", "/app0/sce_sys/param.sfo", NULL };
-    for(int i = 0; fixed[i]; i++){
-        int fd = open(fixed[i], O_RDONLY);
-        if(fd < 0) continue;
-        unsigned char buf[4096];
-        ssize_t n = read(fd, buf, sizeof buf);
-        close(fd);
-        if(n > 0 && sfo_title(buf, (size_t)n, out, cap) == 0) return 0;
-    }
-    if(titleId && titleId[0]){
-        const char *bases[] = { "/user/app", "/data/app", NULL };
-        for(int b = 0; bases[b]; b++){
-            snprintf(path, sizeof path, "%s/%s/sce_sys/param.sfo", bases[b], titleId);
-            int fd = open(path, O_RDONLY);
-            if(fd < 0) continue;
-            unsigned char buf[4096];
-            ssize_t n = read(fd, buf, sizeof buf);
-            close(fd);
-            if(n > 0 && sfo_title(buf, (size_t)n, out, cap) == 0) return 0;
-        }
-    }
-    return -1;
-}
-
-static int appxml_title(const char *titleId, char *out, size_t cap){
-    const char *bases[] = { "/user/app", "/data/app", NULL };
-    for(int b=0; bases[b]; b++){
-    char path[256]; snprintf(path,sizeof path,"%s/%s/app.xml",bases[b],titleId);
-    int fd=open(path,O_RDONLY); if(fd<0) continue;
-    char buf[640]; ssize_t n=read(fd,buf,sizeof buf-1); close(fd);
-    if(n<=0) continue; buf[n]=0;
-    char *p=strstr(buf,"<title>");
-    if(!p) p=strstr(buf,"titleName");
-    if(!p) continue;
-    p = strchr(p, '>');
-    if(!p) continue;
-    p++;
-    while(*p==' '||*p=='\t'||*p=='\r'||*p=='\n') p++; /* trim leading ws */
-    size_t i=0;
-    while(*p && *p!='<' && *p!='\n' && *p!='\r' && i<cap-1){ out[i++]=*p++; }
-    out[i]=0;
-    while(i>0 && (out[i-1]==' '||out[i-1]=='\t')) out[--i]=0; /* trim trailing */
-    if(i>0) return 0;
-    }
-    return -1;
-}
-
-/* NOTE: an earlier revision byte-scanned app.db for titles. Removed:
- * the packed record layout makes the title/contentId boundary ambiguous
- * and the scanner returned wrong names (worse than raw IDs). Exact
- * sources above plus Sony TMDB cover every case instead. */
-
 int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap){
     if(!out_name || cap==0) return -1;
     out_name[0] = 0;
     if(out_path && p_cap) out_path[0] = 0;
-    {
-        /* Tri-state foreground: 1 game, 0 none, -1 scan failed (unknown).
-         * Unknown must NOT count as disappearance — it means "keep whatever
-         * we had", never a transition. */
-        int fg = detect_foreground_active();
-        if(fg < 0) return -2;
-        /* Event-driven focus (kern.msgbuf AppFocusChanged): authoritative
-         * when readable — settles multi-app ambiguity and surfaces system
-         * screens. Log-only for now; snapshot probes still gate transitions
-         * until msgbuf readability is confirmed per firmware. */
-        {
-            char scr_tid[16] = "";
-            int scr = detect_system_screen(scr_tid, sizeof scr_tid);
-            static char last_scr[16] = "";
-            if(scr != FOCUS_UNKNOWN && strcmp(scr_tid, last_scr) != 0){
-                strncpy(last_scr, scr_tid, sizeof last_scr - 1);
-                log_msg("focus: %s (%s)", scr_tid,
-                        scr == FOCUS_GAME ? "game" : "system");
-            }
-        }
-        if(!fg) return -1;
-    }
     char titleId[16]=""; int named=0, have_tid=0;
 #ifdef ORBISRPC_SDK_PAYLOAD
-    /* Sandbox mount first: authoritative OS-level identity. Save-scan
-     * stays as fallback (its mtimes get bulk-touched by cloud sync). */
-    if(scan_sandbox_mount(titleId, sizeof titleId) == 0){
-        have_tid = 1;
-        remember_titleid(titleId);
-        s_last_art[0] = 0;
-    } else if(scan_newest_save(titleId,sizeof titleId)==0){
-        have_tid = 1;
-        remember_titleid(titleId);
-        s_last_art[0] = 0;
-    } else return -1;
+    /* One query yields both state and identity, so nothing can disagree with
+     * itself.
+     *
+     *   -1 uncertain -> -2: hold position, never clear
+     *    2 system app in front -> -3: the game has not closed, just covered
+     *    0 nothing in front -> -1: genuinely gone
+     *    1 a game -> carry on with the TITLEID the read gave us */
+    int fg = read_big_app(titleId, sizeof titleId);
+    if(fg < 0){ log_dbg("detect: big-app read uncertain"); return -2; }
+    if(fg == 2){
+        /* Name the system app when we can: a media app id landing here is
+         * the explanation for an unexpected "not playing" presence. */
+        const char *last = detect_last_titleid();
+        log_dbg("detect: system app in front (%s)", last ? last : "unresolved");
+        return -3;
+    }
+    if(fg == 0) return -1;
+    have_tid = 1;
+    remember_titleid(titleId);
+    s_last_art[0] = 0;
 #else
+    {
+        int fg = detect_foreground_active();
+        if(fg < 0) return -2;
+        if(fg == 2) return -3;
+        if(!fg) return -1;
+    }
     have_tid = (scan_recent_titleid(titleId,sizeof titleId)==0);
     if(have_tid){
         remember_titleid(titleId);
@@ -550,27 +459,88 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
     if(have_tid){
         remember_titleid(titleId);
         s_last_art[0] = 0;
-        if(resolve_reuse(titleId, out_name, cap)){
+        /* A cache hit only counts when it WAS a resolve. A cached raw id
+         * still pre-fills the name so the poll is cheap, but the network
+         * sources below must get their turn -- claiming success here is what
+         * pinned a title to its raw id for the whole session. */
+        int cached_ok = 0;
+        if(resolve_reuse(titleId, out_name, cap, &cached_ok) && cached_ok){
             log_dbg("name: %s via cache", out_name);
             named = 1;
         }
-        /* cheap, game-process-safe sources first; Sony TMDB (network)
-         * resolves anything local sources miss, on any console. */
+        /* games_cache.json persists BOTH the name and the cover URL, so
+         * it is consulted before any network call. A title resolved on an
+         * earlier boot arrives with its art attached; without this, art is
+         * RAM-only and the presence falls through to a pack URL that may
+         * not exist, which is exactly the missing-icon symptom. */
+        char cc_art[256] = "";
+        if(!named && gamecache_get(titleId, out_name, cap, cc_art, sizeof cc_art)){
+            named = 1;
+            if(cc_art[0]){
+                strncpy(s_last_art, cc_art, sizeof s_last_art-1);
+                s_last_art[sizeof s_last_art-1] = 0;
+            }
+            log_msg("name: %s via games_cache%s", out_name,
+                    cc_art[0] ? " (+art)" : " (no art)");
+        }
+        /* config.json titles are still READ: hand-edited overrides win, and
+         * names learned before games_cache existed keep resolving. The daemon
+         * no longer writes here -- that is games_cache.json now. */
         if(!named && cfg_title(&g_cfg, titleId, out_name, cap)==0){ named=1; log_msg("name: %s via config", out_name); }
-        /* System app.db: the authoritative on-box title registry (SQLite,
-         * read-only). Covers disc + digital where per-file sources miss. */
-        /* appdb_title(titleId, out_name, cap); */
-        if(!named && pronunc_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via appmeta", out_name); }
-        if(!named){ if(sfo_file_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via sfo", out_name); } }
-        if(!named){ if(appxml_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via appxml", out_name); } }
-        if(!named){
+        /* Three mutually exclusive sources, one per class of title id:
+         *   CUSA*  -> Sony TMDB
+         *   retro  -> retro-games (ps1.json, then ps2.json, then psp.json)
+         *   else   -> pkg-zone (homebrew)
+         * Never chained: each class has exactly one index that knows it, so
+         * asking a second one costs a full TLS handshake for a guaranteed
+         * miss. This is what let SCUS97399 hammer pkg-zone at 1 Hz. */
+        int want_retro    = (!named && g_cfg.retro_enabled && retro_wants(titleId));
+        int try_pkgzone   = (!named && !want_retro && g_cfg.pkgzone_enabled
+                             && pkgzone_wants(titleId));
+        if(!named && !try_pkgzone && !want_retro){
             char art[256] = "";
             if(tmdb_resolve(titleId, out_name, cap, art, sizeof art)==0){
                 named = 1;
                 strncpy(s_last_art, art, sizeof s_last_art-1);
             } else s_last_art[0] = 0;
         }
-        if(!named){ strncpy(out_name, titleId, cap-1); out_name[cap-1]=0; }
+        /* Homebrew: no on-box source and no TMDB entry, so this is the only
+         * chance at a real name. Failure is silent by design: the raw title id
+         * below is a perfectly good fallback. */
+        if(try_pkgzone){
+            char art[256] = "";
+            if(pkgzone_resolve(titleId, out_name, cap, art, sizeof art)==0){
+                named = 1;
+                strncpy(s_last_art, art, sizeof s_last_art-1);
+                s_last_art[sizeof s_last_art-1] = 0;
+            }
+        }
+        /* Retro: fetches each platform index in turn (ps1 -> ps2 -> psp) and
+         * stops at the first hit. An index miss is normal, not an error, so
+         * only a hard failure is logged. */
+        if(want_retro){
+            char art[RETRO_MAX_URL] = "";
+            if(retro_resolve(titleId, out_name, cap, art, sizeof art)==0){
+                named = 1;
+                if(art[0]){
+                    strncpy(s_last_art, art, sizeof s_last_art-1);
+                    s_last_art[sizeof s_last_art-1] = 0;
+                }
+            }
+        }
+        /* Only a genuine resolve is worth keeping. detect_last_ok() is 0 for
+         * a raw-id fallback, so a network miss never poisons the cache. */
+        if(named && detect_last_ok())
+            gamecache_put(titleId, out_name, s_last_art,
+                          want_retro ? "retro" : try_pkgzone ? "pkgzone" : "tmdb");
+        if(!named){
+            strncpy(out_name, titleId, cap-1); out_name[cap-1]=0;
+            /* Every source missed. Without this line the presence just shows
+             * a bare title id and there is no way to tell a network failure
+             * from a genuinely unknown title. */
+            log_msg("name: %s UNRESOLVED (tried: config, %s)",
+                    titleId, want_retro ? "retro" : try_pkgzone ? "pkgzone" : "tmdb");
+        }
         resolve_remember(titleId, out_name, s_last_art, named);
     }else{
         remember_titleid("");
@@ -588,18 +558,12 @@ int detect_name_for_title(const char *titleId, char *out_name, size_t cap){
     if(!titleId || !titleId[0] || !out_name || cap==0) return -1;
     remember_titleid(titleId);
     s_last_art[0] = 0;
-    if(resolve_reuse(titleId, out_name, cap)){
+    int cached_ok = 0;
+    if(resolve_reuse(titleId, out_name, cap, &cached_ok) && cached_ok){
         log_dbg("name: %s via cache", out_name);
         return 0;
     }
-    /* Game-process-safe only: small reads plus one bounded network
-     * lookup; no multi-megabyte scans anywhere in this codebase. */
     if(cfg_title(&g_cfg, titleId, out_name, cap)==0){ log_msg("name: %s via config", out_name); resolve_remember(titleId, out_name, "", 1); return 0; }
-    /* appdb_title removed: no baked table (README "tables-none"). */
-    if(pronunc_title(titleId, out_name, cap)==0){ log_msg("name: %s via appmeta", out_name); resolve_remember(titleId, out_name, "", 1); return 0; }
-    else log_msg("name: appmeta miss for %s", titleId);
-    if(sfo_file_title(titleId, out_name, cap)==0){ log_msg("name: %s via sfo", out_name); resolve_remember(titleId, out_name, "", 1); return 0; }
-    if(appxml_title(titleId, out_name, cap)==0){ log_msg("name: %s via appxml", out_name); resolve_remember(titleId, out_name, "", 1); return 0; }
     {
         char art[256] = "";
         if(tmdb_resolve(titleId, out_name, cap, art, sizeof art)==0){
@@ -608,6 +572,31 @@ int detect_name_for_title(const char *titleId, char *out_name, size_t cap){
             return 0; /* tmdb_resolve already logged */
         }
         s_last_art[0] = 0;
+    }
+    /* Same three-way split as detect_name_for_app(): CUSA -> TMDB, retro ->
+     * retro-games, everything else -> pkg-zone. */
+    if(g_cfg.retro_enabled && retro_wants(titleId)){
+        char art[RETRO_MAX_URL] = "";
+        if(retro_resolve(titleId, out_name, cap, art, sizeof art)==0){
+            if(art[0]){
+                strncpy(s_last_art, art, sizeof s_last_art-1);
+                s_last_art[sizeof s_last_art-1] = 0;
+            }
+            resolve_remember(titleId, out_name, art, 1);
+            return 0;
+        }
+        /* Every platform index missed. Fall through to the raw id. */
+        log_msg("retro: %s not found in any index", titleId);
+    } else if(g_cfg.pkgzone_enabled && pkgzone_wants(titleId)){
+        char art[256] = "";
+        if(pkgzone_resolve(titleId, out_name, cap, art, sizeof art)==0){
+            if(art[0]){
+                strncpy(s_last_art, art, sizeof s_last_art-1);
+                s_last_art[sizeof s_last_art-1] = 0;
+            }
+            resolve_remember(titleId, out_name, art, 1);
+            return 0;
+        }
     }
     strncpy(out_name, titleId, cap-1); out_name[cap-1]=0;
     resolve_remember(titleId, out_name, "", 0);

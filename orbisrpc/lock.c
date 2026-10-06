@@ -2,7 +2,6 @@
  * so use atomic create (O_CREAT|O_EXCL) + process-table liveness
  * (sysctl, no signals needed in spawned context). */
 #include "lock.h"
-#include "fw.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -11,6 +10,19 @@
 #ifdef ORBISRPC_SDK_PAYLOAD
 #include <sys/types.h>
 #include <sys/sysctl.h>
+#include "procwalk.h"
+/* Is `pid` still a live spawned payload?
+ *
+ * Field offsets inside a kinfo_proc record are not self-describing and shift
+ * between firmwares. The previous name-at-+447 / pid-at-+72 lookup therefore
+ * silently failed on anything newer than 9.00: it reported live peers as dead,
+ * so a second daemon would reclaim the lock while the first was still running
+ * and both would fight over the gateway.
+ *
+ * Narrow to the record whose name is exactly "Payload" (unambiguous), then
+ * look for the pid anywhere inside it. Spelled-out bias: a false positive only
+ * costs an unnecessary stand-down, a false negative costs two daemons, so
+ * err toward matching. */
 static int pid_live(int pid){
     if(pid <= 0 || pid == (int)getpid()) return 0;
     int mib[4] = { 1, 14, 8, 0 };
@@ -19,19 +31,13 @@ static int pid_live(int pid){
     static unsigned char buf[256*1024];
     if(sz > sizeof buf) return 1; /* huge table: assume live, fail closed */
     if(sysctl(mib, 4, buf, &sz, NULL, 0) != 0) return 0;
-    size_t off = 0;
-    while(off + 4 <= sz){
-        int recsz = *(int *)(buf + off);
-        if(recsz <= 0 || off + (size_t)recsz > sz) break;
-        /* A recycled PID owned by a system daemon must not block us:
-         * only a live payload process counts as a peer. Spawned
-         * payloads (elfldr/GoldHEN) show up as "Payload". Offsets are
-         * per-FW (see fw.h); unknown FWs fail closed. */
-        if(fw_match_payload_pid(buf + off, recsz, pid))
-            return 1;
-        off += (size_t)recsz;
-    }
-    return 0;
+    const unsigned char *rec = NULL;
+    size_t recsz = 0;
+    /* rc -1 = unreadable table: fail closed, assume a peer holds the lock */
+    int rc = procwalk_find_comm(buf, sz, "Payload", &rec, &recsz);
+    if(rc == -1) return 1;
+    if(rc != 0) return 0;         /* no Payload process at all */
+    return procwalk_record_has_i32(rec, recsz, pid);
 }
 #else
 #include <signal.h>

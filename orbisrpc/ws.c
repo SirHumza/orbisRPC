@@ -189,7 +189,7 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
             (unsigned char)sa.sa_data[2], (unsigned char)sa.sa_data[3],
             (unsigned char)sa.sa_data[4], (unsigned char)sa.sa_data[5], port);
     /* Bound the blocking connect: 10s send timeout so a dead route can't
-     * hang the daemon thread forever (plugin_unload joins this thread). */
+     * hang the daemon thread forever. */
     {
         struct timeval tv = { .tv_sec = 10, .tv_usec = 0 };
         sceNetSetsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);

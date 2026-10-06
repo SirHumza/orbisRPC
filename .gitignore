@@ -26,5 +26,6 @@ installer/x64/
 installer/eboot.bin
 installer/pkg.gp4
 installer/assets/daemon.elf
+installer/assets/evict.elf
 installer/sce_sys/param.sfo
 tests/test_utils_asan

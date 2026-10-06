@@ -1,6 +1,11 @@
 /* art.c - external-asset resolution (host-testable parsing + PS4 HTTPS).
  * Pure parsing lives in art_parse_mp() (unit-tested); the POST itself
- * mirrors updater.c's bounded HTTPS client. */
+ * mirrors updater.c's bounded HTTPS client.
+ *
+ * mp: mappings are cached per boot only. Persisting them was artwork_cache.json,
+ * which is gone: the cover URL a title resolves to now lives in
+ * games_cache.json alongside its name, so there is one cache, one TTL, and no
+ * chance of replaying an mp: path whose source URL has since changed. */
 #include "art.h"
 #include "jsonlite.h"
 #include "log.h"
@@ -8,7 +13,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <time.h>
 #include <unistd.h>
 
 /* Extract external_asset_path for url from an external-assets response.
@@ -70,120 +74,6 @@ static char s_last_mp[512] = "";
 void art_cache_clear(void){
     s_last_url[0] = 0;
     s_last_mp[0] = 0;
-}
-
-/* Disk cache: url -> mp path, 7-day TTL. Survives reboots so titles
- * resolved once never pay the external-assets round trip again.
- * Best-effort only: any I/O failure degrades to memory-only caching. */
-#define ART_DISK_MAX 32
-#define ART_DISK_TTL (7*24*3600)
-static struct { char url[512]; char mp[512]; int64_t at; } s_disk[ART_DISK_MAX];
-static int s_disk_n = -1; /* -1 = not loaded yet */
-
-static void art_disk_load(void){
-    if(s_disk_n >= 0) return;
-    s_disk_n = 0;
-    FILE *f = fopen("/data/orbisRPC/artwork_cache.json", "rb");
-    if(!f) return;
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    int64_t now = (int64_t)time(NULL);
-    if(sz > 0 && sz < 65536){
-        char *buf = (char*)malloc((size_t)sz + 1);
-        if(buf && fread(buf, 1, (size_t)sz, f) == (size_t)sz){
-            buf[sz] = 0;
-            jl_val_t *r = jl_parse(buf, (size_t)sz);
-            if(r && r->type == JL_ARRAY){
-                for(size_t i = 0; ; i++){
-                    const jl_val_t *e = jl_arr_at(r, i);
-                    if(!e) break;
-                    if(s_disk_n >= ART_DISK_MAX) break;
-                    if(e->type != JL_OBJECT) continue;
-                    const jl_val_t *u = jl_obj_get(e, "url");
-                    const jl_val_t *m = jl_obj_get(e, "mp");
-                    const jl_val_t *a = jl_obj_get(e, "at");
-                    if(!u || u->type != JL_STRING || !u->str) continue;
-                    if(!m || m->type != JL_STRING || !m->str) continue;
-                    if(!a || a->type != JL_NUMBER) continue;
-                    if(now - (int64_t)a->num > ART_DISK_TTL) continue; /* prune */
-                    snprintf(s_disk[s_disk_n].url, sizeof s_disk[s_disk_n].url, "%s", u->str);
-                    snprintf(s_disk[s_disk_n].mp, sizeof s_disk[s_disk_n].mp, "%s", m->str);
-                    s_disk[s_disk_n].at = (int64_t)a->num;
-                    s_disk_n++;
-                }
-            }
-            if(r) jl_free(r);
-        }
-        free(buf);
-    }
-    fclose(f);
-}
-
-static void art_disk_save(void){
-    char tmp[256];
-    snprintf(tmp, sizeof tmp, "%s.new", "/data/orbisRPC/artwork_cache.json");
-    FILE *f = fopen(tmp, "wb");
-    if(!f) return;
-    int ok = 1;
-    if(fputs("[", f) < 0) ok = 0;
-    for(int i = 0; ok && i < s_disk_n; i++){
-        if(i > 0 && fputs(",", f) < 0){ ok = 0; break; }
-        /* URLs/mp paths are response-derived; escape defensively. */
-        char eu[1024], em[1024];
-        size_t a = 0, b = 0;
-        for(const char *p = s_disk[i].url; *p && a + 2 < sizeof eu; p++){
-            if(*p == '"' || *p == '\\') eu[a++] = '\\';
-            eu[a++] = *p;
-        }
-        eu[a] = 0;
-        for(const char *p = s_disk[i].mp; *p && b + 2 < sizeof em; p++){
-            if(*p == '"' || *p == '\\') em[b++] = '\\';
-            em[b++] = *p;
-        }
-        em[b] = 0;
-        if(fprintf(f, "{\"url\":\"%s\",\"mp\":\"%s\",\"at\":%lld}",
-                   eu, em, (long long)s_disk[i].at) < 0) ok = 0;
-    }
-    if(ok && fputs("]", f) < 0) ok = 0;
-    if(ok && fflush(f) != 0) ok = 0;
-    if(ok){ int fd = fileno(f); if(fd >= 0 && fsync(fd) != 0) ok = 0; }
-    if(fclose(f) != 0) ok = 0;
-    if(ok) rename(tmp, "/data/orbisRPC/artwork_cache.json");
-    else remove(tmp);
-}
-
-static int art_disk_get(const char *url, char *out_mp, size_t cap){
-    art_disk_load();
-    int64_t now = (int64_t)time(NULL);
-    for(int i = 0; i < s_disk_n; i++){
-        if(!strcmp(s_disk[i].url, url)){
-            if(now - s_disk[i].at > ART_DISK_TTL) return 0;
-            strncpy(out_mp, s_disk[i].mp, cap - 1);
-            out_mp[cap - 1] = 0;
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static void art_disk_put(const char *url, const char *mp){
-    art_disk_load();
-    for(int i = 0; i < s_disk_n; i++){
-        if(!strcmp(s_disk[i].url, url)){
-            snprintf(s_disk[i].mp, sizeof s_disk[i].mp, "%s", mp);
-            s_disk[i].at = (int64_t)time(NULL);
-            art_disk_save();
-            return;
-        }
-    }
-    if(s_disk_n < ART_DISK_MAX){
-        snprintf(s_disk[s_disk_n].url, sizeof s_disk[s_disk_n].url, "%s", url);
-        snprintf(s_disk[s_disk_n].mp, sizeof s_disk[s_disk_n].mp, "%s", mp);
-        s_disk[s_disk_n].at = (int64_t)time(NULL);
-        s_disk_n++;
-        art_disk_save();
-    }
 }
 
 static int art_post(const char *app_id, const char *token, const char *url,
@@ -286,14 +176,6 @@ int art_resolve_mp(const char *app_id, const char *token, const char *url,
         out_mp[cap - 1] = 0;
         return 1;
     }
-    /* Disk cache (7-day TTL): titles resolved on earlier boots skip the
-     * round trip entirely. */
-    if(art_disk_get(url, out_mp, cap)){
-        snprintf(s_last_url, sizeof s_last_url, "%s", url);
-        snprintf(s_last_mp, sizeof s_last_mp, "%s", out_mp);
-        log_msg("art: mp from disk cache");
-        return 1;
-    }
     static char resp[ART_RESP_MAX];
     size_t rlen = 0;
     if(art_post(app_id, token, url, resp, sizeof resp, &rlen) != 0){
@@ -306,7 +188,6 @@ int art_resolve_mp(const char *app_id, const char *token, const char *url,
     }
     snprintf(s_last_url, sizeof s_last_url, "%s", url);
     snprintf(s_last_mp, sizeof s_last_mp, "%s", out_mp);
-    art_disk_put(url, out_mp);
     log_msg("art: resolved mp (%zuB)", strlen(out_mp));
     return 1;
 }

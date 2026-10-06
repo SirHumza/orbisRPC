@@ -137,7 +137,9 @@ tls_ctx_t *tls_start(int fd, const char *host){
     if((rc = mbedtls_x509_crt_parse(&t->ca,
                 (const unsigned char *)ORBISRPC_CA_BUNDLE_PEM,
                 sizeof ORBISRPC_CA_BUNDLE_PEM)) < 0){
-        log_msg("tls: CA bundle parse fail %d", rc);
+        /* Name the host on a parse failure: it is almost always a malformed or
+         * truncated header, and it is invisible without this. */
+        log_msg("tls[%s]: CA bundle parse fail %d", host, rc);
         goto fail;
     }
     mbedtls_ssl_conf_ca_chain(&t->conf, &t->ca, NULL);
@@ -187,7 +189,14 @@ tls_ctx_t *tls_start(int fd, const char *host){
     {
         uint32_t vf = mbedtls_ssl_get_verify_result(&t->ssl);
         if(vf != 0){
-            log_msg("tls: cert verify fail flags=0x%08x", vf);
+            log_msg("tls[%s]: CERT VERIFY FAILED flags=0x%08x", host, vf);
+            /* mbedTLS flag bits, spelled out. BADCERT_NOT_TRUSTED (0x08) is
+             * the one that bites when a CA rotated out of the bundle. */
+            if(vf & 0x08) log_msg("tls:   -> chain does not reach a bundled root (root missing from ca_bundle_pem.h?)");
+            if(vf & 0x01) log_msg("tls:   -> certificate not yet valid (console clock)");
+            if(vf & 0x02) log_msg("tls:   -> certificate expired");
+            if(vf & 0x04) log_msg("tls:   -> certificate revoked");
+            if(vf & 0x10) log_msg("tls:   -> hostname does not match");
             goto fail;
         }
     }

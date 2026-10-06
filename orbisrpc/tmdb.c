@@ -208,15 +208,15 @@ static int https_get_tmdb(const char *path, char *out, size_t cap, int *out_stat
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     if(getaddrinfo(TMDB_HOST, "443", &hints, &res) != 0 || !res){
-        log_msg("tmdb: https dns fail");
+        log_msg("tmdb: dns fail for %s", TMDB_HOST);
         return -1;
     }
     int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if(fd < 0){ freeaddrinfo(res); return -1; }
+    if(fd < 0){ log_msg("tmdb: socket fail errno=%d", errno); freeaddrinfo(res); return -1; }
     struct timeval tv = { .tv_sec = TMDB_HTTPS_DEADLINE_S, .tv_usec = 0 };
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
     if(connect(fd, res->ai_addr, res->ai_addrlen) < 0){
-        log_msg("tmdb: https connect fail");
+        log_msg("tmdb: connect %s:443 fail errno=%d", TMDB_HOST, errno);
         freeaddrinfo(res); close(fd); return -1;
     }
     freeaddrinfo(res);
@@ -226,6 +226,7 @@ static int https_get_tmdb(const char *path, char *out, size_t cap, int *out_stat
     }
     tls_ctx_t *t = tls_start(fd, TMDB_HOST);
     if(!t){
+        log_msg("tmdb: tls handshake failed for %s (see tls: lines above)", path);
         close(fd);
         return -1;
     }
@@ -254,10 +255,11 @@ static int https_get_tmdb(const char *path, char *out, size_t cap, int *out_stat
     }
     tls_free(t);
     close(fd);
-    if(bl == 0) return -1;
+    if(bl == 0){ log_msg("tmdb: empty body for %s", path); return -1; }
     int st = 0;
     size_t olen = 0;
     char *body = upd_parse_response(raw, bl, cap, &st, &olen, NULL, 0);
+    log_msg("tmdb: %s -> HTTP %d, %d body bytes", path, st, (int)olen);
     if(out_status) *out_status = st;
     if(!body || st != 200){ free(body); return -1; }
     if(olen >= cap){ free(body); return -1; }
@@ -285,7 +287,11 @@ int tmdb_resolve(const char *titleId, char *name, size_t name_cap,
      * consoles — http_get below is last-resort only). No baked tables:
      * CUSA code + Sony CDN is the source of truth. */
     char path[128];
-    if(tmdb_path(titleId, path, sizeof path) != 0) return -1;
+    if(tmdb_path(titleId, path, sizeof path) != 0){
+        log_msg("tmdb: %s is not a valid title id for this lookup", titleId);
+        return -1;
+    }
+    log_msg("tmdb: resolving %s -> https://%s%s", titleId, TMDB_HOST, path);
     static char body[TMDB_BODY_MAX];
     int status = 0;
     int n = https_get_tmdb(path, body, sizeof body, &status);

@@ -1,6 +1,6 @@
 /* compat.c - tiny libc shims for the PS4 link environment.
  * SceLibcInternal lacks getentropy/__errno_location/gmtime_r, and
- * mbedTLS wants a platform entropy poll. Compiled into payload + plugin. */
+ * mbedTLS wants a platform entropy poll. Compiled into payload. */
 #include <stddef.h>
 #include <fcntl.h>
 #include <unistd.h>

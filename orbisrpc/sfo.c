@@ -1,7 +1,7 @@
 /* sfo.c - PARAM.SFO TITLE extractor (bounds-checked, no libc beyond string).
  * Every PS4 game carries sce_sys/param.sfo with a TITLE field. Inside the
- * game process it is reachable via the app0 mount; the plugin tries those
- * paths first because they work on ANY console with zero setup. */
+ * game process it is reachable via the app0 mount; these paths work on ANY
+ * console with zero setup. */
 #include "sfo.h"
 #include <string.h>
 #include <stdint.h>

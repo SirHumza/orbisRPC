@@ -31,10 +31,34 @@ typedef struct {
     char title_ids[CFG_MAX_TITLES][CFG_TITLEID_LEN];
     char title_names[CFG_MAX_TITLES][CFG_TITLENAME_LEN];
     int enabled;
-    int auto_update;       /* DORMANT (parsed for old configs, never acted on) */
+    int pkgzone_enabled;   /* ask pkg-zone.com for homebrew names (3rd party) */
+    int retro_enabled;    /* ask the retro-games indexes for retro/homebrew */
+    /* Visibility gates. Each suppresses one category of presence; the
+     * daemon still detects it, it just does not tell Discord about it.
+     * All default to 1, so a config that predates them behaves as before. */
+    int show_firmware;   /* 0: omit the "Firmware X.YY" state line */
+    int show_idle;       /* 0: no presence on home / Settings / browser */
+    int show_media;      /* 0: media apps are not posted at all */
+    int show_homebrew;   /* 0: pkg-zone homebrew not posted; retro is
+                              * deliberately unaffected (see is_homebrew_id) */
+    int auto_update;       /* check GitHub releases once per boot, stage newer */
     int debug;             /* verbose debug logging (per-poll detail, no secrets) */
     int poll_interval_s;   /* game-check cadence */
-    char presence_state[128];  /* activity "state" line, e.g. "On PS4" */
+    char presence_state[128];  /* legacy: "On PS4". If changed from the default it
+                                * overrides presence_details_game, so existing
+                                * customisations keep working. */
+    char presence_details_game[128];      /* line 2 while a game is posted */
+    char presence_details_home[128];      /* line 2 on the home screen */
+    char presence_settings_text[128];     /* line 2 while Settings is in front */
+    char asset_idle[64];    /* large image on home + settings */
+    char asset_playing[64]; /* small badge while playing/watching */
+    /* Large image (home + settings) and the game badge, as URLs.
+     * Both go through Discord's mp: external-assets proxy: raw https
+     * in large_image renders "?" or drops the whole activity.
+     * Fall back: large_art -> home_art, small_art -> large_art. */
+    char large_art[256];
+    char small_art[256];
+    char browser_art[256];   /* large image while the web browser is up */
 } cfg_t;
 extern cfg_t g_cfg;
 int cfg_load(const char *path, cfg_t *c);

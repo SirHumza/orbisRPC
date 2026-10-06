@@ -5,7 +5,7 @@
 # orbisRPC — Discord Rich Presence for PS4 (GoldHEN RPC)
 
 <p align="center">
-  <a href="https://github.com/SirHumza/orbisRPC/releases/tag/v1.1.0"><img src="https://img.shields.io/badge/version-1.1.0-ffd800?style=flat-square" alt="version"></a>
+  <a href="https://github.com/SirHumza/orbisRPC/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/version-1.0.0-ffd800?style=flat-square" alt="version"></a>
   <img src="https://img.shields.io/badge/PS4-GoldHEN-003791?style=flat-square" alt="PS4 GoldHEN">
   <img src="https://img.shields.io/badge/Discord-Rich%20Presence-5865F2?style=flat-square" alt="Discord">
   <img src="https://img.shields.io/badge/tables-none-brightgreen?style=flat-square" alt="no tables">
@@ -19,23 +19,18 @@ playing to Discord: name, cover art, timer. No PC at runtime.</p>
 
 ## Install (5 minutes)
 
-1. Grab `OrbisRPC-Setup-1.1.0.pkg` from the
-   [Releases page](https://github.com/SirHumza/orbisRPC/releases/tag/v1.1.0)
+1. Grab `OrbisRPC-Setup-1.0.0.pkg` from the
+   [Releases page](https://github.com/SirHumza/orbisRPC/releases/tag/v1.0.0)
    and install it with Package Installer.
-2. Open **orbisRPC Setup**. It stages `orbisrpc.bin` in
-   `/data/payloads`, writes `/data/orbisRPC/config.json`, retires any old
+2. Open **orbisRPC Setup**. It stages `orbisrpc.bin` + `evict.elf` in
+   `/data/payloads`, writes `/data/orbisRPC/config.json`, evicts any old
    daemon, then asks for your Discord token.
-3. Open **Payloads** in GoldHEN settings, go to `orbisrpc.bin`, press
-   **Square** to enable AutoRun, then **X** once to run it. Launch a
-   game, watch Discord.
+3. Launch **orbisrpc** from Payload Guest (GoldHEN's payload menu),
+   launch a game, watch Discord.
 
-After a reboot: it auto-runs on every jailbreak if you selected
-AutoRun — no need to launch it again.
-
-⚠️ Firmware note: currently tested on PS4 firmware 9.00. Other firmware
-versions are supported by design (runtime capability probing, no hardcoded
-offsets) but are not yet confirmed on hardware — please report results.
-
+After a reboot: re-jailbreak, then enable AutoRun for `orbisrpc` in
+Payload Guest once — it starts itself on every jailbreak after that.
+⚠️Firmware note: Currently tested only on PS4 firmware 9.00. Other firmware versions are not yet confirmed.
 ## What you get
 
 | | |
@@ -65,18 +60,47 @@ Details: [`docs/DAEMON.md`](docs/DAEMON.md) · [`docs/INSTALLER.md`](docs/INSTAL
 ## Config
 
 Only `token` (your Discord user session token) is required —
-`/data/orbisRPC/config.json`. Everything else ships working: presence text,
-home art, poll interval, plus the self-learned `titles` map (hands off).
+`/data/orbisRPC/config.json`. Everything else ships working.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `token` | — | Discord user session token (**required**) |
+| `presence_state` | `"On PS4"` | Activity state line for games and the home screen |
+| `presence_settings_text` | `"In Settings"` | Activity name while Settings is open |
+| `poll_interval_s` | `12` | Detection cadence |
+| `home_art` | project logo | Idle tile artwork (URL or uploaded asset key) |
+| `pkgzone_enabled` | `true` | Ask pkg-zone.com for homebrew names — sends the title id to a third party; set `false` to disable |
+| `retro_enabled` | `true` | Ask the retro-games indexes for PS1/PS2/PSP names and covers |
+| `show_firmware` | `true` | Show the `Firmware X.YY` line |
+| `show_idle` | `true` | Post a presence on the home screen, Settings and the browser |
+| `show_media` | `true` | Post media apps (Netflix, YouTube, Plex…) as `Watching` |
+| `show_homebrew` | `true` | Post homebrew titles. Retro classics are **not** affected |
+| `debug` | `false` | Verbose per-poll logging |
+
+A `false` visibility flag still detects the title — it just stops telling
+Discord about it, so a game underneath keeps showing. The exception is the home
+screen: with `show_idle` off, a game that closes is cleared rather than left up,
+since nothing is running underneath there.
+
+Plus the self-learned `titles` map, which fills itself in as titles resolve.
 
 ## Building
 
 ```bash
-./scripts/build_sdk.sh            # daemon payload (needs ps4-payload-sdk)
+./scripts/build_sdk_from_source.sh   # SDK from git (REQUIRED - see note)
+PS4_SDK_SRC=~/ps4-payload-sdk-src \
+PS4_PAYLOAD_SDK=~/ps4-payload-sdk ./scripts/build_sdk.sh   # daemon payload
 make -f installer/Makefile        # Setup PKG (OpenOrbis toolchain, llvmshim)
 make -C tests test                # host unit tests
 make -C tests asan                # ASan/UBSan
 python3 tests/e2e_consumer.py     # contracts + linkage gate
 ```
+
+⚠️ **Build the SDK from git, not the release ZIP.** The SDK's CRT refuses to
+start on firmware it does not list, and terminates the payload before `main()`
+with no log line. The released SDK (v0.9) lists 13.50 but not 13.52, so a
+ZIP-built payload cannot boot on 13.52. See
+[`findings/sdk-13.52.md`](findings/sdk-13.52.md).
 
 ## Safety
 

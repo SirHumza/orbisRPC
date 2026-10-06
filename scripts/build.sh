@@ -41,13 +41,13 @@ CFLAGS="--target=$TARGET -fPIC -std=gnu11 -Wall -Wno-unused \
         -Wno-int-conversion -Wno-incompatible-pointer-types \
         -DMBEDTLS_NO_PLATFORM_ENTROPY \
         -isystem $SDK/include -Ithird_party/mbedtls/include"
-LIBS="-lc -lkernel -lSceNet -lSceSysmodule \
-      -lSceUserService"
+LIBS="-lc -lkernel -lSceNet -lSceNetCtl -lSceSysmodule \
+      -lSceUserService -lSceAppInstUtil -lSceAppContent"
 LDFLAGS="-m elf_x86_64 -pie --eh-frame-hdr -L$SDK/lib $LIBS $SDK/lib/crt1.o --script $SDK/link.x"
 export OO_PS4_TOOLCHAIN="$SDK"
 OUT="$ROOT/build"; mkdir -p "$OUT"
 echo "=== compiling (CC=$CC LD=$LD SDK=$SDK) ==="
-for f in log cfg jsonlite b64 sfo tmdb_crypto tmdb updater_http updater_util tls ws detect focus fw discord daemon compat lock timesync art health manifest main; do
+for f in log cfg jsonlite b64 sfo procwalk bigapp fw pkgzone gamecache notify retro tmdb_crypto tmdb updater updater_http updater_util tls ws detect discord daemon compat lock timesync art health manifest main; do
   "$CC" $CFLAGS -c -o "$OUT/$f.o" "orbisrpc/$f.c" || fail "compile $f"
 done
 echo "=== mbedtls (skip net_sockets/timing: POSIX-only) ==="
@@ -61,10 +61,8 @@ echo "ELF -> $OUT/orbisrpc.elf ($(stat -f%z "$OUT/orbisrpc.elf" 2>/dev/null || s
 MODE="${1:-all}"
 if [ "$MODE" = "fself" ] || [ "$MODE" = "all" ]; then
   "$SDK/bin/macos/create-fself-macos" -in="$OUT/orbisrpc.elf" \
-      -out="$OUT/orbisrpc.fself" --eboot "$OUT/orbisrpc-eboot.bin" --paid 0x3800000000000011 --authinfo 000000000000000000000000001C004000FF000000000080000000000000000000000000000000000000008000400040000000000000008000000000000000080040FFFF000000F000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 || fail "fself creation"
+      -out="$OUT/orbisrpc.fself" --eboot "$OUT/orbisrpc-eboot.bin" --paid 0x3800000000000011 || fail "fself creation"
   echo "FSELF -> $OUT/orbisrpc.fself"
-  echo "  (deploy $OUT/orbisrpc.elf -> /data/payloads/orbisrpc.bin for Payload Guest)"
-  echo "  note: GoldHEN's OWN payload slot is /data/payload.bin (a different, single-purpose slot)"; \
-  echo "  run orbisRPC from Payload Guest, not as a GoldHEN payload.bin"
+  echo "  (GoldHEN payload to deploy is $OUT/orbisrpc.elf -> /data/GoldHEN/payloads/orbisrpc.bin)"
 fi
 echo "done."

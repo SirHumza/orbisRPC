@@ -1,107 +1,107 @@
-/* fw.c - firmware detection + per-FW kinfo_proc layout table. See fw.h.
- * Version source is uname(2) (libc, no libs, no syscalls): PS4 reports the
- * system version in the release field. The payload SDK libc has no uname,
- * so SDK builds report unknown and use the bounded scan (still correct,
- * just never the exact-offset fast path). Only FWs verified live on
- * hardware go in the table; everything else uses the bounded scan. */
+/* fw.c - see fw.h. */
 #include "fw.h"
+#include "log.h"
 #include <string.h>
 #include <stdio.h>
-#ifndef ORBISRPC_SDK_PAYLOAD
-#include <sys/utsname.h>
-#endif
+#include <stdint.h>
 
-void fw_version(char *out, size_t cap){
-    if(!out || cap == 0) return;
-    /* Default before any parsing so every exit path is defined. */
-    snprintf(out, cap, "?.??");
-#ifdef ORBISRPC_SDK_PAYLOAD
-    /* No uname in the payload SDK libc: unknown FW. Callers fall back
-     * to the bounded scan, which needs no version. */
-    return;
-#else
-    struct utsname u;
-    if(uname(&u) != 0) return;
-    /* Accept "9.00", "9.0", "13.52", or FreeBSD-style "12.0-RELEASE":
-     * take leading digits.digits and normalize to MM.mm. */
-    int maj = -1, min = -1;
-    if(sscanf(u.release, "%d.%d", &maj, &min) != 2) return;
-    if(maj < 0 || maj > 99 || min < 0 || min > 99) return;
-    snprintf(out, cap, "%d.%02d", maj, min);
-#endif
-}
+/* Firmware layout as reported by sceKernelGetSystemSwVersion(). The string is
+ * authoritative; the packed value is only a fallback for builds where the
+ * string comes back empty. */
+typedef struct fw_info {
+    uint64_t reserved;
+    char version_string[0x1c];
+    uint32_t version;
+} fw_info_t;
 
-/* Verified live on hardware. DO NOT extend from theory: an entry here is
- * a promise that offset 447 holds the process name on that FW. */
-static const struct { const char *ver; int name_off; int min_rec; } kKnown[] = {
-    { "9.00", 447, 479 },
-};
+int sceKernelGetSystemSwVersion(fw_info_t *);
 
-int fw_kinfo_for(const char *ver, int *name_off, int *min_rec){
-    if(!ver) return -1;
-    for(unsigned i = 0; i < sizeof kKnown / sizeof kKnown[0]; i++){
-        if(!strcmp(ver, kKnown[i].ver)){
-            if(name_off) *name_off = kKnown[i].name_off;
-            if(min_rec) *min_rec = kKnown[i].min_rec;
-            return 0;
-        }
+/* Sony returns a three-part version, e.g. 13.520.001. Only the first two
+ * parts are wanted, so trailing components are accepted and trimmed
+ * rather than treated as garbage -- a strict MAJOR.MINOR check reported
+ * unknown on a perfectly readable 13.52 console. */
+static int digits_ok(const char *s){
+    if(!s || !s[0]) return 0;
+    int dots = 0, n = 0;
+    for(const char *p = s; *p; p++){
+        if(*p == '.'){ dots++; continue; }
+        if(*p < '0' || *p > '9') return 0;
+        n++;
     }
-    return -1;
+    return dots >= 1 && n >= 2;
 }
 
-int fw_kinfo(int *name_off, int *min_rec){
-    char ver[16];
-    fw_version(ver, sizeof ver);
-    return fw_kinfo_for(ver, name_off, min_rec);
+/* Normalise Sony's packed version to "MAJOR.MINOR".
+ *
+ * The minor field is three digits with a trailing sub-patch zero, so
+ * "13.520.001" means 13.52, not 13.520:
+ *
+ *   13.520.001 -> 13.52      9.000 -> 9.00      8.500 -> 8.50
+ *
+ * Cutting only at the second dot (an earlier revision) left the zero attached
+ * and rendered "Firmware 13.520" on the presence card.
+ */
+void fw_normalize(char *v){
+    if(!v) return;
+    /* Sony pads the string with a leading space on some firmware -- 9.00
+     * returns " 9.008.031" (verified on console 2026-10-05) while 13.52
+     * returns "13.520" clean. Skipped here rather than in digits_ok() so
+     * the caller hands out a trimmed string either way: without this the
+     * space survived the dot logic and the presence read "Firmware  9.00".
+     *
+     * The bytes are shifted down, not just walked past: this edits the
+     * caller's buffer in place, so a bare pointer bump would leave the
+     * space sitting at v[0] for them to print. */
+    char *start = v;
+    while(*start == ' ' || *start == '\t') start++;
+    if(start != v) memmove(v, start, strlen(start) + 1);
+    /* trailing padding would survive the dot cut the same way */
+    size_t n = strlen(v);
+    while(n && (v[n-1] == ' ' || v[n-1] == '\t')) v[--n] = 0;
+
+    char *first = strchr(v, '.');
+    if(!first) return;
+    char *second = strchr(first + 1, '.');
+    if(second) *second = 0;
+    /* minor is at most 2 significant digits; drop a third if present */
+    if(first[1] && first[2] && first[3]) first[3] = 0;
 }
 
-/* Bounded needle search inside one record. recsz caps the search so a
- * corrupt/short record can never over-read. */
-static int rec_find(const unsigned char *rec, int recsz,
-                    const char *needle, int *at){
-    int nlen = (int)strlen(needle);
-    if(!rec || recsz <= 0 || nlen <= 0 || nlen > recsz) return 0;
-    for(int i = 0; i + nlen <= recsz; i++){
-        if(!memcmp(rec + i, needle, (size_t)nlen)){
-            if(at) *at = i;
-            return 1;
-        }
+int fw_version(char *out, size_t cap){
+    if(!out || cap == 0) return -1;
+    static const char unknown[] = "unknown";
+    snprintf(out, cap, "%s", unknown);
+
+    fw_info_t info;
+    memset(&info, 0, sizeof info);
+    if(sceKernelGetSystemSwVersion(&info) != 0){
+        log_msg("fw: system sw version call failed");
+        return -1;
     }
-    return 0;
-}
-
-int fw_match_eboot(const unsigned char *rec, int recsz){
-    static const char want[] = "eboot.bin";
-    int off = 0, minrec = 0;
-    if(fw_kinfo(&off, &minrec) == 0){
-        /* Known FW: exact offset, exact cost. */
-        if(recsz >= minrec && off + 10 <= recsz &&
-           !memcmp(rec + off, want, 10))
-            return 1;
+    info.version_string[sizeof(info.version_string) - 1] = 0;
+    /* Normalise BEFORE validating: fw_normalize() strips the padding some
+     * firmware adds, and digits_ok() rejects any byte that is not a digit or
+     * a dot. Validating first would report a padded-but-perfectly-readable
+     * " 9.008.031" as unrecognised. */
+    char s[sizeof(info.version_string)];
+    snprintf(s, sizeof(s), "%s", info.version_string);
+    fw_normalize(s);
+    if(digits_ok(s)){
+        snprintf(out, cap, "%s", s);
         return 0;
     }
-    /* Unknown FW: bounded scan for the name anywhere in the record.
-     * Require the trailing NUL so "eboot.binX" can't false-positive. */
-    int at = -1;
-    if(!rec_find(rec, recsz, want, &at)) return 0;
-    if(at + 9 >= recsz || rec[at + 9] != 0) return 0;
-    return 1;
-}
-
-int fw_match_payload_pid(const unsigned char *rec, int recsz, int pid){
-    if(pid <= 0) return 0;
-    int off = 0, minrec = 0;
-    if(fw_kinfo(&off, &minrec) == 0){
-        if(recsz < minrec || off + 8 > recsz) return 0;
-        if(*(const int *)(rec + 72) != pid) return 0;
-        return !memcmp(rec + off, "Payload", 8) && rec[off + 8] == 0;
+    /* Fall back to the packed BCD-ish value: major<<40 | minor<<32.
+     * Shift on a 64-bit copy: shifting a uint32_t by 40 would be undefined. */
+    uint64_t v = (uint64_t)info.version;
+    uint8_t major = (uint8_t)(v >> 40);
+    uint8_t minor = (uint8_t)(v >> 32);
+    if((major & 0x0f) <= 9 && (major >> 4) <= 9 &&
+       (minor & 0x0f) <= 9 && (minor >> 4) <= 9 && major){
+        snprintf(out, cap, "%x.%02x", major, minor);
+        return 0;
     }
-    /* Unknown FW: pid field offset is unverified, so only the name part
-     * is probed; pid match is skipped rather than guessed. A missed
-     * reclaim is a minor stall, a wrong kill would be data loss. */
-    int at = -1;
-    if(!rec_find(rec, recsz, "Payload", &at)) return 0;
-    if(at + 7 >= recsz || rec[at + 7] != 0) return 0;
-    (void)pid;
-    return 1;
+    /* Bracketed so a stray leading/trailing byte is visible instead of
+     * blending into the quotes as padding. */
+    log_msg("fw: unrecognised version string [%s]", info.version_string);
+    return -1;
 }

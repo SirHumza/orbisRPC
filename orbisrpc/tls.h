@@ -1,5 +1,5 @@
 /* tls.h - self-contained TLS client (mbedTLS, statically linked).
- * No PS4 TLS-module dependency: works in payload and plugin processes.
+ * No PS4 TLS-module dependency: works in payload processes.
  * Certificate verification is REQUIRED against the curated bundle;
  * see ca_bundle_pem.h. */
 #ifndef TLS_H

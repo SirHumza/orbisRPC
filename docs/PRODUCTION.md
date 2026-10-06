@@ -25,8 +25,7 @@ libkernel.so). Running on-console at 192.168.1.136 via elfldr:9021.
   gate, safe mode, signed all-or-nothing staging, boot rollback.
 - `cfg.c`/`lock.c`/`timesync.c` — schema'd fallible config, sysctl-liveness
   single instance, SNTP wall clock for timer ms.
-- `installer/` + daemon generation protocol — installer bumps
-  `daemon.gen`; older daemons exit cleanly when superseded (no signals).
+- `tools/evict.c` — SIGTERM-then-SIGKILL deploy rotation for the locked daemon.
 
 ## State machine
 
@@ -51,7 +50,7 @@ Sandbox param.sfo source, details-ID duplication, user `titles`
 overrides, `home_art`, shipped logo default, app.db SQLite names,
 self-learning map, presence-builder test seam, small badge, strncpy NUL
 hardening, home_art validation, 4004 survival, cfg_save return,
-generation-based deploy rotation, CI ASan+e2e jobs.
+evict.elf deploy tool, CI ASan+e2e jobs.
 
 ## Not fixed (external / out of scope)
 
@@ -72,7 +71,7 @@ generation-based deploy rotation, CI ASan+e2e jobs.
 ## Hardware matrix (proven)
 
 Gateway ready, TLS-ECDHE suite, game detection + ticking timer post-SNTP,
-mp: art serving (phone), duplicate-ID gone, generation clean-stop rotations,
+mp: art serving (phone), duplicate-ID gone, evict clean-stop rotations,
 reboot recovery. Pending eyes: appdb name flip, badge render, logo tile.
 
 ## Readiness

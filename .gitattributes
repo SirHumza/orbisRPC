@@ -1,0 +1,15 @@
+# Scripts are built and run from WSL/Linux but checked out on Windows, where
+# core.autocrlf=true rewrites LF as CRLF. A CRLF shebang makes the kernel fail
+# with "cannot execute: required file not found", which reads like a missing
+# file rather than a line-ending problem.
+*.sh text eol=lf
+Makefile text eol=lf
+*.mk text eol=lf
+*.py text eol=lf
+*.x text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.s text eol=lf
+*.ini text eol=lf

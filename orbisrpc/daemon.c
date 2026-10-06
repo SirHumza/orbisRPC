@@ -1,13 +1,10 @@
-/* daemon.c - orbisRPC core loop, usable from the ELF payload (main.c) or from a
- * GoldHEN plugin. When `fixed_game_name` is non-NULL the daemon posts presence
- * for that game unconditionally (the plugin runs inside the game process and
- * already knows the title); otherwise it detects the foreground game.
+/* daemon.c - orbisRPC core loop (payload ELF only).
  *
  * Auth model: a Discord USER SESSION token pasted into config.json ("token").
  * There is no OAuth flow anymore — OAuth2 access tokens are rejected by the
  * gateway (close 4004), which was why v1 never worked.
  *
- * A `stop` flag is polled so plugin_unload() can shut the loop down cleanly. */
+ * A `stop` flag is polled so a signal handler can shut the loop down cleanly. */
 #include "cfg.h"
 #include "clock.h"
 #include "lock.h"
@@ -17,15 +14,13 @@
 #include "ws.h"
 #include "discord.h"
 #include "detect.h"
-#include "focus.h"
 #include "fw.h"
+#include "notify.h"
 #include "updater.h"
 #include "version.h"
 #include "jsonlite.h"
 #include "art.h"
 #include <sys/stat.h>
-#include <dirent.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
@@ -37,7 +32,7 @@ extern cfg_t g_cfg;
 
 static volatile sig_atomic_t s_stop = 0;
 
-/* Tells a running daemon_run() to shut down (called from plugin_unload). */
+/* Tells a running daemon_run() to shut down. */
 void daemon_request_stop(void){ s_stop = 1; }
 void daemon_clear_stop(void){ s_stop = 0; }
 int daemon_stop_requested(void){ return s_stop; }
@@ -50,14 +45,82 @@ static void daemon_on_signal(int sig){
     s_stop = 1;
 }
 
-/* Sleep up to `secs` but wake within a second when the plugin asks us to
- * stop, so plugin_unload() never hangs on a long backoff. Returns 1 stopped. */
+/* Sleep up to `secs` but wake within a second when stop is requested,
+ * so we never hang on a long backoff. Returns 1 stopped. */
 static int sleep_stop(int secs){
     for(int i = 0; i < secs; i++){
         if(s_stop) return 1;
         sleep(1);
     }
     return s_stop;
+}
+
+/* Last known Settings-screen state: 1 in Settings, 0 elsewhere, -1 never
+ * determined. Settings overlays a running game without closing it, so while it
+ * is up the presence is REPLACED by a dedicated "In Settings" one rather than
+ * the game carrying a changed state line. -1 is sticky: an unknown probe
+ * result must not overwrite a real reading. */
+static int s_in_settings = -1;
+/* 1 once the Settings presence is on the wire, so a poll storm does not
+ * re-post it; cleared when Settings closes so returning re-posts the game. */
+static int s_settings_posted = 0;
+/* Same for the web browser. */
+static int s_in_browser = -1;
+static int s_browser_posted = 0;
+
+/* "Firmware 13.52" for the Settings presence. Reads through the same helper the
+ * rest of the daemon uses, so an unavailable firmware string degrades to
+ * "unknown" instead of stalling the post. */
+static void firmware_state_line(char *out, size_t cap){
+    if(!g_cfg.show_firmware){ out[0] = 0; return; }  /* "" omits `state` */
+    char fw[16] = "unknown";
+    fw_version(fw, sizeof fw);
+    snprintf(out, cap, "Firmware %s", fw);
+}
+
+/* The second visible line, per context. Beside the firmware helper so all
+ * three lines of a presence are chosen in one place. */
+static const char *details_for_home(void){
+    return g_cfg.presence_details_home[0] ? g_cfg.presence_details_home
+                                           : "Idling on Home Menu";
+}
+static const char *details_for_game(const char *title_id){
+    /* Media apps get their own phrasing: Discord draws a "Watching" context
+     * of its own for type 3, so this line says where, not what. */
+    if(title_id && title_id[0] && detect_media_type(title_id) == 3)
+        return "Watching on PlayStation 4";
+    /* presence_state is legacy ("On PS4"). If the operator has changed it from
+     * that default it wins, so an existing customisation is not silently lost
+     * now that presence_details_game exists. */
+    if(g_cfg.presence_state[0] && strcmp(g_cfg.presence_state, "On PS4") != 0)
+        return g_cfg.presence_state;
+    return g_cfg.presence_details_game[0] ? g_cfg.presence_details_game
+                                           : "Playing on PlayStation 4";
+}
+static const char *details_for_settings(void){
+    return g_cfg.presence_settings_text[0] ? g_cfg.presence_settings_text
+                                            : "In Settings";
+}
+
+/* Effective artwork URLs, most specific first.
+ * large: large_art -> home_art. small: small_art -> large.
+ * Returns NULL when nothing is configured, which makes discord.c
+ * omit the assets rather than send a dangling key. */
+static const char *large_art_url(void){
+    if(g_cfg.large_art[0]) return g_cfg.large_art;
+    if(g_cfg.home_art[0])   return g_cfg.home_art;
+    return NULL;
+}
+static const char *small_art_url(void){
+    if(g_cfg.small_art[0]) return g_cfg.small_art;
+    return large_art_url();
+}
+
+/* Browser image: its own key, falling back to the idle logo so a console
+ * without a browser.png still renders something sensible. */
+static const char *browser_art_url(void){
+    if(g_cfg.browser_art[0]) return g_cfg.browser_art;
+    return large_art_url();
 }
 
 static int have_token(const cfg_t *c){
@@ -95,49 +158,6 @@ static void sess_save(const char *tid, const char *name, int64_t started){    jl
         else remove("/data/orbisRPC/session.json.new");
     }
     free(s);
-}
-
-/* status.json heartbeat: machine-readable liveness for users and the
- * installer (FTP-readable proof the daemon is alive, no klog needed).
- * Written on state changes + every alive tick. Never fatal. */
-static void status_write(const char *state, const char *title,
-                         const char *gw){
-    jl_val_t *r = jl_new_object();
-    if(!r) return;
-    jl_obj_set(r, "version", jl_new_string(ORBISRPC_VERSION));
-    jl_obj_set(r, "state", jl_new_string(state ? state : "?"));
-    jl_obj_set(r, "title", jl_new_string(title ? title : ""));
-    jl_obj_set(r, "gw", jl_new_string(gw ? gw : "down"));
-    jl_obj_set(r, "ts", jl_new_number((double)time(NULL)));
-    char *s = jl_stringify(r);
-    jl_free(r);
-    if(!s) return;
-    FILE *f = fopen("/data/orbisRPC/status.json.new", "wb");
-    if(f){
-        int ok = (fputs(s, f) >= 0) && (fflush(f) == 0);
-        if(ok){ int fd = fileno(f); if(fd < 0 || fsync(fd) != 0) ok = 0; }
-        if(fclose(f) != 0) ok = 0;
-        if(ok) rename("/data/orbisRPC/status.json.new",
-                      "/data/orbisRPC/status.json");
-        else remove("/data/orbisRPC/status.json.new");
-    }
-    free(s);
-}
-
-/* Generation protocol (replaces evict.elf): the installer bumps
- * daemon.gen on every install; an older running daemon that sees a newer
- * generation exits cleanly so the fresh payload takes over. No signals,
- * no module loading, no sandbox fights. Missing file = generation 0. */
-static long gen_read(void){
-    FILE *f = fopen("/data/orbisRPC/daemon.gen", "rb");
-    if(!f) return 0;
-    char b[32];
-    size_t n = fread(b, 1, sizeof b - 1, f);
-    fclose(f);
-    if(n == 0) return 0;
-    b[n] = 0;
-    long v = atol(b);
-    return v < 0 ? 0 : v;
 }
 
 /* Playtime ledger: append-only "<title_id> <name> <seconds>" per finished
@@ -185,55 +205,8 @@ static void pres_set(pres_state_t *cur, pres_state_t next){
     log_msg("STATE: presence %s -> %s", pres_name(*cur), pres_name(next));
     *cur = next;
 }
-/* diag.json: one boot-time signal census for the firmware matrix.
- * Users paste this single file instead of "it doesn't work": daemon
- * version, firmware, and which of the four focus signals this box
- * actually has. Read-only probes, never fatal. */
-extern void *dlopen(const char *filename, int flags);
-extern int dlclose(void *handle);
-static void diag_write(void){
-    char fw[16] = "";
-    int noff = 0, mrec = 0;
-    fw_version(fw, sizeof fw);
-    int kinfo_known = (fw_kinfo(&noff, &mrec) == 0);
-    int msgbuf = focus_msgbuf_ok();
-    int sandbox = 0;
-    {
-        DIR *d = opendir("/mnt/sandbox");
-        if(d){ sandbox = 1; closedir(d); }
-    }
-    int scu = 0;
-    {
-        void *h = dlopen("libSceShellCoreUtil.sprx", 0);
-        if(h){ scu = 1; dlclose(h); }
-    }
-    jl_val_t *r = jl_new_object();
-    if(!r) return;
-    jl_obj_set(r, "version", jl_new_string(ORBISRPC_VERSION));
-    jl_obj_set(r, "fw", jl_new_string(fw));
-    jl_obj_set(r, "kinfo_table", jl_new_number((double)kinfo_known));
-    jl_obj_set(r, "msgbuf", jl_new_number((double)msgbuf));
-    jl_obj_set(r, "sandbox", jl_new_number((double)sandbox));
-    jl_obj_set(r, "shellcore", jl_new_number((double)scu));
-    jl_obj_set(r, "ts", jl_new_number((double)time(NULL)));
-    char *s = jl_stringify(r);
-    jl_free(r);
-    if(!s) return;
-    FILE *f = fopen("/data/orbisRPC/diag.json.new", "wb");
-    if(f){
-        int ok = (fputs(s, f) >= 0) && (fflush(f) == 0);
-        if(ok){ int fd = fileno(f); if(fd < 0 || fsync(fd) != 0) ok = 0; }
-        if(fclose(f) != 0) ok = 0;
-        if(ok) rename("/data/orbisRPC/diag.json.new",
-                      "/data/orbisRPC/diag.json");
-        else remove("/data/orbisRPC/diag.json.new");
-    }
-    free(s);
-}
-/* fixed_game_name != NULL -> post presence for that game only, no detection.
- * NULL -> poll the foreground app like the payload daemon does.
- * Returns 0 normal stop, 1 config error, 2 auth-fatal (bad token). */
-int daemon_run(const char *fixed_game_name){
+/* Returns 0 normal stop, 1 config error, 2 auth-fatal (bad token). */
+int daemon_run(void){
     s_stop = 0;
 #ifdef SIGTERM
     signal(SIGTERM, daemon_on_signal);
@@ -253,7 +226,6 @@ int daemon_run(const char *fixed_game_name){
     }
     log_init(LOG_PATH);
     log_msg("orbisRPC daemon start — build %s %s", __DATE__, __TIME__);
-    diag_write();
     /* Single writer: a second launch (or a stale pileup from repeated
      * injections) stands down instead of fighting over the gateway. */
     {
@@ -272,7 +244,6 @@ int daemon_run(const char *fixed_game_name){
     {
         static const char *targets[] = {
             "/data/payloads/orbisrpc.bin",
-            "/data/GoldHEN/plugins/orbisrpc_plugin.prx",
         };
         for(unsigned ti = 0; ti < sizeof targets/sizeof targets[0]; ti++){
             int vr = health_verify_or_rollback(targets[ti]);
@@ -293,38 +264,51 @@ int daemon_run(const char *fixed_game_name){
                 log_msg("created template %s; edit \"token\" then reboot", CFG_PATH);
         } else fclose(probe);
         log_msg("config load failed; running on defaults until valid config appears");
+        notify_once_boot("cfgfail", "config.json unreadable - using defaults");
     }
     if(!g_cfg.enabled){ log_msg("disabled in config; exiting"); health_mark_clean(); log_close(); return 0; }
     log_set_debug(g_cfg.debug);
     if(g_cfg.debug) log_dbg("debug logging on (config)");
+    /* Boot census. MUST come after cfg_load(): an earlier revision printed this
+     * before the load and so reported the zero-initialised global, which made a
+     * correctly enabled pkgzone_enabled read as "off". */
+    {
+        char fw[16] = "unknown";
+        fw_version(fw, sizeof fw);
+        int st = detect_settings_active();
+        log_msg("env: firmware=%s pkgzone=%s settings_probe=%s debug=%d",
+                fw, g_cfg.pkgzone_enabled ? "on" : "off",
+                st == 1 ? "in-settings" : (st == 0 ? "ok" : "unavailable"),
+                g_cfg.debug);
+    }
+    /* LAN kill switch: lets a fresh payload be injected without rebooting the
+     * console. Non-fatal if the bind fails. */
     /* Wall-clock correction for Discord timestamps (PSN time sync is
      * typically blocked on jailbroken consoles). Boot sweep is bounded;
      * hourly ticks are single-host attempts (never stall heartbeats). */
     time_sync_all();
     if(!have_token(&g_cfg)){
         /* Waiting for configuration is a HEALTHY boot, not a crash:
-         * mark clean so token-less boots never trip safe mode, then
-         * wait for a token to appear (FTP edit, no reboot, no exit). */
+         * mark clean so token-less boots never trip safe mode. */
         health_mark_healthy();
-        log_msg("no token in %s; waiting (edit \"token\" over FTP)", CFG_PATH);
-        status_write("waiting_token", "", "down");
-        for(;;){
-            if(s_stop){ log_close(); return 0; }
-            if(sleep_stop(15)) { log_close(); return 0; }
-            cfg_t next = g_cfg;
-            if(cfg_load(CFG_PATH, &next) == 0) g_cfg = next;
-            if(have_token(&g_cfg)) break;
-        }
-        log_msg("token appeared; continuing boot");
+        log_msg("FATAL: put your Discord user token in %s as \"token\":\"...\"", CFG_PATH);
+        notify_once_boot("notoken", "No Discord token - edit config.json");
+        log_close();
+        return 1;
     }
 
-    /* No network self-update: new versions arrive via reinstall PKG,
-     * which bumps daemon.gen so this process supersedes cleanly. */
-    log_msg("boot: local %s (updates via reinstall)", ORBISRPC_VERSION);
+    /* Self-update once per boot, before first connect. Never fatal:
+     * staged artifacts take effect on next launch/injection. */
+    if(g_cfg.auto_update && !safe_mode){
+        int ur = updater_check_and_stage();
+        log_msg("updater: %s (local %s)",
+                ur > 0 ? "staged newer build" : ur == 0 ? "already current" : "check failed",
+                ORBISRPC_VERSION);
+    } else if(safe_mode){
+        log_msg("updater: skipped (safe mode)");
+    }
 
     discord_t dc;
-    memset(&dc, 0, sizeof dc); /* ws_close guards on connected; zero = safe */
-    long boot_gen = gen_read();
     int base_poll = g_cfg.poll_interval_s;
     if(base_poll < 5) base_poll = 5;
     if(base_poll > 60) base_poll = 60;
@@ -340,18 +324,6 @@ int daemon_run(const char *fixed_game_name){
     int64_t last_health = 0;
     for(;;){ /* outer: connect cycles with backoff on failure */
         if(s_stop) break;
-        /* Superseded by a newer install: exit cleanly (presence cleared
-         * below when connected) so the fresh payload takes over. */
-        {
-            long cur = gen_read();
-            if(cur > boot_gen){
-                log_msg("superseded by generation %ld; exiting cleanly", cur);
-                status_write("superseded", "", "down");
-                if(dc.connected) discord_clear_presence(&dc);
-                ws_close(&dc.ws);
-                break;
-            }
-        }
         /* re-read config every cycle so token edits land without a reboot.
          * On parse failure keep last-good config instead of stale defaults. */
         {
@@ -366,6 +338,7 @@ int daemon_run(const char *fixed_game_name){
         }
         if(!have_token(&g_cfg)){
             log_msg("no token in config; waiting %ds", backoff);
+            notify_once_boot("notoken", "No Discord token - edit config.json");
             if(sleep_stop(backoff)) break;
             continue;
         }
@@ -382,6 +355,9 @@ int daemon_run(const char *fixed_game_name){
         }
         if(rc != 0){
             int wait = reconnect_delay(&conn_fails, base_poll, &jctr);
+            /* Throttled: the backoff already grows, so an unthrottled
+             * notification here fires every 13s and then every minute. */
+            notify_throttled("connect", "Cannot reach Discord - retrying", 300);
             log_msg("gateway connect failed (attempt %d); retry in %ds",
                     conn_fails, wait);
             if(sleep_stop(wait)) break;
@@ -471,38 +447,19 @@ int daemon_run(const char *fixed_game_name){
         static int cand_hits = 0, miss_hits = 0;
         int64_t last_poll = 0;
         int64_t last_alive = 0;
-        int64_t last_wall = 0;
         static int healthy_marked = 0;
         /* re-post after every (re)connect so Discord never sticks on stale */
         int need_post = active && last[0];
         while(!s_stop){ /* inner: live session, serviced every second */
+            /* Poll every tick, not every detect poll: STOP must land within a
+             * second even while a title is being resolved. */
             int64_t now = orbis_mono_s();
             if(now - last_tsync >= 3600){ last_tsync = now; time_sync(); }
             if(now != last_poll){
-                /* Rest Mode / resume detection: the wall clock jumping
-                 * forward while the monotonic clock barely moved means we
-                 * slept through a suspend. Force a time re-sync and a
-                 * state reconcile so timers and presence heal instead of
-                 * posting stale epochs. */
-                {
-                    int64_t wall = (int64_t)time(NULL);
-                    if(last_wall > 0 && wall - last_wall > 900 &&
-                       now - last_poll <= 2){
-                        log_msg("wall jumped +%llds (resumed?); re-syncing",
-                                (long long)(wall - last_wall));
-                        last_tsync = 0;
-                        if(active && last[0]) need_post = 1;
-                        else home_posted = 0;
-                    }
-                    last_wall = wall;
-                }
                 last_poll = now;
                 if(now - last_alive >= 60){
                     last_alive = now;
                     log_msg("alive: %s", active ? last : "idle");
-                    status_write(active ? "playing" : "idle",
-                                 active ? last : "",
-                                 discord_state_name(&dc));
                 }
                 /* State reconciliation: re-post current presence every
                  * 15 min so a silently desynced tile (dropped update,
@@ -536,42 +493,118 @@ int daemon_run(const char *fixed_game_name){
                 }
                 char name[128] = "";
                 int scan_unknown = 0;
-#ifdef ORBISRPC_SDK_PAYLOAD
-                /* Launch/close shortcut: the eboot set changing means the
-                 * foreground game changed RIGHT NOW. Reset debounce so the
-                 * switch commits within ~2 polls. Deliberately NOT instant:
-                 * the title scan needs one poll for fresh atime data, and
-                 * committing a stale scan instantly would lock the wrong
-                 * title with a full session. */
-                {
-                    static int last_eboots = -1;
-                    int nboots = detect_eboot_count();
-                    if(nboots >= 0 && nboots != last_eboots){
-                        if(last_eboots >= 0)
-                            log_msg("eboot set %d -> %d; fast-switching",
-                                    last_eboots, nboots);
-                        last_eboots = nboots;
-                        cand_title[0] = 0;
-                        cand_hits = 0;
-                        miss_hits = 0;
+                    {
+                    int dr = detect_current_game(name, sizeof name, NULL, 0);
+                    /* -2 uncertain and -3 system app covering a live game both
+                     * mean hold. They are logged apart because only one says
+                     * the daemon has lost its view of the console. Both must
+                     * suppress the clear path below: neither is a close. */
+                    scan_unknown = (dr == -2 || dr == -3);
+                    if(dr == -2) log_dbg("detect read failed; holding");
+                    else if(dr == -3) log_dbg("system UI in front; holding %s", last);
+                    if(scan_unknown) name[0] = 0;
                     }
-                }
-#endif
-                if(fixed_game_name){
-                    strncpy(name, fixed_game_name, sizeof name-1);
-                    name[sizeof name-1] = 0;
-                }else{
-                    /* detect_current_game already checks foreground-active
-                     * internally; don't double-call it. -2 means the scan
-                     * itself failed: hold position, touch nothing. */
-                    scan_unknown = (detect_current_game(name, sizeof name, NULL, 0) == -2);
-                    if(scan_unknown){
-                        log_dbg("detect scan failed; holding");
-                        name[0] = 0;
+                    /* Settings screen. Only a definite answer moves the state:
+                     * a probe that cannot see kern.msgbuf leaves the last known
+                     * value alone instead of flapping the presence off and on. */
+                    {
+                    int sstate = detect_settings_active();
+                    if(sstate >= 0 && sstate != s_in_settings){
+                        s_in_settings = sstate;
+                        log_msg("settings screen: %s", sstate ? "in" : "out");
+                        /* Leaving Settings always hands control back to the
+                         * normal path below: re-arm the game post, and re-arm
+                         * the home post so returning to the home screen is
+                         * allowed to speak again. Previously this only set
+                         * need_post, which the home-screen branch below never
+                         * looks at, so leaving Settings wedged the daemon. */
+                        if(!sstate){
+                            s_settings_posted = 0;
+                            need_post = active && last[0];
+                            home_posted = 0;
+                        }
                     }
-                }
+                    }
 
-                if(name[0]){
+                    /* Browser: same shape as Settings. Probed only when
+                     * Settings is not in front, so Settings keeps priority
+                     * when both would match. */
+                    int bstate = (s_in_settings == 1) ? -1 : detect_browser_active();
+                    if(bstate >= 0 && bstate != s_in_browser){
+                        s_in_browser = bstate;
+                        log_msg("browser screen: %s", bstate ? "in" : "out");
+                        if(!bstate){
+                            s_browser_posted = 0;
+                            need_post = active && last[0];
+                            home_posted = 0;
+                        }
+                    }
+                    /* While Settings is up it replaces the whole presence: its
+                     * own name, no artwork, no timer, no small icon. The game
+                     * underneath keeps `started`, so returning restores the
+                     * original elapsed time rather than restarting the clock.
+                     * It also counts as "hold" below -- Settings must never
+                     * look like a game closing. */
+                    int in_settings = (s_in_settings == 1);
+                    int in_browser = (s_in_settings != 1 && s_in_browser == 1);
+                    /* Neither may look like a game closing. */
+                    if(in_settings || in_browser) scan_unknown = 1;
+                    /* Visibility gates. Detection always runs; this only
+                     * decides whether Discord is told about it.
+                     *
+                     * "Don't send" is safe wherever something could be
+                     * running underneath -- Settings, the browser, a media app,
+                     * homebrew. Home is the exception: nothing is underneath
+                     * there, so a closed game must be cleared rather than held,
+                     * otherwise the tile would linger forever. */
+                    const char *cur_tid_now = detect_last_titleid();
+                    int gate_idle    = g_cfg.show_idle    == 0;
+                    int gate_media   = (g_cfg.show_media   == 0) &&
+                                       cur_tid_now && detect_media_type(cur_tid_now) == 3;
+                    int gate_homebrew = (g_cfg.show_homebrew == 0) &&
+                                        is_homebrew_id(cur_tid_now);
+                    if(in_settings && gate_idle) log_dbg("presence: settings suppressed");
+                    else if(in_settings && !s_settings_posted){
+                        char st[64];
+                        firmware_state_line(st, sizeof st);
+                        int pr = discord_set_presence_ex(&dc, st,
+                            "PlayStation 4", details_for_settings(),
+                            g_cfg.asset_idle, NULL,
+                            "settings", g_cfg.application_id, NULL,
+                            large_art_url(), NULL, 0);
+                        if(pr == 0){
+                            log_msg("presence: settings");
+                            s_settings_posted = 1;
+                            n_posts++;
+                        } else {
+                            log_msg("settings presence send failed; will retry");
+                        }
+                    } else if(in_browser && gate_idle) log_dbg("presence: browser suppressed");
+                    else if(in_browser && !s_browser_posted){
+                        /* Standalone presence: its own name, line and artwork,
+                         * no timer and no badge. A game may be running
+                         * underneath; it comes back on its own when the
+                         * browser closes. */
+                        char st[64];
+                        firmware_state_line(st, sizeof st);
+                        int pr = discord_set_presence_ex(&dc, st,
+                            "PlayStation 4", "Using Web Browser",
+                            NULL, NULL,
+                            "browser", g_cfg.application_id, NULL,
+                            browser_art_url(), NULL, 0);
+                        if(pr == 0){
+                            log_msg("presence: browser");
+                            s_browser_posted = 1;
+                            n_posts++;
+                        } else {
+                            log_msg("browser presence send failed; will retry");
+                        }
+                    }
+
+                /* Settings or the browser has already spoken for this poll:
+                 * skip the whole game/home/clear decision below rather than
+                 * letting a stale name or a pending miss counter fight it. */
+                else if(name[0]){
                     const char *cur_tid = detect_last_titleid();
                     if(!cur_tid) cur_tid = "";
                     if(!strcmp(cur_tid, cand_title)){
@@ -582,7 +615,7 @@ int daemon_run(const char *fixed_game_name){
                         cand_hits = 1;
                     }
                     miss_hits = 0;
-                    if(fixed_game_name || cand_hits >= 2){
+                    if(cand_hits >= 2){
                     if(!active || strcmp(cur_tid,sess_tid)!=0){
                         /* Switching away from a live session: bank its time.
                          * (Fresh starts and resumes have nothing to bank;
@@ -607,28 +640,41 @@ int daemon_run(const char *fixed_game_name){
                         log_msg("GAME_DETECTED title=%s name=%s", cur_tid[0]?cur_tid:"?", name);
                         art_cache_clear();
                         sess_save(cur_tid, name, started);
-                        /* Self-learning map: persist authoritatively resolved
-                         * names so later boots resolve instantly, even when
-                         * every live source is unreachable. Raw-ID fallbacks
-                         * (ok=0) are never learned. */
-                        if(cur_tid[0] && detect_last_ok() && cfg_learn(&g_cfg, cur_tid, name)){
-                            if(cfg_save(CFG_PATH, &g_cfg) != 0)
-                                log_msg("config: learn save failed for %s", cur_tid);
-                            else
-                                log_msg("config: learned %s", cur_tid);
-                        }
+                        /* No metadata is written to config.json any more.
+                         * detect.c persists id+name+cover to games_cache.json
+                         * when a title resolves; that file is the only place
+                         * the daemon learns anything. config.json keeps only
+                         * operator settings and hand-edited overrides. */
                     } else if(strcmp(name,last)!=0){
                         strncpy(last, name, sizeof last-1);
                         last[sizeof last-1] = 0;
                         need_post = 1;
                     }
+                    /* A media app or homebrew title that is switched off is
+                     * never announced. Sending nothing leaves whatever was
+                     * last posted standing, so a game underneath keeps
+                     * showing and an empty console simply stays quiet. */
+                    int gate_this_title = gate_media || gate_homebrew;
+                    if(need_post && gate_this_title){
+                        log_dbg("presence: %s suppressed", last);
+                        need_post = 0;
+                    }
                     if(need_post){
-                        const char *state = g_cfg.presence_state[0] ? g_cfg.presence_state : NULL;
+                        /* name / details / state: what is playing, where it
+                         * is, and the firmware. */
+                        char gst[64];
+                        firmware_state_line(gst, sizeof gst);
+                        const char *state = gst[0] ? gst : NULL;
+                        const char *details = details_for_game(sess_tid);
                         const char *tart = detect_last_art();
                         /* Playback queue of one: only clear need_post after
                          * the bytes actually go out. A failed send stays
                          * queued and rides the next tick/reconnect. */
-                        int pr = discord_set_presence_ex(&dc, state, last, sess_tid[0]?sess_tid:NULL, g_cfg.application_id, g_cfg.art_base_url, tart, g_cfg.home_art[0]?g_cfg.home_art:NULL, started);
+                        int pr = discord_set_presence_ex(&dc, state, last, details,
+                            NULL, g_cfg.asset_playing,
+                            sess_tid[0]?sess_tid:NULL, g_cfg.application_id,
+                            g_cfg.art_base_url, tart,
+                            small_art_url(), started);
                         if(pr == 0){
                             log_msg("presence: %s", last);
                             pres_set(&pres, PS_GAME);
@@ -654,14 +700,34 @@ int daemon_run(const char *fixed_game_name){
                         last[0]=0; sess_tid[0]=0; active=0; started=0;
                         home_posted = 0;
                     }
+                } else if(gate_idle && active){
+                    /* Home with idle switched off. Clear rather than leave the
+                     * previous game up: nothing is running underneath on the
+                     * home screen, so holding would strand a closed game's
+                     * tile for good. This is the one place where "don't send"
+                     * would be wrong. */
+                    discord_clear_presence(&dc);
+                    log_msg("presence cleared (home, idle suppressed)");
+                    pres_set(&pres, PS_NONE);
+                    ledger_append(sess_tid, last, started, time_fixed());
+                    strncpy(prev_tid, sess_tid, sizeof prev_tid-1);
+                    prev_started = started;
+                    prev_end = now;
+                    remove("/data/orbisRPC/session.json");
+                    last[0]=0; sess_tid[0]=0; active=0; started=0;
+                    home_posted = 0;
                 } else if(!home_posted && !scan_unknown){
                     /* Home screen support: no game running. Post a timerless
                      * home presence once (instead of bare online), clear it
                      * the moment a game commits. */
-                    const char *state = g_cfg.presence_state[0] ? g_cfg.presence_state : NULL;
-                    if(discord_set_presence_ex(&dc, state, "PlayStation 4", "home",
-                                            g_cfg.application_id, g_cfg.art_base_url,
-                                            g_cfg.home_art[0] ? g_cfg.home_art : NULL, NULL, 0) == 0){
+                    char hst[64];
+                    firmware_state_line(hst, sizeof hst);
+                    const char *state = hst[0] ? hst : NULL;
+                    if(discord_set_presence_ex(&dc, state, "PlayStation 4",
+                        details_for_home(),
+                        g_cfg.asset_idle, NULL, "home",
+                        g_cfg.application_id, g_cfg.art_base_url,
+                        large_art_url(), NULL, 0) == 0){
                         log_msg("presence: home");
                         pres_set(&pres, PS_HOME);
                         n_posts++;

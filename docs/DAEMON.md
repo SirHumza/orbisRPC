@@ -16,19 +16,50 @@ tile). Every 15 min the current state reposts regardless (reconciliation).
 
 ## Detection
 
-1. `/mnt/sandbox/<ID>_000` mount = authoritative running ID.
-2. eboot-process count change = launch/close right now (fast-switch).
-3. Save/appdir/app.pkg-atime signals disambiguate.
+The OS is asked directly: `sceSystemServiceGetAppIdOfBigApp()` names the app in
+front, `sceLncUtilGetAppTitleId()` turns that into a TITLEID. One call yields
+both state and identity, so they cannot disagree. No struct offsets, no
+directory scans, no mtime inference — nothing here a firmware can invalidate.
+`findings/proc-table-offsets.md` records what this replaced and why.
+
+Three answers stay distinct, because collapsing any two of them clears
+presence while a game is open:
+
+| Reading | Meaning | Presence |
+|---|---|---|
+| `app_id == -1` | nothing in front | may clear (2 misses) |
+| `app_id == 0` / `NPXS` id | system app in front | **hold** — the game is still running |
+| unreadable / malformed id | no opinion | **hold** |
+
+## Settings
+
+ShellUI logs every scene change to `kern.msgbuf`; the newest
+`OnFocusActiveSceneChanged` entry is the live scene. Settings scenes carry
+`: SettingPage`.
+
+Settings **replaces** the whole presence — its own name (`presence_settings_text`),
+no artwork, no timer, no small icon — rather than the game carrying a changed
+state line. The game underneath keeps its `started` epoch, so returning
+restores the original elapsed time instead of restarting the clock. The buffer
+is sized from the kernel's own answer and `mmap`ed, because a hardcoded size
+fails with ENOMEM on any console whose ring is larger.
 
 ## Names (first hit wins, no baked tables ever)
 
 1. `titles` map in config (manual override + self-learned).
-2. System app.db, read-only SQLite: `tbl_appbrowse.titleName`, then
-   `tbl_appinfo` TITLE keys, then `/user/appmeta/<id>/param.json`.
-3. Local pronunciation.xml / param.sfo / app.xml.
-4. Sony TMDB live (`<ID>_00` + HMAC-SHA1 URL — byte-identical to the PC
-   tools; unreachable from most consoles, kept as fallback).
+2. Local pronunciation.xml / param.sfo / app.xml.
+3. Sony TMDB live (`<ID>_00` + HMAC-SHA1 URL) over TLS-443; port 80 is blocked
+   on a jailbroken console, so it is the last resort, not the first.
+4. pkg-zone.com, **homebrew titles only** (`pkgzone_enabled`, default on).
+   Retail titles never reach it — TMDB owns them — and PS1/PS2 ids are excluded
+   as a separate deferred problem. It is a scraped third-party page with no API
+   contract, so a layout change degrades silently to the raw title id rather
+   than blocking the presence. Every hit is written back to the `titles` map.
 5. Raw ID (never shown twice; retried after 5 min, never frozen).
+
+Icon URLs from Sony's CDN still arrive as `http://` on some titles; they are
+upgraded to `https://` before use, because Discord silently drops an activity
+whose artwork is a non-https external URL (the tile just shows "?").
 
 ## Art
 

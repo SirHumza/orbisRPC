@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 cfg_t g_cfg;
@@ -15,14 +14,45 @@ void cfg_defaults(cfg_t *c) {
     memset(c, 0, sizeof(*c));
     c->schema_version = CFG_SCHEMA_VERSION;
     c->enabled = 1;
-    c->auto_update = 0; /* dormant: network self-update removed; updates via reinstall */
+    /* On by default, but it sends the console's title id to a third-party
+     * site, so it is one boolean away from being off for good. */
+    c->pkgzone_enabled = 1;
+    c->retro_enabled = 1;
+    c->show_firmware = 1;
+    c->show_idle = 1;
+    c->show_media = 1;
+    c->show_homebrew = 1;
+    c->auto_update = 1;
     c->poll_interval_s = 12;
     strncpy(c->token, "SET_ME", sizeof(c->token)-1);
     strncpy(c->presence_state, "On PS4", sizeof(c->presence_state)-1);
-    /* Idle tile ships working: project-hosted orbisRPC logo, resolved
-     * through the mp: proxy like every other art URL. Override with any
-     * http(s) URL or uploaded asset key. */
-    strncpy(c->home_art, "https://raw.githubusercontent.com/SirHumza/orbisRPC/main/config/icons/logo.png",
+    /* Presence shows three lines: name, details, state (+ timer). The details
+     * line says what you are doing; the state line carries the firmware. */
+    strncpy(c->presence_details_game, "Playing on PlayStation 4",
+            sizeof(c->presence_details_game)-1);
+    strncpy(c->presence_details_home, "Idling on Home Menu",
+            sizeof(c->presence_details_home)-1);
+    strncpy(c->presence_settings_text, "In Settings",
+            sizeof(c->presence_settings_text)-1);
+    /* Uploaded Discord asset keys. Referencing a key needs no
+     * external-assets POST, so these work with no network at all.
+     * Empty by default: the URLs below are what actually get used, and
+     * raw https in large_image only renders because discord.c proxies it
+     * through mp:. Set either to a key to prefer that instead. */
+    c->asset_idle[0] = 0;
+    c->asset_playing[0] = 0;
+    /* URLs for the two images, resolved through Discord's mp: external-assets
+     * proxy at post time (a raw https in large_image renders "?" or drops the
+     * activity). large_art falls back to home_art, small_art to large_art. */
+    strncpy(c->large_art, "https://retro-games.cybermask.dpdns.org/images/ps-logo-full.png",
+            sizeof(c->large_art)-1);
+    strncpy(c->small_art, "https://retro-games.cybermask.dpdns.org/images/ps-logo-blue.png",
+            sizeof(c->small_art)-1);
+    strncpy(c->browser_art, "https://retro-games.cybermask.dpdns.org/images/web_browser.png",
+            sizeof(c->browser_art)-1);
+    /* Idle tile: same logo as large_art, kept as the legacy fallback for
+     * configs written before large_art existed. */
+    strncpy(c->home_art, "https://retro-games.cybermask.dpdns.org/images/ps-logo-full.png",
             sizeof(c->home_art)-1);
     c->n_titles = 0;
     /* Default art backend: our own Sony-CDN icon pack, resolved through
@@ -77,6 +107,14 @@ int cfg_load(const char *path, cfg_t *c) {
     STR("art_base_url", art_base_url);
     STR("home_art", home_art);
     STR("presence_state", presence_state);
+    STR("presence_details_game", presence_details_game);
+    STR("presence_details_home", presence_details_home);
+    STR("presence_settings_text", presence_settings_text);
+    STR("asset_idle", asset_idle);
+    STR("asset_playing", asset_playing);
+    STR("large_art", large_art);
+    STR("small_art", small_art);
+    STR("browser_art", browser_art);
 #undef STR
     /* User-local title overrides: {"CUSA11995": "Marvel's Spider-Man"}.
      * Defensive: wrong types, overlong keys/names, and overflow past
@@ -104,6 +142,12 @@ int cfg_load(const char *path, cfg_t *c) {
         }
     }
     o = jl_obj_get(root, "enabled");         if (o && o->type == JL_BOOL)   c->enabled = (int)o->num;
+    o = jl_obj_get(root, "pkgzone_enabled"); if (o && o->type == JL_BOOL)   c->pkgzone_enabled = (int)o->num;
+    o = jl_obj_get(root, "retro_enabled"); if (o && o->type == JL_BOOL)   c->retro_enabled = (int)o->num;
+    o = jl_obj_get(root, "show_firmware"); if (o && o->type == JL_BOOL)   c->show_firmware = (int)o->num;
+    o = jl_obj_get(root, "show_idle");     if (o && o->type == JL_BOOL)   c->show_idle = (int)o->num;
+    o = jl_obj_get(root, "show_media");    if (o && o->type == JL_BOOL)   c->show_media = (int)o->num;
+    o = jl_obj_get(root, "show_homebrew"); if (o && o->type == JL_BOOL)   c->show_homebrew = (int)o->num;
     o = jl_obj_get(root, "auto_update");     if (o && o->type == JL_BOOL)   c->auto_update = (int)o->num;
     o = jl_obj_get(root, "debug");           if (o && o->type == JL_BOOL)   c->debug = (int)o->num;
     o = jl_obj_get(root, "poll_interval_s"); if (o && o->type == JL_NUMBER) c->poll_interval_s = (int)o->num;
@@ -171,10 +215,24 @@ int cfg_save(const char *path, const cfg_t *c) {
     jl_obj_set(r, "application_id",  jl_new_string(c->application_id));
     jl_obj_set(r, "art_base_url",    jl_new_string(c->art_base_url));
     jl_obj_set(r, "enabled",         jl_new_bool(c->enabled));
+    jl_obj_set(r, "pkgzone_enabled", jl_new_bool(c->pkgzone_enabled));
+    jl_obj_set(r, "retro_enabled", jl_new_bool(c->retro_enabled));
+    jl_obj_set(r, "show_firmware", jl_new_bool(c->show_firmware));
+    jl_obj_set(r, "show_idle",     jl_new_bool(c->show_idle));
+    jl_obj_set(r, "show_media",    jl_new_bool(c->show_media));
+    jl_obj_set(r, "show_homebrew", jl_new_bool(c->show_homebrew));
     jl_obj_set(r, "auto_update",     jl_new_bool(c->auto_update));
     jl_obj_set(r, "debug",           jl_new_bool(c->debug));
     jl_obj_set(r, "poll_interval_s", jl_new_number((double)c->poll_interval_s));
     jl_obj_set(r, "presence_state",  jl_new_string(c->presence_state));
+    jl_obj_set(r, "presence_details_game", jl_new_string(c->presence_details_game));
+    jl_obj_set(r, "presence_details_home", jl_new_string(c->presence_details_home));
+    jl_obj_set(r, "presence_settings_text", jl_new_string(c->presence_settings_text));
+    jl_obj_set(r, "asset_idle", jl_new_string(c->asset_idle));
+    jl_obj_set(r, "asset_playing", jl_new_string(c->asset_playing));
+    jl_obj_set(r, "large_art", jl_new_string(c->large_art));
+    jl_obj_set(r, "small_art", jl_new_string(c->small_art));
+    jl_obj_set(r, "browser_art", jl_new_string(c->browser_art));
     jl_obj_set(r, "home_art",        jl_new_string(c->home_art));
     if(c->n_titles > 0){
         jl_val_t *t = jl_new_object();
@@ -192,8 +250,6 @@ int cfg_save(const char *path, const cfg_t *c) {
     FILE *f = fopen(tmp, "wb");
     int ok = 0;
     if (f) {
-        /* token lives in this file: owner-only before bytes hit disk */
-        { int fd0 = fileno(f); if(fd0 >= 0) fchmod(fd0, 0600); }
         ok = (fputs(s, f) >= 0);
         if(fflush(f) != 0) ok = 0;
         /* force bytes to disk before rename */

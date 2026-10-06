@@ -17,42 +17,18 @@
 #include "icfg.h"
 
 #ifndef SETUP_VERSION
-#define SETUP_VERSION "1.1.0"
+#define SETUP_VERSION "1.0.0"
 #endif
 #define DAEMON_ELF "/app0/assets/daemon.elf"
-#define GEN_PATH "/data/orbisRPC/daemon.gen"
+#define EVICT_ELF "/app0/assets/evict.elf"
 #define INST_DIR "/data/orbisRPC"
 #define INST_LOG "/data/orbisRPC/install.log"
 #define PAYLOAD_BIN "/data/payloads/orbisrpc.bin"
-#define STATUS_PATH "/data/orbisRPC/status.json"
+#define EVICT_BIN "/data/payloads/evict.elf"
 
 /* Stage log: every copy step records errno + sizes to a file we can read
  * back over FTP. The dialog alone can't say WHICH stage failed. */
 static const char *g_stage = "-";
-
-/* --- pre-main boot marker ------------------------------------------
- * The wizard died before main() on every packaging experiment, leaving
- * install.log untouched and the crash handler (installed inside main)
- * never armed. A constructor runs before main, so it separates the two
- * failure classes for good:
- *   no BOOT line at all  -> the loader/SELF never got control (packaging,
- *                           authinfo, SIGSYS) or a pre-main fault
- *   BOOT but no stage    -> main started, died before the first ilog()
- * Async-signal-safe only: raw open/write, no stdio, no malloc. */
-__attribute__((constructor))
-static void boot_marker(void){
-    static const char msg[] = "BOOT installer entered pre-main\n";
-    const char *paths[2];
-    size_t i;
-    paths[0] = "/data/install.log";
-    paths[1] = INST_LOG;
-    for(i = 0; i < 2; i++){
-        int fd = open(paths[i], O_WRONLY | O_APPEND | O_CREAT, 0666);
-        if(fd < 0) continue;
-        { ssize_t w = write(fd, msg, sizeof msg - 1); (void)w; }
-        close(fd);
-    }
-}
 
 static void ilog(const char *tag, int err, long expect, long got){
     FILE *f;
@@ -241,25 +217,33 @@ static int mkdirs(const char *path){
 static int step_files(void){
     char report[512];
     int ok = -1;
+    int evict_ok = -1;
     mkdir(INST_DIR, 0777);
     mkdirs("/data/payloads");
-    ui_progress_open("Installing orbisRPC");
-    /* Copy daemon payload. */
-    ui_progress_msg("Copying payload");
-    ok = copy_file(DAEMON_ELF, PAYLOAD_BIN);
-    ilogv("daemon-copy", ok, 0);
-    ui_progress_set(60);
-    /* Pre-save config from PKG asset on FRESH installs only. A reinstall
-     * must never clobber the existing config: it holds the token and
-     * every learned title. step_token() below handles token entry. */
-    ui_progress_msg("Saving config");
+    /* Evict any running orbisRPC daemon before copying new payload.
+     * kill() is blocked by the sandbox (EPERM), so use
+     * sceKernelLoadStartModule to launch evict.elf as a module.
+     * evict.elf reads daemon.lock, kills the daemon, exits. */
     {
-        if(exists(ICFG_PATH)){
-            ilogv("cfg-keep", 0, 0);
-        } else if(exists("/app0/assets/config.json")){
+        evict_ok = copy_file(EVICT_ELF, EVICT_BIN);
+        ilog("evict-copy", evict_ok, 0, 0);
+        if(evict_ok == 0){
+            uint32_t rv = sceKernelLoadStartModule(EVICT_BIN, 0, NULL, 0, NULL, NULL);
+            ilog("evict-launch", rv, 0, 0);
+            sceKernelUsleep(500000);
+        }
+    }
+    /* Copy daemon payload. */
+    ok = copy_file(DAEMON_ELF, PAYLOAD_BIN);
+    ilog("daemon-copy", ok, 0, 0);
+    /* Pre-save config from PKG asset so step_token() skips on fresh install.
+     * Copy config.json from /app0/assets/config.json to /data/orbisRPC/config.json. */
+    {
+        FILE *src = fopen("/app0/assets/config.json", "rb");
+        if(src){
+            fclose(src);
             int rc = copy_file("/app0/assets/config.json", ICFG_PATH);
-            ilogv("cfg-copy", rc, 0);
-            if(rc == 0) chmod(ICFG_PATH, 0600);
+            ilog("cfg-copy", rc == 0 ? 0 : (errno ? errno : -1), 0, 0);
         } else {
             ilog("cfg-noasset", errno, 0, 0);
             /* Fallback: write template with pre-set token. */
@@ -267,16 +251,16 @@ static int step_files(void){
             if(f){
                 fputs("{\"schema_version\":1,\"token\":\"SET_ME\",\"presence_state\":\"On PS4\"}", f);
                 fclose(f);
-                chmod(ICFG_PATH, 0600);
             }
         }
     }
     snprintf(report, sizeof report,
+             "%s : %s%s%s%s\n"
              "%s : %s%s%s%s",
              PAYLOAD_BIN, ok == 0 ? "OK" : "denied",
-             ok == 0 ? "" : " [stage ", ok == 0 ? "" : g_stage, ok == 0 ? "" : "]");
-    ui_progress_set(80);
-    ui_progress_close();
+             ok == 0 ? "" : " [stage ", ok == 0 ? "" : g_stage, ok == 0 ? "" : "]",
+             EVICT_BIN, evict_ok == 0 ? "OK" : "denied",
+             evict_ok == 0 ? "" : " [stage ", evict_ok == 0 ? "" : g_stage, evict_ok == 0 ? "" : "]");
     ui_ok(report);
     if(ok != 0){
         ui_ok("Install failed: could not write the payload.\n\nStopping here.");
@@ -295,7 +279,6 @@ static int step_files(void){
                 if(f){
                     fputs("{\"schema_version\":1,\"token\":\"SET_ME\",\"presence_state\":\"On PS4\"}", f);
                     fclose(f);
-                    chmod(ICFG_PATH, 0600);
                 }
             } else {
                 fclose(f);
@@ -303,26 +286,6 @@ static int step_files(void){
         }
     }
     ilogv("cfg-done", 0, 0);
-    /* Generation bump: any older running daemon sees the new generation
-     * and exits cleanly so the fresh payload takes over (no evict). */
-    {
-        long cur = 0;
-        FILE *gf = fopen(GEN_PATH, "rb");
-        if(gf){
-            char gb[32];
-            size_t n = fread(gb, 1, sizeof gb - 1, gf);
-            fclose(gf);
-            if(n > 0){ gb[n] = 0; cur = atol(gb); }
-        }
-        gf = fopen(GEN_PATH, "wb");
-        if(gf){
-            fprintf(gf, "%ld\n", cur + 1);
-            fclose(gf);
-            ilogv("gen-bump", cur + 1, 0);
-        } else {
-            ilog("gen-bump", errno ? errno : -1, 0, 0);
-        }
-    }
     return 0;
 }
 
@@ -340,28 +303,11 @@ static void step_token(void){
     }
     for(tries = 0; tries < 3; tries++){
         r = ui_input("Discord token", "paste token, Done to save", tok, sizeof tok);
-        if(r < 0){
-            /* IME failure is transient (system dialog busy, OOM): retry
-             * instead of surrendering, and say so. Last try keeps the
-             * FTP fallback message. */
-            ilog("token-imefail", tries, 0, 0);
-            if(tries < 2){
-                ui_ok("Text input glitched. Try again.");
-                continue;
-            }
-            ui_ok("Text input failed. You can paste the token into "
-                  "/data/orbisRPC/config.json over FTP instead.");
-            return;
-        }
+        if(r < 0){ ui_ok("Text input failed. Skipping."); return; }
         if(r == 0) return;
         if(token_valid(tok)){
-            if(icfg_token_save(ICFG_PATH, tok) == 0){
-                ilogv("token-saved", 0, 0);
-                ui_ok("Config saved.");
-            } else {
-                ilog("token-save", errno, 0, 0);
-                ui_ok("Could not save the token.\n\nPaste it into /data/orbisRPC/config.json over FTP instead.");
-            }
+            r = icfg_token_save(ICFG_PATH, tok);
+            ui_ok("Config saved.");
             return;
         }
         ui_ok("That doesn't look like a token.\nCheck it and try again, or cancel to skip.");
@@ -378,22 +324,6 @@ static void finish(int code){
     _exit(code);
 }
 
-/* Final screen reports what is actually true: daemon liveness comes
- * from status.json freshness, not from the copy steps succeeding. */
-static void step_done(void){
-    char st[32] = "";
-    char msg[256];
-    if(icfg_daemon_state(STATUS_PATH, (long)time(NULL), 120, st, sizeof st)){
-        snprintf(msg, sizeof msg,
-                 "Done.\n\nDaemon is alive (%s).\nLaunch orbisrpc from the payload launcher after a reboot.", st);
-    } else {
-        snprintf(msg, sizeof msg,
-                 "Done.\n\nNo live daemon seen — normal on first install.\nLaunch orbisrpc from the payload launcher.");
-    }
-    ilogv("done-shown", 0, 0);
-    ui_ok(msg);
-}
-
 int main(void){
     /* Hide the PS4 splash first — dialogs opened while the splash
      * is visible get auto-dismissed (half-second flash) or never
@@ -401,13 +331,15 @@ int main(void){
      * run with the splash already gone, so no visible lag. */
     sceSystemServiceHideSplashScreen();
     crash_guard();
-    if(ui_init() != 0){ ilogv("ui-init-fail", 0, 0); finish(1); }
+    if(ui_init() != 0) finish(1);
     ui_ok("orbisRPC");
     if(step_assets() != 0) finish(1);
     ilogv("assets-ok", 0, 0);
     if(step_files() != 0) finish(1);
     step_token();
     ilogv("post-token", 0, 0);
-    step_done();
+    ui_ok("Done.\n\n"
+            "Payloads in /data/payloads.\n"
+            "Launch orbisrpc from the payload launcher.");
     finish(0);
 }

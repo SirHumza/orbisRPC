@@ -12,6 +12,7 @@
 #include "clock.h"
 #include "b64.h"
 #include "log.h"
+#include "notify.h"
 #include "art.h"
 #include "jsonlite.h"
 #include "detect.h"
@@ -150,28 +151,15 @@ static int send_identify(discord_t *d, const char *token){
     return rc < 0 ? -1 : 0;
 }
 
-const char *discord_state_name(const discord_t *d){
-    if(!d || !d->connected) return "down";
-    switch(d->state){
-    case GW_CONNECTING: return "connecting";
-    case GW_HELLO_WAIT: return "hello_wait";
-    case GW_IDENTIFYING: return "identifying";
-    case GW_READY: return "ready";
-    default: return "down";
-    }
-}
-
 int discord_connect(discord_t *d, const char *token){
     if(!d || !token || !token[0]) return -1;
     memset(d,0,sizeof(*d));
-    d->state = GW_CONNECTING;
     strncpy(d->token, token, sizeof d->token-1);
     d->token[sizeof d->token-1] = 0;
     char key[64]=""; make_key(key);
     int rc=ws_connect(&d->ws, GW_HOST, GW_PORT, GW_PATH, key);
     if(rc){ log_msg("ws connect fail %d",rc); return -1; }
     d->connected=1;
-    d->state = GW_HELLO_WAIT;
     int64_t now=orbis_mono_s();
     d->last_heartbeat=now; d->last_ack=now;
     /* HELLO (text frame carrying {"op":10,...}) */
@@ -203,7 +191,6 @@ int discord_connect(discord_t *d, const char *token){
         ws_close(&d->ws); d->connected=0;
         return -1;
     }
-    d->state = GW_IDENTIFYING;
     log_msg("discord: identify sent, hb=%llds",(long long)(d->hb_interval_ms/1000));
     /* READY confirms the token was accepted. `op` is the WebSocket frame
      * type; the gateway event is JSON inside — parse it, don't switch on it. */
@@ -226,8 +213,10 @@ int discord_connect(discord_t *d, const char *token){
         if(go==11){ d->last_ack=orbis_mono_s(); continue; }
         if(go==0 && is_ready(buf, (size_t)nr)){
             gw_seq(d, buf, (size_t)nr);
-            d->state = GW_READY;
             log_msg("discord: gateway ready");
+            /* Fires on every successful READY, including recovery after an
+             * outage -- that is the notification you actually want. */
+            notify_show("Connected to Discord");
             return 0;
         }
         /* other pre-READY events: ignore */
@@ -238,7 +227,9 @@ int discord_connect(discord_t *d, const char *token){
 
 int discord_set_presence(discord_t *d, const char *state, const char *name,
                          const char *application_id, int64_t started_epoch){
-    return discord_set_presence_ex(d, state, name, NULL, application_id, NULL, NULL, NULL, started_epoch);
+    return discord_set_presence_ex(d, state, name, NULL, NULL, NULL,
+                                    NULL, application_id, NULL, NULL,
+                                    NULL, started_epoch);
 }
 
 /* Lowercase titleId into an asset-key buffer. Returns key length. */
@@ -257,6 +248,8 @@ static size_t asset_key(const char *title_id, char *key, size_t cap){
 /* Test seam: pure activity-JSON builder (no sockets). token may be ""
  * to skip the mp: proxy (deterministic offline tests). NULL on OOM. */
 jl_val_t *discord_build_activity(const char *state, const char *name,
+                          const char *details,
+                          const char *asset_idle, const char *asset_playing,
                           const char *title_id, const char *application_id,
                           const char *art_base_url, const char *art_url,
                           const char *small_art_url,
@@ -274,6 +267,11 @@ jl_val_t *discord_build_activity(const char *state, const char *name,
         }
         jl_obj_set(act,"type",jl_new_int(atype)); /* 0 Playing */
     }
+    /* Second visible line. Never the raw title ID: that renders as noise
+     * under the name, and twice when the name itself fell back to the ID.
+     * Callers pass a short human phrase (what you are doing); the
+     * firmware version belongs in `state`, alongside the timer. */
+    if(details&&details[0]) jl_obj_set(act,"details",jl_new_string(details));
     if(state&&state[0]) jl_obj_set(act,"state",jl_new_string(state));
     /* details intentionally mirrors the human-readable name, never the raw
      * title ID: sending the ID here renders it as a second line under the
@@ -299,7 +297,13 @@ jl_val_t *discord_build_activity(const char *state, const char *name,
      * dangling keys drop the whole activity. Two working forms, tried in
      * order: (1) mp: proxy resolved via external-assets for the URL we
      * have (Sony CDN or art_base_url pack); (2) uploaded asset key. */
-    if(title_id&&!strcmp(title_id,"home")&&application_id&&application_id[0]){
+    /* "settings" is idle artwork too: Settings shows the same large
+     * image as home. Without this the branch fell through and the
+     * activity was sent with no assets at all. */
+    int idle_art = title_id && title_id[0] &&
+                   (!strcmp(title_id,"home") || !strcmp(title_id,"settings") ||
+                    !strcmp(title_id,"browser"));
+    if(idle_art && application_id && application_id[0]){
         /* Idle tile: PlayStation logo. home_art (arrives as art_url):
          * http(s) URL -> mp: proxy; bare value -> uploaded asset key
          * used as-is; empty -> <art_base_url>home.png when the pack
@@ -323,12 +327,20 @@ jl_val_t *discord_build_activity(const char *state, const char *name,
             if(n>0 && (size_t)n<sizeof home_pack) hsrc = home_pack;
         }
         char hmp[512] = "";
+        /* Prefer the configured idle asset key: already uploaded to the
+         * Discord app, so it costs no external-assets round trip and
+         * works with no network. art_url stays the fallback so an
+         * operator who prefers a URL is not overridden. */
         const char *himg = NULL;
+        if(asset_idle && asset_idle[0]){
+            himg = asset_idle;
+        } else {
         if(hsrc && !strncmp(hsrc,"http",4)){
             if(token && token[0] && art_resolve_mp(application_id, token, hsrc, hmp, sizeof hmp))
                 himg = hmp;
         } else if(hsrc){
             himg = hsrc; /* operator-supplied uploaded key: trusted */
+        }
         }
         if(himg){
             jl_val_t *as=jl_new_object();
@@ -375,7 +387,21 @@ jl_val_t *discord_build_activity(const char *state, const char *name,
      * PlayStation logo next to game art. mp: URLs resolve through the
      * disk-cached proxy; anything unresolvable is omitted, never sent
      * raw (bad small images drop the whole activity). */
-    if(small_art_url && small_art_url[0]){
+    int playing_art = title_id && title_id[0] &&
+                       strcmp(title_id,"home") != 0 &&
+                       strcmp(title_id,"settings") != 0 &&
+                       strcmp(title_id,"browser") != 0;
+    if(asset_playing && asset_playing[0] && playing_art){
+        jl_val_t *as = jl_obj_get(act, "assets");
+        if(!as || as->type != JL_OBJECT){
+            as = jl_new_object();
+            if(as) jl_obj_set(act, "assets", as);
+        }
+        if(as && as->type == JL_OBJECT){
+            jl_obj_set(as, "small_image", jl_new_string(asset_playing));
+            jl_obj_set(as, "small_text", jl_new_string("PlayStation 4"));
+        }
+    } else if(small_art_url && small_art_url[0]){
         char smp[512] = "";
         const char *simg = NULL;
         if(!strncmp(small_art_url, "mp:", 3)){
@@ -396,12 +422,15 @@ jl_val_t *discord_build_activity(const char *state, const char *name,
 }
 
 int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
+                          const char *details,
+                          const char *asset_idle, const char *asset_playing,
                          const char *title_id, const char *application_id,
                          const char *art_base_url, const char *art_url,
                          const char *small_art_url,
                          int64_t started_epoch){
     if(!d || !d->connected || !name) return -1;
-    jl_val_t *act = discord_build_activity(state, name, title_id,
+    jl_val_t *act = discord_build_activity(state, name, details,
+        asset_idle, asset_playing, title_id,
         application_id, art_base_url, art_url, small_art_url, started_epoch, d->token);
     if(!act) return -1;
     jl_val_t *dd=jl_new_object();
@@ -441,10 +470,6 @@ int discord_clear_presence(discord_t *d){
 
 int discord_tick(discord_t *d){
     if(!d || !d->connected) return -1;
-    /* Liveness lives in connected; state records the highest phase
-     * reached. A drop leaves state at its phase with connected=0 —
-     * observers must read through discord_state_name(), which reports
-     * any !connected session as down. */
     int64_t now=orbis_mono_s();
     long hb_s=(long)(d->hb_interval_ms/1000); if(hb_s<5)hb_s=5;
     /* gateway must ack heartbeats; 2 missed intervals means it's gone */
