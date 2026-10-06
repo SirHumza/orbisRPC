@@ -26,7 +26,7 @@
 | Updates | Manual | Self-updating from GitHub with rollback |
 | Installer | Manual ncat send | PKG (OrbisRPC-Setup.pkg) |
 
-### Known issues (from HANDOFF.md)
+### Known issues (from HANDOFF.md — file since deleted, content merged into docs/)
 1. Cover art shows "?" — mp: proxy works but asset propagation needs work
 2. Stale title on fresh launches — cloud sync bulk-touches save mtimes
 3. Game crashes (CE-34878-0) on some titles with daemon running
@@ -148,7 +148,7 @@ PS4_PAYLOAD_SDK=/mnt/c/Tools/ps4-payload-sdk-reference ./scripts/build_sdk.sh
 
 ## Session 5: ELF vs flat bin on high firmware (2026-09-29)
 
-- User reports ELF payloads do not work on high PS4 firmwares like 13.52 (cause not investigated). The repo docs (`docs/injecting.md`, `findings/loader.md`) say BinLoader 9020 and elfldr 9021 take the ELF, but that was only observed on 9.00 / GoldHEN 2.4.
+- User reports ELF payloads do not work on high PS4 firmwares like 13.52 (cause not investigated). The repo docs (`docs/injecting.md`, `docs/research/loader.md`) say BinLoader 9020 and elfldr 9021 take the ELF, but that was only observed on 9.00 / GoldHEN 2.4.
 - Context from web search: PS4 13.52 got a public WebKit jailbreak on 2026-09-19 and GoldHEN 2.4b18.11 support on 2026-09-20 (beta; other 13.xx builds planned later).
 - Conclusion: a flat `.bin` (libPS4 style, like the old kern.msgbuf payload) is needed for this console.
 - Extra risk: the daemon has only ever run on 9.00. `orbisrpc/detect.c` reads the process table with hard-coded offsets (name at 447, record size 479, pid at 72); these may differ on 13.52, so detection needs verifying even after a flat port.

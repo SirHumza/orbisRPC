@@ -1,7 +1,7 @@
 /* fw.h - console firmware version string, for display only.
  *
  * Not the same thing as the SDK's firmware gating: the CRT refuses to start
- * on unlisted firmware (see findings/sdk-13.52.md), while this just wants to
+ * on unlisted firmware (see docs/research/sdk-13.52.md), while this just wants to
  * print something like "13.52" next to the presence.
  *
  * Unlike upstream's fw.c this does NOT carry a per-firmware kinfo_proc offset

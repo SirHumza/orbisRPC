@@ -146,9 +146,10 @@ PS4 (GoldHEN)                              Discord
 └─────────────────────────┘      └──────────────────┘
 ```
 
-Details: [`docs/DAEMON.md`](docs/DAEMON.md) · [`docs/INSTALLER.md`](docs/INSTALLER.md) ·
+Details: [`docs/DAEMON.md`](docs/DAEMON.md) · [`docs/BUILDING.md`](docs/BUILDING.md) ·
+[`docs/CONFIG.md`](docs/CONFIG.md) · [`docs/INSTALLER.md`](docs/INSTALLER.md) ·
 [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) ·
-[`docs/PRODUCTION.md`](docs/PRODUCTION.md)
+[`docs/PRODUCTION.md`](docs/PRODUCTION.md) · full index at [`docs/`](docs/)
 
 ## Config
 
@@ -193,7 +194,7 @@ python3 tests/e2e_consumer.py     # contracts + linkage gate
 start on firmware it does not list, and terminates the payload before `main()`
 with no log line. The released SDK (v0.9) lists 13.50 but not 13.52, so a
 ZIP-built payload cannot boot on 13.52. See
-[`findings/sdk-13.52.md`](findings/sdk-13.52.md).
+[`docs/research/sdk-13.52.md`](docs/research/sdk-13.52.md).
 
 ## Safety
 

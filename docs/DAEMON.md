@@ -20,7 +20,7 @@ The OS is asked directly: `sceSystemServiceGetAppIdOfBigApp()` names the app in
 front, `sceLncUtilGetAppTitleId()` turns that into a TITLEID. One call yields
 both state and identity, so they cannot disagree. No struct offsets, no
 directory scans, no mtime inference — nothing here a firmware can invalidate.
-`findings/proc-table-offsets.md` records what this replaced and why.
+`research/proc-table-offsets.md` records what this replaced and why.
 
 Three answers stay distinct, because collapsing any two of them clears
 presence while a game is open:

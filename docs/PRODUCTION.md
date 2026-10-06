@@ -59,7 +59,6 @@ evict.elf deploy tool, CI ASan+e2e jobs.
 - GoldHEN settings-page loader segfaults every ELF (external).
 - IME dialog init errors (external API behavior).
 - Vesktop `?` tile (client quirk; phone renders fine).
-- Dead Discord notify webhook (cosmetic post-push hook).
 
 ## Risks
 
@@ -76,5 +75,5 @@ reboot recovery. Pending eyes: appdb name flip, badge render, logo tile.
 
 ## Readiness
 
-Production for the daemon scope. Installer/PKG remains out of scope per
-directive. Ship it.
+Production for the daemon scope. The Setup PKG (autorun, nanoDNS
+exception) ships with the official release — see [INSTALLER.md](INSTALLER.md).

@@ -86,7 +86,7 @@ the result on screen.
 | Symptom | Meaning | Fix |
 |---|---|---|
 | `Connection refused` on 9021/9020 | No listener armed | Tap BinLoader / open payloader page, retry instantly |
-| Nothing at all, any firmware 13.52+ | SDK built from the release ZIP | Rebuild via `scripts/build_sdk_from_source.sh` — the ZIP is v0.9, which predates the 13.52 CRT offsets, so `_start()` dies before `main()`. `findings/sdk-13.52.md` |
+| Nothing at all, any firmware 13.52+ | SDK built from the release ZIP | Rebuild via `scripts/build_sdk_from_source.sh` — the ZIP is v0.9, which predates the 13.52 CRT offsets, so `_start()` dies before `main()`. `research/sdk-13.52.md` |
 | `payload launched successfully` then silence, no log | Loader segfault (see above) | Update GoldHEN ≥ v2.4b18.5, use BinLoader server |
 | `Error handling payload` | Loader rejected the bytes | Re-check file integrity (`shasum`), resend |
 | Log exists but `FATAL: token rejected (4004)` | Token rotated/dead | Fresh token into `/data/orbisRPC/config.json`, relaunch |

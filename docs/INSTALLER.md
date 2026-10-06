@@ -1,5 +1,10 @@
 # Installer (Setup PKG, `ORPC00001`)
 
+> Status: design + code exist in `installer/`, but **no PKG ships with
+> test builds** — testers install the `.elf` directly (see repo README).
+> The PKG arrives with the official release and will also set up autorun
+> and the nanoDNS exception.
+
 ## What it does
 
 One linear flow, forward-only (every No skips ahead, nothing loops back):

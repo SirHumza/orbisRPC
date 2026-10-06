@@ -92,7 +92,7 @@ clang-18/lld-18; it never downloads the release ZIP.
 
 The daemon still has not been run on 13.52 with a fixed-SDK build. If it is
 still silent after this, the next suspect is the loader/spawn side, not the SDK:
-`findings/elf-linkage.md` records that elfldr "SIGKILLs on the first
+`elf-linkage.md` records that elfldr "SIGKILLs on the first
 unresolvable import — silent by design", which would look identical from the
 outside.
 
