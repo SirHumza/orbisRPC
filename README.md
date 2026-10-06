@@ -67,6 +67,9 @@ Questions, test-build feedback, bug reports: join the Discord —
 **[discord.gg/BWEyfcT7ZQ](https://discord.gg/BWEyfcT7ZQ)** — and post in
 `testers-chat`. No need to hunt for the link; this is it.
 
+**Found an issue?** Come to the Discord server and report it to us —
+we'll take care of it.
+
 ⚠️ **This is a beta.** Test builds are handed out on the Discord — join the
 server to get beta access.
 
