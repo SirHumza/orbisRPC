@@ -26,7 +26,7 @@ jobs:
       # git instead. Recipe from drakmor/nanoDNS's ps4 workflow, which ships a
       # working 13.52 payload over the same elfldr path.
       - name: checkout ps4-payload-sdk
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ps4-payload-dev/sdk
           path: sdk
