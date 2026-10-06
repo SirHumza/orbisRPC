@@ -100,6 +100,27 @@ gst.prod.dl.playstation.net
 ```
 
 Once you're done, save and restart your console.
+
+Also set your PS4's DNS to `127.0.0.1` so traffic actually goes through
+nanoDNS — then reboot. (This is the step most people miss.)
+
+**Still "can't connect to Discord" while the PS4 is online?**
+
+1. Open the PS4 web browser and go to `discord.com` — if that doesn't load,
+   it's your connection, not the payload.
+2. Delete `/data/orbisRPC/log.txt`, restart the console, run the payload
+   again.
+3. If it still fails, send the new `log.txt` in `testers-chat`.
+
+**Known issues (test build)**
+
+- Some homebrew (Apollo Save Tool, Cheats Manager, Homebrew Store) isn't
+  detected yet — under investigation.
+- Hotspot/mobile connections can send oversized frames that Discord
+  rejects — use stable Wi-Fi/LAN if presence won't set.
+
+**Official release:** will ship a PKG installer that sets everything up
+for you — including autorun and the nanoDNS exception fix.
 ## What you get
 
 | | |
