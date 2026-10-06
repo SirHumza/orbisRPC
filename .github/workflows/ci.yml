@@ -65,7 +65,7 @@ jobs:
           if echo "$NEEDED" | grep -q 'libkernel\.so'; then echo "FORBIDDEN: app-world libkernel.so"; exit 1; fi
           echo "linkage OK"
       - name: upload test-build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: orbisrpc-test-build
           path: build-sdk/orbisrpc_sdk.elf
