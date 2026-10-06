@@ -20,7 +20,7 @@ reads like a verdict on Discord itself. The daemon reports real reachability
 in its own log once started.
 
 The installer never boots anything directly. Starting the daemon is
-Payload Guest's `/data/payloads/` directory — pick `evict.elf` first
+the `/data/payloads/` directory — pick `evict.elf` first
 (removes old orbisrpc instance), then pick `orbisrpc.bin`.
 No loopback ports, no injection, no boot proof to go wrong.
 
@@ -67,7 +67,7 @@ button on No, which inverts the whole wizard.
 
 ## Auto-start
 
-Payload Guest AutoRun: enable it for `orbisrpc` once and the daemon
+GoldHEN AutoRun: enable it for `orbisrpc` once and the daemon
 starts on every jailbreak. The queue is menu-managed; the installer
 shows where, it can't write the queue itself.
 

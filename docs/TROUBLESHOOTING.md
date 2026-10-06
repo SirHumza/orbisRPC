@@ -66,7 +66,8 @@ Never share the config file — a user token is full account access.
 ## Payload won't start
 
 - The payload lives at `/data/payloads/` — put the `.elf` there (FTP/USB)
-  and launch it from the payload list. Don't use Payload Guest for orbisRPC.
+  and launch it from the payload list. Never use Payload Guest for
+  orbisRPC — it crashes.
 - No sender handy? elfldr (port 9021) or the BinLoader server (port 9020)
   also work — see [`injecting.md`](injecting.md).
 - Ports closed? GoldHEN's BinLoader toggle is off, or the console

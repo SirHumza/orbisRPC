@@ -33,7 +33,7 @@ Beta Discord Rich Presence daemon for jailbroken PS4. Testers install the
 - Docs: tester flow in `README.md`, reference in `docs/`
   (`TROUBLESHOOTING.md`, `CONFIG.md`, `BUILDING.md`), hardware research in
   `docs/research/`. Keep them in sync with behavior changes.
-- Don't tell testers to use Payload Guest for orbisRPC; autorun via
+- Never tell testers to use Payload Guest for orbisRPC — it crashes. Autorun via
   `/data/payloads` is not recommended on test builds.
 - License is undecided (MIT vs GPL). Don't add GPL code or a LICENSE
   file until the owners pick.
