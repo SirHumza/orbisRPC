@@ -65,8 +65,10 @@ Never share the config file — a user token is full account access.
 
 ## Payload won't start
 
-- Send it via elfldr (port 9021) or the BinLoader server (port 9020).
-  Don't use Payload Guest for orbisRPC.
+- The payload lives at `/data/payloads/` — put the `.elf` there (FTP/USB)
+  and launch it from the payload list. Don't use Payload Guest for orbisRPC.
+- No sender handy? elfldr (port 9021) or the BinLoader server (port 9020)
+  also work — see [`injecting.md`](injecting.md).
 - Ports closed? GoldHEN's BinLoader toggle is off, or the console
   rebooted to stock — re-jailbreak first.
 - Reboot wipes jailbreak + daemon (RAM-only). Re-jailbreak, re-send.

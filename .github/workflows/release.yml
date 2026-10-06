@@ -58,7 +58,8 @@ jobs:
             Test build `.elf` — no PKG yet.
 
             1. Delete the `/data/orbisRPC` folder from your PS4 first.
-            2. Run the payload once — it creates the config, then waits (no token yet).
+            2. Put the `.elf` at `/data/payloads/` and launch it from the payload list.
+            3. First run creates the config, then waits (no token yet).
             3. Open `/data/orbisRPC/config.json`, put your token in the `"token": "SET_ME"` slot.
             4. Re-run the payload. Launch a game, watch Discord.
 

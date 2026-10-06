@@ -94,15 +94,17 @@ Details: [`docs/DAEMON.md`](docs/DAEMON.md) · full index at [`docs/`](docs/)
 
 1. Before launching, delete the `/data/orbisRPC` folder from your PS4 if
    you have one there from an earlier build.
-2. Run the payload first time — it'll create the config file, then say
-   there's no token yet.
-3. Open `/data/orbisRPC/config.json` and add your account token in the
+2. Put the `.elf` on the console at `/data/payloads/` (FTP it over, or
+   USB) — that's where GoldHEN looks for payloads.
+3. Launch it from the payload list. First run creates the config file,
+   then says there's no token yet.
+4. Open `/data/orbisRPC/config.json` and add your account token in the
    `"token": "SET_ME"` slot.
-4. After setting the token, re-run the payload. Launch a game and watch
-   Discord. Give feedback in `testers-chat`.
+5. After setting the token, re-run the payload from `/data/payloads`.
+   Launch a game and watch Discord. Give feedback in `testers-chat`.
 
-After a reboot just re-jailbreak and re-send the payload — don't use
-Payload Guest for this.
+After a reboot just re-jailbreak and launch the payload from
+`/data/payloads` again.
 
 **Upgrading test builds:** as usual, delete the `/data/orbisRPC` folder
 before using a new test build — and you'll have to re-add your token in
