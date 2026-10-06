@@ -46,6 +46,9 @@ Your DNS blocker is eating Sony's TMDB host. Either disable it or use
 4. Raw external URLs and dangling asset keys drop the *whole* activity
    silently (name, timer, everything) — see
    [research/tls-ime.md](research/tls-ime.md) for the verified rules.
+5. No cover art at all (name + timer fine)? TMDB is unreachable without
+   the nanoDNS exception, so there's nothing to draw — fix DNS per the
+   nanoDNS section above and the art comes back on next resolve.
 
 ## Name shows raw ID (CUSA…)
 
