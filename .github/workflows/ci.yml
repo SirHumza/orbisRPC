@@ -61,6 +61,12 @@ jobs:
           echo "$NEEDED" | grep -q libSceSystemService.sprx || { echo "missing libSceSystemService (foreground detection)"; exit 1; }
           if echo "$NEEDED" | grep -q 'libkernel\.so'; then echo "FORBIDDEN: app-world libkernel.so"; exit 1; fi
           echo "linkage OK"
+      - name: upload test-build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbisrpc-test-build
+          path: build-sdk/orbisrpc_sdk.elf
+          if-no-files-found: error
   notify:
     # Post-push Discord ping via webhook. The webhook URL lives in the
     # DISCORD_WEBHOOK_URL repo secret (never in the tree); forks without
