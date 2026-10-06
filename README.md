@@ -78,9 +78,9 @@ Details: [`docs/DAEMON.md`](docs/DAEMON.md) · full index at [`docs/`](docs/)
 
 ## Requirements
 
-- Jailbroken PS4 on firmware **9.00 through 13.52**, GoldHEN running.
+- Jailbroken PS4 on firmware **from 5.05 upto 13.52**, GoldHEN running.
 - A way to send the payload (elfldr on port 9021, or GoldHEN BinLoader
-  on 9020).
+  on 9090).
 - A Discord account + your user token (see Install).
 - Internet on the PS4 that can reach Discord (see Troubleshooting if not).
 
@@ -117,7 +117,7 @@ test builds change fast — stick to manual runs for now.
 **Official release:** will ship a PKG installer that sets everything up
 for you — including autorun and the nanoDNS exception fix.
 
-✅ Firmware: confirmed working on 9.00 through 13.52.
+✅ Firmware: confirmed working on 9.00 through 13.52 but older fimwares should work.
 
 ### What's in the latest test build (0.60)
 
@@ -273,9 +273,10 @@ Build/test/CI details: [`docs/BUILDING.md`](docs/BUILDING.md).
 ## Credits
 
 - **SirHumza** — project founder, daemon core.
-- **CyberMask367** — firmware coverage to 13.52, pkg-zone homebrew,
-  retro lists, presence flags, tester wrangling.
-- Testers in `testers-chat` — every log file that made a fix possible.
+- **CyberMask367** — firmware coverage to 13.52, homebrew and retro games resolving, presence flags, tester wrangling.
+- Testers in `testers-chat`  on DIscord — every log file that made a fix possible.
+- [*PKG-ZONE*](https://pkg-zone.com) — metadata on ps4 hombrew apps used for resolving
+- [*PSX DATA CENTER*](https://psxdatacenter.com) — source used to make custom json list  in [`config`](config/) for resolving retro games
 
 ## License
 
