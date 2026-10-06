@@ -43,7 +43,7 @@ playing to Discord: name, cover art, timer. No PC at runtime.</p>
 
 | | |
 |---|---|
-| 🎮 **Any game, no lists** | Names resolve from your console's metadata (SFO, app.xml) plus Sony's TMDB — CUSA, PPSA, indies, zero per-game setup. |
+| 🎮 **Any games** | Names resolve on your console via Sony's TMDB — CUSA, zero per-game setup. |
 | 🕹️ **Homebrew + retro** | Homebrew resolves via pkg-zone; PS1/PS2/PSP classics via a custom list. |
 | 🖼️ **Real cover art** | Game art served per title, PlayStation logo when idle. |
 | ⏱️ **True timers** | Survive reconnects and restarts, resume across quick game switches. |
