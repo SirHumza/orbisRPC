@@ -5,14 +5,14 @@
 # orbisRPC — Discord Rich Presence for PS4 (GoldHEN RPC)
 
 <p align="center">
-  <a href="https://github.com/SirHumza/orbisRPC/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/version-1.0.0-ffd800?style=flat-square" alt="version"></a>
+  <a href="https://github.com/SirHumza/orbisRPC/releases"><img src="https://img.shields.io/badge/version-beta-ffd800?style=flat-square" alt="version"></a>
   <img src="https://img.shields.io/badge/PS4-GoldHEN-003791?style=flat-square" alt="PS4 GoldHEN">
   <img src="https://img.shields.io/badge/Discord-Rich%20Presence-5865F2?style=flat-square" alt="Discord">
   <a href="https://discord.gg/BWEyfcT7ZQ"><img src="https://img.shields.io/badge/Discord-Join%20the%20server-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Join the Discord"></a>
   <img src="https://img.shields.io/badge/tables-none-brightgreen?style=flat-square" alt="no tables">
 </p>
 
-<p align="center">by <b>CyberMask367</b> · <a href="https://discord.gg/BWEyfcT7ZQ">discord.gg/BWEyfcT7ZQ</a></p>
+<p align="center">by <b>SirHumza & CyberMask367</b> · <a href="https://discord.gg/BWEyfcT7ZQ">discord.gg/BWEyfcT7ZQ</a></p>
 
 <p align="center"><b>Discord Rich Presence for the jailbroken PS4 — every game, zero setup.</b><br>
 A background daemon that lives entirely on your console and posts what you're
@@ -22,14 +22,16 @@ playing to Discord: name, cover art, timer. No PC at runtime.</p>
 
 ## Install (5 minutes)
 
-1. Grab `OrbisRPC-Setup-1.0.0.pkg` from the
-   [Releases page](https://github.com/SirHumza/orbisRPC/releases/tag/v1.0.0)
-   and install it with Package Installer.
-2. Open **orbisRPC Setup**. It stages `orbisrpc.bin` + `evict.elf` in
-   `/data/payloads`, writes `/data/orbisRPC/config.json`, evicts any old
-   daemon, then asks for your Discord token.
-3. Launch **orbisrpc** from Payload Guest (GoldHEN's payload menu),
-   launch a game, watch Discord.
+> ⚠️ **No PKG yet — beta installs via payload.** Grab the latest test-build
+> `.elf` from the Discord (**[discord.gg/BWEyfcT7ZQ](https://discord.gg/BWEyfcT7ZQ)**).
+
+1. If an old test build is on the console, delete the `/data/orbisRPC`
+   folder first.
+2. Send the payload to the PS4 (elfldr / Payload Guest) and run it once —
+   it writes a fresh `/data/orbisRPC/config.json`.
+3. Open `/data/orbisRPC/config.json`, put your Discord token in the
+   `"token": "SET_ME"` slot, then re-run the payload.
+4. Launch a game and watch Discord.
 
 After a reboot: re-jailbreak, then enable AutoRun for `orbisrpc` in
 Payload Guest once — it starts itself on every jailbreak after that.
@@ -74,7 +76,7 @@ Save, then restart the console.
 | ⏱️ **True timers** | Survive reconnects and restarts, resume across quick game switches. |
 | 🧠 **Self-learning** | First-seen titles are remembered, so later boots resolve instantly. |
 | 🔄 **Self-updating** | Daemon updates land from GitHub releases with automatic rollback. No reinstall treadmill. |
-| 📦 **One-tap installer** | Setup PKG: install → token → payload in place. |
+| 📦 **Simple install** | Payload install → token → presence. (Setup PKG coming later.) |
 
 ## How it works
 

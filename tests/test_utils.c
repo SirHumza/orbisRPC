@@ -49,6 +49,8 @@ int ws_close(ws_t *w){ (void)w; return -1; }
 #include <string.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 
 /* Portable temp dir (mkdtemp needs feature macros this toolchain lacks). */
@@ -91,9 +93,10 @@ static void test_gateway_op_spoof(void) {
     jl_free(r2);
 }
 
-static void test_json_oom_safe(void) {    assert(jl_parse("true", 4) != NULL);
-    assert(jl_parse("false", 5) != NULL);
-    assert(jl_parse("null", 4) != NULL);
+static void test_json_oom_safe(void) {
+    jl_val_t *t = jl_parse("true", 4); assert(t != NULL); jl_free(t);
+    jl_val_t *f = jl_parse("false", 5); assert(f != NULL); jl_free(f);
+    jl_val_t *z = jl_parse("null", 4); assert(z != NULL); jl_free(z);
     jl_val_t *n = jl_parse("123.5", 5);
     assert(n && n->type == JL_NUMBER);
     jl_free(n);
@@ -472,10 +475,47 @@ static void test_cfg_titles(void) {
     assert(!strcmp(c.browser_art, "https://retro-games.cybermask.dpdns.org/images/web_browser.png"));
 }
 
+/* Test-only VFS shim. sqlite's DbPath-based xFullPathname can fail with a
+ * silent SQLITE_CANTOPEN (no syscall, no errno, nothing logged) on some
+ * runners. Our test paths are always absolute, so bypass it with a plain
+ * copy and delegate everything else to the real unix VFS. */
+static sqlite3_vfs g_orx_wrap;
+static int g_orx_installed = 0;
+
+static int orx_fullpath(sqlite3_vfs *p, const char *z, int n, char *o){
+    size_t len = strlen(z) + 1;
+    (void)p;
+    if (len > (size_t)n) return SQLITE_CANTOPEN;
+    memcpy(o, z, len);
+    return SQLITE_OK;
+}
+
+static void orx_vfs_install(void){
+    sqlite3_vfs *under;
+    if (g_orx_installed) return;
+    g_orx_installed = 1;
+    (void)sqlite3_initialize();
+    under = sqlite3_vfs_find(0);
+    if (!under) return;
+    g_orx_wrap = *under; /* inherit szOsFile, mxPathname, all methods */
+    g_orx_wrap.pNext = 0; /* must not link into the old registry list */
+    g_orx_wrap.zName = "orxtest";
+    g_orx_wrap.xFullPathname = orx_fullpath;
+    (void)sqlite3_vfs_register(&g_orx_wrap, 1); /* default for this process */
+}
+
 static void test_appdb(void) {
     char dir[64], db[96], meta[96], pj[160];
+    orx_vfs_install();
     assert(make_tmpdir(dir, sizeof dir) == 0);
     snprintf(db, sizeof db, "%s/app.db", dir);
+    /* Brand-new dir, so a pre-existing app.db is a stale artifact. sqlite
+     * opens with O_NOFOLLOW and fails ELOOP on a symlink where plain
+     * open() would follow it — clear the path before opening. */
+    unlink(db);
+    /* Pre-create so sqlite never exercises its CREATE branch; the test
+     * validates appdb reads/writes on a real file either way. */
+    { int prefd = open(db, O_RDWR|O_CREAT|O_TRUNC, 0600); if (prefd >= 0) close(prefd); }
     snprintf(meta, sizeof meta, "%s/appmeta", dir);
     assert(mkdir(meta, 0700) == 0);
     sqlite3 *s = NULL;

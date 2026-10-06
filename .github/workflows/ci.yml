@@ -26,8 +26,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ps4-payload-dev/sdk
-          ref: 573b4a0 # Add 14.00 offsets; includes 959e4ed "Add 13.52 offsets"
           path: sdk
+          fetch-depth: 0 # a raw SHA is not a branch/tag; checkout the repo then pin it
+      - name: pin ps4-payload-sdk
+        run: git -C sdk checkout 573b4a0 # Add 14.00 offsets; includes 959e4ed "Add 13.52 offsets"
       - name: install llvm
         run: sudo apt-get update -qq && sudo apt-get install -qy clang-18 lld-18 llvm-18
       - name: build SDK from source
