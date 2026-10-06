@@ -48,7 +48,7 @@ jobs:
           if echo "$NEEDED" | grep -q 'libkernel\.so'; then echo "FORBIDDEN: app-world libkernel.so"; exit 1; fi
           echo "linkage OK"
       - name: attach ELF to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: build-sdk/orbisrpc_sdk.elf
           generate_release_notes: true
