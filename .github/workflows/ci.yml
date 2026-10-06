@@ -1,10 +1,13 @@
 name: ci
 on: [push, pull_request]
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   host:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: host unit tests
         run: make -C tests clean && make -C tests test
       - name: ASan/UBSan
@@ -16,7 +19,7 @@ jobs:
   sdk-payload:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # The release ZIP (v0.9) predates the SDK's 13.52 offsets, and the SDK's
       # crt/patch.c makes _start() terminate before main() for unlisted
       # firmware -- so a ZIP-built payload dies silently on 13.52. Build from
