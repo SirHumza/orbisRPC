@@ -1,0 +1,46 @@
+name: Bug report
+description: Something broke on-console. Testers: try Discord testers-chat first.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tester? You will usually get help faster in the Discord (`testers-chat`).
+        If you file here, attach everything below or the report can't be acted on.
+  - type: input
+    id: build
+    attributes:
+      label: Build string
+      description: The `daemon start — build …` line from your log.txt
+      placeholder: "daemon start — build Oct  6 2026 01:40:52"
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: PS4 firmware
+      description: e.g. 9.00 through 13.52
+      placeholder: "11.00"
+    validations:
+      required: true
+  - type: textarea
+    id: symptom
+    attributes:
+      label: Symptom
+      description: What you expected vs what happened
+    validations:
+      required: true
+  - type: textarea
+    id: dns
+    attributes:
+      label: DNS answers
+      description: DNS blocker on/off? PS4 DNS set to 127.0.0.1? tmdb exception added? Rebooted after?
+    validations:
+      required: true
+  - type: file
+    id: log
+    attributes:
+      label: log.txt
+      description: Fresh /data/orbisRPC/log.txt after deleting it, restarting, and re-running once
+    validations:
+      required: true
