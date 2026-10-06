@@ -1,0 +1,65 @@
+name: release
+on:
+  push:
+    tags:
+      - 'v*'
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: checkout ps4-payload-sdk
+        uses: actions/checkout@v4
+        with:
+          repository: ps4-payload-dev/sdk
+          path: sdk
+          fetch-depth: 0 # a raw SHA is not a branch/tag; checkout the repo then pin it
+      - name: pin ps4-payload-sdk
+        run: git -C sdk checkout 573b4a0 # Add 14.00 offsets; includes 959e4ed "Add 13.52 offsets"
+      - name: install llvm
+        run: sudo apt-get update -qq && sudo apt-get install -qy clang-18 lld-18 llvm-18
+      - name: build SDK from source
+        run: |
+          make -C sdk DESTDIR="$HOME/ps4-payload-sdk" clean install
+      - name: gate SDK firmware support
+        run: |
+          grep -q "case 0x1352:" sdk/crt/patch.c || {
+            echo "FAIL: SDK lacks 13.52 offsets; payload cannot boot on 13.52"; exit 1; }
+          echo "SDK has 13.52 offsets"
+      - name: build SDK daemon payload
+        run: |
+          export PS4_PAYLOAD_SDK="$HOME/ps4-payload-sdk"
+          export PS4_SDK_SRC="$GITHUB_WORKSPACE/sdk"
+          ./scripts/build_sdk.sh
+      - name: gate daemon-world linkage only
+        run: |
+          export LLVM_READELF="$(command -v llvm-readelf-18 || command -v llvm-readelf)"
+          NEEDED=$("$LLVM_READELF" -d build-sdk/orbisrpc_sdk.elf | grep NEEDED | sed 's/.*\[//;s/\]//')
+          echo "$NEEDED"
+          echo "$NEEDED" | grep -q libkernel_web.sprx || { echo "missing libkernel_web"; exit 1; }
+          echo "$NEEDED" | grep -q libSceLibcInternal.sprx || { echo "missing libSceLibcInternal"; exit 1; }
+          echo "$NEEDED" | grep -q libSceNet.sprx || { echo "missing libSceNet"; exit 1; }
+          echo "$NEEDED" | grep -q libSceSystemService.sprx || { echo "missing libSceSystemService (foreground detection)"; exit 1; }
+          if echo "$NEEDED" | grep -q 'libkernel\.so'; then echo "FORBIDDEN: app-world libkernel.so"; exit 1; fi
+          echo "linkage OK"
+      - name: attach ELF to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build-sdk/orbisrpc_sdk.elf
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            Test build `.elf` — no PKG yet.
+
+            1. Delete the `/data/orbisRPC` folder from your PS4 first.
+            2. Run the payload once — it creates the config, then waits (no token yet).
+            3. Open `/data/orbisRPC/config.json`, put your token in the `"token": "SET_ME"` slot.
+            4. Re-run the payload. Launch a game, watch Discord.
+
+            Firmware 9.00 through 13.52. Issues → Discord: https://discord.gg/BWEyfcT7ZQ (`testers-chat`).
