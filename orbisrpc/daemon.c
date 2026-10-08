@@ -68,6 +68,12 @@ static int s_settings_posted = 0;
 static int s_in_browser = -1;
 static int s_browser_posted = 0;
 
+/* Shown when the gateway closes with 4004 (token rejected). Same text at
+ * connect time and mid-session, so one constant covers both. Throttled
+ * there rather than once-per-boot because a rejected token persists and
+ * the daemon keeps retrying on purpose -- it never exits on 4004. */
+#define TOKEN_REJECTED_MSG "Discord token rejected - make sure Token is valid"
+
 /* "Firmware 13.52" for the Settings presence. Reads through the same helper the
  * rest of the daemon uses, so an unavailable firmware string degrades to
  * "unknown" instead of stalling the post. */
@@ -349,6 +355,7 @@ int daemon_run(void){
              * reload picks up a fixed token on its own. */
             log_msg("WARN: token rejected by gateway (close 4004). "
                     "Fix \"token\" in %s; retrying", CFG_PATH);
+            notify_throttled("token4004", TOKEN_REJECTED_MSG, 300);
             int wait = reconnect_delay(&conn_fails, base_poll, &jctr);
             if(sleep_stop(wait)) break;
             continue;
@@ -746,6 +753,7 @@ int daemon_run(void){
                  * 4004 (never strand the daemon). Drop to the outer loop:
                  * backoff + config reload picks up a fixed token alone. */
                 log_msg("WARN: token rejected (close 4004). Fix %s; retrying", CFG_PATH);
+                notify_throttled("token4004", TOKEN_REJECTED_MSG, 300);
                 ws_close(&dc.ws);
                 pres_set(&pres, PS_NONE);
                 if(sleep_stop(reconnect_delay(&conn_fails, base_poll, &jctr))) break;

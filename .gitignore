@@ -11,8 +11,12 @@ __pycache__/
 config/config.ps4.json
 plugin/build/
 tests/test_utils
-config/icons/*
-!config/icons/logo.png
+# Retro cover art. Fetched at runtime from retro-games.cybermask.dpdns.org
+# (see the *_art URLs in cfg.c) and cached here locally; nothing under
+# orbisrpc/ reads these. 3.7 GB across ~23k files, so kept out of history.
+config/images/PS1/
+config/images/PS2/
+config/images/PSP/
 
 # installer artifacts
 *.pkg

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="config/icons/logo.png" width="420" alt="orbisRPC">
+  <img src="config/images/icons/logo.png" width="420" alt="orbisRPC">
 </p>
 
 # orbisRPC — Discord Rich Presence for PS4 (GoldHEN RPC)
