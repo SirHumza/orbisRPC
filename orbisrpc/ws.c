@@ -339,6 +339,10 @@ static int valid_frame_header(const unsigned char *b, uint64_t plen){
     return 1;
 }
 
+/* ws_skip_plan() lives in ws_skip.c so the host tests can compile it without
+ * the socket/TLS half of this file. */
+#include "ws_skip.c"
+
 int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out){
     if(!w || !w->connected || !buf || cap==0) return -1;
     for(;;){
@@ -376,7 +380,7 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
                     size_t h = (hdr < avail) ? hdr : avail;
                     w->rpos += h;                       /* eat the header */
                     size_t payload_here = avail - h;
-                    w->skip_left = plen - (uint64_t)payload_here;
+                    ws_skip_plan(plen, payload_here, &w->skip_left);
                     w->skip_op = wire_op;
                     if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
                     continue;
@@ -401,7 +405,29 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
                     return (int)copy;
                 }
             }
-            if(w->rlen == w->rcap){ /* full with no parseable frame: give up cleanly */
+            if(w->rlen == w->rcap){
+                /* A full buffer during a drain is NORMAL, not a fault: an
+                 * oversized frame is by definition larger than the buffer, so
+                 * the drain can only make progress by discarding what is
+                 * buffered. Bailing out here wiped the buffer and returned -2
+                 * with skip_left outstanding, which left the socket mid-frame
+                 * and made the next parse read JSON payload as a frame header
+                 * (observed: op=2 fin=0 plen=125 b1=0x22 -- a quote byte).
+                 * Consume against skip_left instead; the loop below refills
+                 * from TLS, so no headroom is actually needed. */
+                if(w->skip_left > 0){
+                    size_t take = (size_t)w->skip_left;
+                    if(take > w->rlen) take = w->rlen;
+                    w->skip_left -= take;
+                    w->rpos += take;
+                    if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
+                    if(w->skip_left == 0){
+                        if(opcode_out)*opcode_out = w->skip_op;
+                        return -3;
+                    }
+                    continue;
+                }
+                /* full with no parseable frame and no drain: give up cleanly */
                 log_msg("ws: buffer full with no frame; dropping %zuB and reconnecting", w->rlen);
                 w->rpos=0; w->rlen=0; return -2;
             }

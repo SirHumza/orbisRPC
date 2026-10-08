@@ -15,7 +15,7 @@ to prepare a source icon.
 """
 import sys, os, struct
 
-SRC = sys.argv[1] if len(sys.argv) > 1 else 'config/icons/logo.notify.png'
+SRC = sys.argv[1] if len(sys.argv) > 1 else 'config/images/icons/logo.notify.png'
 OUT = sys.argv[2] if len(sys.argv) > 2 else 'orbisrpc/icon_embedded.h'
 
 MAX_ICON = 512

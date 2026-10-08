@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="config/icons/logo.png" width="420" alt="orbisRPC">
+  <img src="config/images/icons/logo.png" width="420" alt="orbisRPC">
 </p>
 
 # orbisRPC — Discord Rich Presence for PS4 (GoldHEN RPC)
@@ -43,7 +43,7 @@ playing to Discord: name, cover art, timer. No PC at runtime.</p>
 
 | | |
 |---|---|
-| 🎮 **Any game, no lists** | Names resolve from your console's metadata (SFO, app.xml) plus Sony's TMDB — CUSA, PPSA, indies, zero per-game setup. |
+| 🎮 **Any games** | Names resolve on your console via Sony's TMDB — CUSA, zero per-game setup. |
 | 🕹️ **Homebrew + retro** | Homebrew resolves via pkg-zone; PS1/PS2/PSP classics via a custom list. |
 | 🖼️ **Real cover art** | Game art served per title, PlayStation logo when idle. |
 | ⏱️ **True timers** | Survive reconnects and restarts, resume across quick game switches. |
@@ -78,9 +78,9 @@ Details: [`docs/DAEMON.md`](docs/DAEMON.md) · full index at [`docs/`](docs/)
 
 ## Requirements
 
-- Jailbroken PS4 on firmware **9.00 through 13.52**, GoldHEN running.
+- Jailbroken PS4 on firmware **from 5.05 upto 13.52**, GoldHEN running.
 - A way to send the payload (elfldr on port 9021, or GoldHEN BinLoader
-  on 9020).
+  on 9090).
 - A Discord account + your user token (see Install).
 - Internet on the PS4 that can reach Discord (see Troubleshooting if not).
 
@@ -117,16 +117,13 @@ test builds change fast — stick to manual runs for now.
 **Official release:** will ship a PKG installer that sets everything up
 for you — including autorun and the nanoDNS exception fix.
 
-✅ Firmware: confirmed working on 9.00 through 13.52.
+✅ Firmware: confirmed working on 9.00 through 13.52 but older fimwares should work.
 
-### What's in the latest test build (0.60)
+### What's in the latest test build (0.70)
 
-- Fixed firmware string parsing — older firmware numbers like 9.00 now
-  show properly.
-- Homebrew apps resolve via pkg-zone.
-- Retro games (PS1/PS2/PSP) resolve via a custom list.
-- Optional presence flags, all `true` by default:
-  `show_firmware`, `show_idle`, `show_media`, `show_homebrew`.
+- Increased ws gateway frame buffer cap to 32MB - should fix oversized gateway frame skipping issue for some users (hopefully🤞).
+- fixed minor issue with frame draining.
+- added notification for invalid token.
 
 ## What you'll see
 
@@ -273,9 +270,10 @@ Build/test/CI details: [`docs/BUILDING.md`](docs/BUILDING.md).
 ## Credits
 
 - **SirHumza** — project founder, daemon core.
-- **CyberMask367** — firmware coverage to 13.52, pkg-zone homebrew,
-  retro lists, presence flags, tester wrangling.
-- Testers in `testers-chat` — every log file that made a fix possible.
+- **CyberMask367** — firmware coverage to 13.52, homebrew and retro games resolving, presence flags, tester wrangling.
+- Testers in `testers-chat`  on DIscord — every log file that made a fix possible.
+- [*PKG-ZONE*](https://pkg-zone.com) — metadata on ps4 hombrew apps used for resolving
+- [*PSX DATA CENTER*](https://psxdatacenter.com) — source used to make custom json list  in [`config`](config/) for resolving retro games
 
 ## License
 

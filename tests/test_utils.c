@@ -16,6 +16,7 @@
 #include "../orbisrpc/pkgzone.h"
 #include "../orbisrpc/gamecache.h"
 #include "../orbisrpc/fw.h"
+#include "../orbisrpc/ws.h"
 #include "../orbisrpc/gamecache.h"
 #include "../orbisrpc/pkgzone.h"
 #include "../installer/icfg.h"
@@ -38,6 +39,10 @@ int ws_recv_frame(ws_t *w, char *b, size_t c, int *o, int *f){
 }
 int ws_pong(ws_t *w){ (void)w; return -1; }
 int ws_close(ws_t *w){ (void)w; return -1; }
+/* ws.c itself is not linked on the host (it owns a tls_ctx_t), so the pure
+ * drain arithmetic comes in directly. Only ws_skip_plan is needed, and it is
+ * real code compiled from the real source, not a copy. */
+#include "../orbisrpc/ws_skip.c"
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/ecp.h>
 #include <mbedtls/ctr_drbg.h>
@@ -91,6 +96,56 @@ static void test_gateway_op_spoof(void) {
     jl_val_t *r2 = jl_parse(no_op, sizeof(no_op)-1);
     assert(r2 && jl_obj_get(r2, "op") == NULL);
     jl_free(r2);
+}
+
+/* --- oversized-frame drain arithmetic ---------------------------------
+ * A real account's READY measured 11.7 MB (four attempts, 11695449 /
+ * 11694320 / 11694256 / 11706895), past the old 8 MB cap, so identify never
+ * completed. The drain then left the socket mid-frame and the next parse
+ * read JSON payload as a header (op=2 fin=0 plen=125 b1=0x22 -- a quote).
+ * ws_skip_plan is the pure piece, so the silent failure modes are pinned
+ * here instead of on the console. */
+static void test_ws_skip_plan(void) {
+    uint64_t left = 0xdeadbeef;
+
+    /* The real READY, header just eaten, nothing of the body buffered. */
+    ws_skip_plan(11695449, 0, &left);
+    assert(left == 11695449);
+
+    /* Part of the body already buffered: drain only the remainder. */
+    ws_skip_plan(11695449, 65536, &left);
+    assert(left == 11695449 - 65536);
+
+    /* Body fully buffered already -> nothing left to discard. This is the
+     * saturation case; the old bare subtraction underflowed to ~1.8e19 here
+     * and the drain never terminated. */
+    ws_skip_plan(1000, 1000, &left);
+    assert(left == 0);
+    /* More buffered than the header claimed: must still saturate, never wrap. */
+    ws_skip_plan(1000, 5000, &left);
+    assert(left == 0);
+    ws_skip_plan(100, (size_t)-1, &left);
+    assert(left == 0);
+
+    /* Draining to exactly zero must land on zero, not one byte over. */
+    ws_skip_plan(2048, 2047, &left);
+    assert(left == 1);
+    ws_skip_plan(2048, 2048, &left);
+    assert(left == 0);
+
+    /* The cap the console actually hits: 11.7 MB frame, 32 MB buffer. */
+    ws_skip_plan(11695449, 32768, &left);
+    assert(left == 11695449 - 32768);
+    /* A frame larger than even the raised cap still drains sanely. */
+    ws_skip_plan((uint64_t)64 * 1024 * 1024, 0, &left);
+    assert(left == (uint64_t)64 * 1024 * 1024);
+
+    /* NULL out-pointer must not crash. */
+    ws_skip_plan(1000, 10, NULL);
+
+    /* The cap must actually be above the measured READY, or every one of
+     * these scenarios returns to the console as a failed connect. */
+    assert(WS_RBUF_MAX > 11706895);
 }
 
 static void test_json_oom_safe(void) {
@@ -1438,6 +1493,7 @@ int main(void) {
     test_procwalk_find_and_pid();
     test_json();
     test_gateway_op_spoof();
+    test_ws_skip_plan();
     test_json_oom_safe();
     test_json_hostile();
     test_tmdb();
