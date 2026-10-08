@@ -227,8 +227,6 @@ nanoDNS — then reboot. (This is the step most people miss.)
 
 - Some homebrew (Apollo Save Tool, Cheats Manager, Homebrew Store) isn't
   detected yet — under investigation.
-- Hotspot/mobile connections can send oversized frames that Discord
-  rejects — use stable Wi-Fi/LAN if presence won't set.
 
 ## Building
 
