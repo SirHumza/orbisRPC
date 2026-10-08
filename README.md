@@ -119,14 +119,11 @@ for you — including autorun and the nanoDNS exception fix.
 
 ✅ Firmware: confirmed working on 9.00 through 13.52 but older fimwares should work.
 
-### What's in the latest test build (0.60)
+### What's in the latest test build (0.70)
 
-- Fixed firmware string parsing — older firmware numbers like 9.00 now
-  show properly.
-- Homebrew apps resolve via pkg-zone.
-- Retro games (PS1/PS2/PSP) resolve via a custom list.
-- Optional presence flags, all `true` by default:
-  `show_firmware`, `show_idle`, `show_media`, `show_homebrew`.
+- Increased ws gateway frame buffer cap to 32MB - should fix oversized gateway frame skipping issue for some users (hopefully🤞).
+- fixed minor issue with frame draining.
+- added notification for invalid token.
 
 ## What you'll see
 
