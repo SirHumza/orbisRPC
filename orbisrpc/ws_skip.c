@@ -16,8 +16,18 @@
  */
 #include "ws.h"
 
-void ws_skip_plan(uint64_t plen, size_t payload_here, uint64_t *skip_left_out){
-    if(!skip_left_out) return;
+uint64_t ws_skip_plan(uint64_t plen, size_t payload_here, uint64_t *skip_left_out){
+    if(!skip_left_out) return 0;
+    /* payload_here is the number of payload bytes ALREADY REMOVED from rbuf
+     * and therefore no longer pending. It must NOT be the number sitting in
+     * the buffer: the drain loop consumes those too, so counting them here
+     * as well double-counts and the drain terminates early with the stream
+     * left mid-frame (console 2026-10-09, op=10 b1=0x3a b2=0x74).
+     *
+     * ws_recv_frame() removes no payload before arming the drain, so it
+     * passes 0. The saturation branch is kept so a caller that does remove
+     * bytes cannot underflow. */
     *skip_left_out = ((uint64_t)payload_here >= plen)
                      ? 0 : plen - (uint64_t)payload_here;
+    return *skip_left_out;
 }

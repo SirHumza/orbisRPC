@@ -13,7 +13,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define RETRO_HOST "retro-games.cybermask.dpdns.org"
+/* Host and base path are separate because a raw.githubusercontent.com URL is
+ * a path, not a hostname: getaddrinfo() and tls_start() below both need a bare
+ * host, and the certificate is issued for raw.githubusercontent.com. Putting the
+ * whole URL in RETRO_HOST made DNS fail outright. */
+#define RETRO_HOST "raw.githubusercontent.com"
+#define RETRO_BASE "/SirHumza/orbisRPC/refs/heads/main/config"
 #define RETRO_DEADLINE_S 25
 #define RETRO_HDR_MAX 8192
 /* Working window. Independent of the 1.5 MB file: a chunk plus enough tail to
@@ -291,8 +296,11 @@ int retro_resolve(const char *title_id, char *name, size_t name_cap,
     if(!n) return -1;
 
     for(int k = 0; k < n; k++){
-        char path[64];
-        snprintf(path, sizeof path, "/%s", s_plat_file[cands[k]]);
+        /* Sized for RETRO_BASE + "/" + the longest index filename, with room
+         * to spare: a longer org/repo name must not truncate the request
+         * path into a silent 404. */
+        char path[192];
+        snprintf(path, sizeof path, RETRO_BASE "/%s", s_plat_file[cands[k]]);
         name[0] = 0;
         if(url && url_cap) url[0] = 0;
         int rc = retro_fetch_scan(path, pat, name, name_cap, url, url_cap);

@@ -245,19 +245,19 @@ int daemon_run(void){
     int safe_mode = health_boot_note_crash();
     if(safe_mode)
         log_msg("WARN: repeated unclean boots; safe mode (updates off)");
-    /* Boot watchdog: a staged update that never proved itself healthy
-     * gets rolled back to .bak before anything runs it. */
+    /* Sanity check on the installed payload. This used to be a rollback
+     * watchdog: health_verify_or_rollback() tried to restore a <path>.bak
+     * that only a staged install ever wrote. With the updater reduced to a
+     * notification no .bak can exist, so every boot logged
+     * "failed verification (no backup)" forever. The ELF check is still
+     * worth keeping - it catches a truncated or corrupt install. */
     {
         static const char *targets[] = {
             "/data/payloads/orbisrpc.bin",
         };
-        for(unsigned ti = 0; ti < sizeof targets/sizeof targets[0]; ti++){
-            int vr = health_verify_or_rollback(targets[ti]);
-            if(vr == 1)
-                log_msg("WARN: %s rolled back to last-good backup", targets[ti]);
-            else if(vr == -1)
-                log_msg("WARN: %s failed verification (no backup)", targets[ti]);
-        }
+        for(unsigned ti = 0; ti < sizeof targets/sizeof targets[0]; ti++)
+            if(!health_check_binary(targets[ti]))
+                log_msg("WARN: %s is not a valid payload (truncated?)", targets[ti]);
     }
     if(cfg_load(CFG_PATH, &g_cfg) != 0){
         /* First boot: drop a template so FTP edit is the only step */
@@ -303,13 +303,27 @@ int daemon_run(void){
         return 1;
     }
 
-    /* Self-update once per boot, before first connect. Never fatal:
-     * staged artifacts take effect on next launch/injection. */
+    /* Update check once per boot, before first connect. Never fatal. Does not
+     * download or install anything; only notifies when a newer signed
+     * release exists, so the user can run the setup app. */
     if(g_cfg.auto_update && !safe_mode){
-        int ur = updater_check_and_stage();
-        log_msg("updater: %s (local %s)",
-                ur > 0 ? "staged newer build" : ur == 0 ? "already current" : "check failed",
-                ORBISRPC_VERSION);
+        /* Update CHECK only. Nothing is downloaded or installed here -- the
+         * setup app applies updates. A verified newer release just raises a
+         * notification so the user knows to run it. */
+        char newer[32] = "";
+        int ur = updater_check_notify(newer, sizeof newer);
+        if(ur > 0){
+            char msg[96];
+            snprintf(msg, sizeof msg,
+                     "Update %s available - use setup app to update", newer);
+            notify_once_boot("update", msg);
+            log_msg("updater: notification sent for %s (local %s)",
+                    newer, ORBISRPC_VERSION);
+        } else {
+            log_msg("updater: %s (local %s)",
+                    ur == 0 ? "already current" : "check failed",
+                    ORBISRPC_VERSION);
+        }
     } else if(safe_mode){
         log_msg("updater: skipped (safe mode)");
     }
@@ -324,6 +338,16 @@ int daemon_run(void){
     int backoff = base_poll;
     int conn_fails = 0;
     unsigned jctr = 0;
+    /* "Connected to Discord" policy: once on the first successful connect,
+     * then only again if a connect attempt actually failed in between.
+     *
+     * Deliberately NOT counting mid-session drops. The gateway can drop and
+     * come straight back (heartbeat ACKs, a brief outage) and treating that
+     * as a failure would re-notify on every cycle, which is the spam this
+     * replaces. Only a failed connect attempt -- rc != 0 from
+     * discord_connect -- counts as "we could not reach Discord". */
+    int announced_connected = 0;
+    int connect_failed_since_ok = 0;
     /* Health metrics (hourly HEALTH line). */
     int64_t boot_mono = orbis_mono_s();
     unsigned n_posts = 0, n_reconnects = 0;
@@ -356,6 +380,7 @@ int daemon_run(void){
             log_msg("WARN: token rejected by gateway (close 4004). "
                     "Fix \"token\" in %s; retrying", CFG_PATH);
             notify_throttled("token4004", TOKEN_REJECTED_MSG, 300);
+            connect_failed_since_ok = 1;
             int wait = reconnect_delay(&conn_fails, base_poll, &jctr);
             if(sleep_stop(wait)) break;
             continue;
@@ -365,10 +390,19 @@ int daemon_run(void){
             /* Throttled: the backoff already grows, so an unthrottled
              * notification here fires every 13s and then every minute. */
             notify_throttled("connect", "Cannot reach Discord - retrying", 300);
+            connect_failed_since_ok = 1;
             log_msg("gateway connect failed (attempt %d); retry in %ds",
                     conn_fails, wait);
             if(sleep_stop(wait)) break;
             continue;
+        }
+        if(!announced_connected || connect_failed_since_ok){
+            notify_show("Connected to Discord");
+            announced_connected = 1;
+            connect_failed_since_ok = 0;
+            log_msg("notify: %s",
+                    conn_fails > 0 ? "connected after failed attempts"
+                                   : "connected (first)");
         }
         if(conn_fails > 0)
             log_msg("gateway connected after %d failures", conn_fails);

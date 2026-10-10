@@ -1,21 +1,28 @@
-/* updater.c - self-updater. Pure logic (host-tested) plus PS4 HTTPS.
+/* updater.c - update CHECK. Pure logic (host-tested) plus PS4 HTTPS.
  *
- * Flow, once per daemon boot when enabled:
+ * Once per daemon boot, when enabled:
  *   GET https://api.github.com/repos/<repo>/releases/latest
- *   -> tag_name + asset browser_download_urls
- *   if tag newer than ORBISRPC_VERSION:
- *     download each known asset (cap 4MB), validate ELF magic,
- *     write <target>.new, rename over target.
- * Payload .bin takes effect on next injection. Never deletes, never writes unvalidated bytes.
+ *   -> tag_name
+ *   if the tag is newer than ORBISRPC_VERSION, notify. Nothing else.
+ *
+ * This deliberately does NOT download or install anything. It used to fetch
+ * orbisrpc.bin from the release and activate it over the live payload, which
+ * made every boot a remote-code-execution path. Updates are applied by the
+ * setup app now, and this file only tells the user to go do that.
+ *
+ * There is deliberately no signature check here. It was there to authenticate
+ * a binary that was then downloaded and executed; with the download gone, the
+ * only thing a signature could protect is the truth of a notification, and
+ * that cost a second release asset and a signing key nobody outside the
+ * original publisher holds. The tag arrives over TLS to api.github.com, so
+ * the realistic worst case is a wrong version number in a notification --
+ * not code execution.
  */
 #include "updater.h"
 #include "updater_http.h"
 #include "version.h"
 #include "clock.h"
 #include "jsonlite.h"
-#include "health.h"
-#include "manifest.h"
-#include "release_pubkey.h"
 #include "log.h"
 #include <string.h>
 #include <stdlib.h>
@@ -258,79 +265,28 @@ static char *https_get(const char *host, const char *path,
     return NULL;
 }
 
-static int stage_file(const char *target, const unsigned char *data, size_t n){
-    char tmp[192];
-    snprintf(tmp, sizeof tmp, "%s.new", target);
-    if(!updater_image_ok(data, n)){ log_msg("updater: staged bytes failed validation"); return -1; }
-    FILE *f = fopen(tmp, "wb");
-    if(!f){ log_msg("updater: cannot write %s", tmp); return -1; }
-    int ok = (fwrite(data, 1, n, f) == n);
-    if(fflush(f) != 0) ok = 0;
-    if(ok){ int fd = fileno(f); if(fd >= 0 && fsync(fd) != 0) ok = 0; }
-    if(fclose(f) != 0) ok = 0;
-    if(!ok){ remove(tmp); return -1; }
-    /* Atomic verified activation: validates <target>.new, backs up live
-     * to .bak, activates, re-verifies, auto-restores .bak on failure.
-     * A refused stage leaves the live target untouched (ORX-UPDATE-003). */
-    if(health_stage_activate(target) != 0){
-        log_msg("updater: stage activate failed for %s; live kept", target);
-        return -1;
-    }
-    return 0;
-}
+/* No stage_file() here any more: nothing is written to the payload path.
+ * See the header comment -- the download-and-activate path was removed so
+ * the payload cannot execute code fetched from the internet at boot. */
 
-/* Download a release asset by exact name. Returns heap body or NULL. */
-static char *fetch_asset(const jl_val_t *assets, const char *want_name,
-                         size_t cap, int *status, size_t *out_len){
-    for(size_t i = 0; ; i++){
-        const jl_val_t *a = jl_arr_at(assets, i);
-        if(!a) break;
-        const jl_val_t *nm = jl_obj_get(a, "name");
-        const jl_val_t *dl = jl_obj_get(a, "browser_download_url");
-        if(!nm || nm->type != JL_STRING || !dl || dl->type != JL_STRING) continue;
-        if(strcmp(nm->str, want_name) != 0) continue;
-        const char *url = dl->str;
-        if(strncmp(url, "https://", 8) != 0) return NULL;
-        const char *h0 = url + 8;
-        const char *p0 = strchr(h0, '/');
-        if(!p0 || (size_t)(p0 - h0) >= 128) return NULL;
-        char host[128];
-        memcpy(host, h0, (size_t)(p0 - h0)); host[p0 - h0] = 0;
-        return https_get(host, p0, cap, status, out_len);
-    }
-    return NULL;
-}
+/* Check whether a newer signed release exists, and say so on screen.
+ *
+ * This used to download release assets and activate them over the live
+ * payload (/data/payloads/orbisrpc.bin). That path is gone: the payload no
+ * longer fetches or executes code from the internet, so a compromised
+ * release, CDN, or redirect can at worst lie about a version number.
+ * Updates are applied by the setup app instead.
+ *
+ * The only thing fetched is the release JSON. There is no signature check:
+ * it authenticated a binary that used to be downloaded and executed, and
+ * with the download gone it could only guard the truth of a notification.
+ *
+ * Returns 1 when a newer release tag was found (notification fired),
+ * 0 when already current, -1 when the check itself failed.
+ * Never fatal to the daemon. */
+int updater_check_notify(char *newer_out, size_t newer_cap){
+    if(newer_out && newer_cap) newer_out[0] = 0;
 
-/* Decode manifest.sig: raw 64 bytes, or 128 hex chars. 0 ok. */
-static int decode_sig(const char *body, size_t len, unsigned char out[64]){
-    if(len == 64){ memcpy(out, body, 64); return 0; }
-    /* strip whitespace for hex form; exactly 128 hex chars required —
-     * trailing garbage after the 128 fails closed */
-    char hex[129];
-    size_t hn = 0, total = 0;
-    for(size_t i = 0; i < len; i++){
-        char c = body[i];
-        if(c == ' ' || c == '\t' || c == '\r' || c == '\n') continue;
-        total++;
-        if(hn < 128) hex[hn++] = c;
-    }
-    if(hn != 128 || total != 128) return -1;
-    for(int i = 0; i < 64; i++){
-        unsigned v = 0;
-        for(int k = 0; k < 2; k++){
-            char c = hex[2 * i + k];
-            v <<= 4;
-            if(c >= '0' && c <= '9') v |= (unsigned)(c - '0');
-            else if(c >= 'a' && c <= 'f') v |= (unsigned)(c - 'a' + 10);
-            else if(c >= 'A' && c <= 'F') v |= (unsigned)(c - 'A' + 10);
-            else return -1;
-        }
-        out[i] = (unsigned char)v;
-    }
-    return 0;
-}
-
-int updater_check_and_stage(void){
     char path[160];
     snprintf(path, sizeof path, "/repos/%s/releases/latest", ORBISRPC_REPO);
     size_t rl = 0;
@@ -340,112 +296,20 @@ int updater_check_and_stage(void){
     jl_val_t *r = jl_parse(js, rl);
     free(js);
     if(!r){ log_msg("updater: release parse failed"); return -1; }
+
     const jl_val_t *tag = jl_obj_get(r, "tag_name");
-    const jl_val_t *assets = jl_obj_get(r, "assets");
-    int updated = 0;
+    int found = 0;
+
     if(tag && tag->type == JL_STRING && tag->str[0] &&
        updater_cmp(tag->str, ORBISRPC_VERSION) > 0){
         log_msg("updater: %s available (local %s)", tag->str, ORBISRPC_VERSION);
-        if(assets && assets->type == JL_ARRAY){
-            /* Preferred: signed manifest (manifest.json + manifest.sig).
-             * Verified with the embedded release pubkey; every binary must
-             * match its listed SHA256. A bad signature refuses the whole
-             * update (ORX-UPDATE-002). */
-            manifest_t mf;
-            int have_manifest = 0;
-            size_t ml = 0;
-            char *mbody = fetch_asset(assets, "manifest.json", 65536, &status, &ml);
-            if(mbody){
-                size_t sl = 0;
-                char *sbody = fetch_asset(assets, "manifest.sig", 4096, &status, &sl);
-                if(sbody && manifest_parse(mbody, ml, &mf) == 0 &&
-                   manifest_gate(&mf) && manifest_is_newer(&mf, ORBISRPC_VERSION)){
-                    unsigned char sig[64];
-                    if(decode_sig(sbody, sl, sig) == 0 &&
-                       manifest_verify_sig((unsigned char*)mbody, ml, sig,
-                                           ORBISRPC_RELEASE_PUBKEY) == 0){
-                        have_manifest = 1;
-                        log_msg("updater: manifest %s verified (key %s)",
-                                mf.version, ORBISRPC_RELEASE_KEY_ID);
-                    } else {
-                        log_msg("updater: WARN ORX-UPDATE-002: manifest signature invalid; refusing update");
-                    }
-                } else if(sbody){
-                    log_msg("updater: WARN ORX-UPDATE-002: manifest invalid/gated; refusing update");
-                }
-                free(sbody);
-                if(!have_manifest){ free(mbody); mbody = NULL; }
-            }
-            /* Refuse unsigned updates outright. SHA256SUMS comes from the
-             * same release as the binaries, so it pins nothing against
-             * release-asset compromise — exactly what the signed manifest
-             * defends against (ORX-UPDATE-002). */
-            if(!have_manifest){
-                log_msg("updater: no valid signed manifest; refusing update (ORX-UPDATE-002)");
-                jl_free(r);
-                return 0;
-            }
-            /* Two-phase commit: download + verify the asset first, then
-             * activate it. A failure stages nothing — rollback restores the runtime. */
-            struct { const char *target; char *bin; size_t len; } pend[1];
-            memset(pend, 0, sizeof pend);
-            int pend_n = 0, pend_fail = 0;
-            for(size_t i = 0; ; i++){
-                const jl_val_t *a = jl_arr_at(assets, i);
-                if(!a) break;
-                const jl_val_t *nm = jl_obj_get(a, "name");
-                const jl_val_t *dl = jl_obj_get(a, "browser_download_url");
-                if(!nm || nm->type != JL_STRING || !dl || dl->type != JL_STRING) continue;
-                const char *target = NULL;
-                if(!strcmp(nm->str, "orbisrpc.bin")) target = "/data/payloads/orbisrpc.bin";
-                else continue;
-                /* download URLs must be https (fail closed on http/other). */
-                const char *url = dl->str;
-                if(strncmp(url, "https://", 8) != 0){ pend_fail = 1; break; }
-                const char *h0 = url + 8;
-                const char *p0 = strchr(h0, '/');
-                if(!p0 || (size_t)(p0-h0) >= 128){ pend_fail = 1; break; }
-                char host[128];
-                memcpy(host, h0, (size_t)(p0-h0)); host[p0-h0] = 0;
-                size_t al = 0;
-                char *bin = https_get(host, p0, UPD_BODY_MAX, &status, &al);
-                if(!bin || !updater_image_ok((unsigned char*)bin, al)){
-                    log_msg("updater: asset %s failed validation", nm->str);
-                    free(bin);
-                    pend_fail = 1;
-                    break;
-                }
-                if(manifest_check(&mf, nm->str, (unsigned char*)bin, al) != 0){
-                    log_msg("updater: asset %s not in manifest or hash mismatch; refusing (ORX-UPDATE-002)", nm->str);
-                    free(bin);
-                    pend_fail = 1;
-                    break;
-                }
-                if(pend_n < 2){
-                    pend[pend_n].target = target;
-                    pend[pend_n].bin = bin;
-                    pend[pend_n].len = al;
-                    pend_n++;
-                } else {
-                    free(bin); /* more binaries than we stage; ignore extras */
-                }
-            }
-            if(!pend_fail && pend_n > 0){
-                for(int pi = 0; pi < pend_n; pi++){
-                    if(stage_file(pend[pi].target,
-                                 (unsigned char*)pend[pi].bin, pend[pi].len) == 0){
-                        log_msg("updater: staged %s (%zu bytes)",
-                                pend[pi].target, pend[pi].len);
-                        updated = 1;
-                    }
-                }
-            } else if(pend_fail){
-                log_msg("updater: incomplete set; staged nothing (versions stay matched)");
-            }
-            for(int pi = 0; pi < pend_n; pi++) free(pend[pi].bin);
-            free(mbody);
+        if(newer_out && newer_cap){
+            snprintf(newer_out, newer_cap, "%s", tag->str);
+            found = 1;
         }
+    } else {
+        log_msg("updater: already current (local %s)", ORBISRPC_VERSION);
     }
     jl_free(r);
-    return updated ? 1 : 0;
+    return found;
 }
