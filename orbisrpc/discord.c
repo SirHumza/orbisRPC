@@ -214,9 +214,10 @@ int discord_connect(discord_t *d, const char *token){
         if(go==0 && is_ready(buf, (size_t)nr)){
             gw_seq(d, buf, (size_t)nr);
             log_msg("discord: gateway ready");
-            /* Fires on every successful READY, including recovery after an
-             * outage -- that is the notification you actually want. */
-            notify_show("Connected to Discord");
+            /* The "connected" notification is raised by the daemon, which
+             * knows whether this was a first connect or a recovery after a
+             * failed one. Firing it here meant every successful READY
+             * notified -- once per reconnect. */
             return 0;
         }
         /* other pre-READY events: ignore */

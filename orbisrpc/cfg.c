@@ -44,15 +44,15 @@ void cfg_defaults(cfg_t *c) {
     /* URLs for the two images, resolved through Discord's mp: external-assets
      * proxy at post time (a raw https in large_image renders "?" or drops the
      * activity). large_art falls back to home_art, small_art to large_art. */
-    strncpy(c->large_art, "https://retro-games.cybermask.dpdns.org/images/ps-logo-full.png",
+    strncpy(c->large_art, "https://raw.githubusercontent.com/SirHumza/orbisRPC/refs/heads/main/config/images/icons/ps-logo-full.png",
             sizeof(c->large_art)-1);
-    strncpy(c->small_art, "https://retro-games.cybermask.dpdns.org/images/ps-logo-blue.png",
+    strncpy(c->small_art, "https://raw.githubusercontent.com/SirHumza/orbisRPC/refs/heads/main/config/images/icons/ps-logo-small.png",
             sizeof(c->small_art)-1);
-    strncpy(c->browser_art, "https://retro-games.cybermask.dpdns.org/images/web_browser.png",
+    strncpy(c->browser_art, "https://raw.githubusercontent.com/SirHumza/orbisRPC/refs/heads/main/config/images/icons/web_browser.png",
             sizeof(c->browser_art)-1);
     /* Idle tile: same logo as large_art, kept as the legacy fallback for
      * configs written before large_art existed. */
-    strncpy(c->home_art, "https://retro-games.cybermask.dpdns.org/images/ps-logo-full.png",
+    strncpy(c->home_art, "https://raw.githubusercontent.com/SirHumza/orbisRPC/refs/heads/main/config/images/icons/ps-logo-full.png",
             sizeof(c->home_art)-1);
     c->n_titles = 0;
     /* Default art backend: our own Sony-CDN icon pack, resolved through

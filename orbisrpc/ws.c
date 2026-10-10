@@ -339,9 +339,10 @@ static int valid_frame_header(const unsigned char *b, uint64_t plen){
     return 1;
 }
 
-/* ws_skip_plan() lives in ws_skip.c so the host tests can compile it without
- * the socket/TLS half of this file. */
+/* ws_skip_plan() lives in ws_skip.c and the envelope scraper in ws_env.c, so
+ * the host tests can compile both without the socket/TLS half of this file. */
 #include "ws_skip.c"
+#include "ws_env.c"
 
 int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out){
     if(!w || !w->connected || !buf || cap==0) return -1;
@@ -352,13 +353,57 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
             w->rlen -= w->rpos; w->rpos = 0;
         }
         if(w->skip_left>0){
-            /* draining an oversized frame: drop whatever is buffered */
+            /* Draining an oversized frame. Every discarded byte is fed to the
+             * envelope scraper first, so op/s/t survive without buffering. */
             size_t have = w->rlen - w->rpos;
             size_t take = have < (size_t)w->skip_left ? have : (size_t)w->skip_left;
+            if(take && w->env_active)
+                ws_env_feed(&w->env, w->rbuf + w->rpos, take);
             w->skip_left -= take; w->rpos += take;
             if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
+            /* Hand back the envelope as soon as op/s/t are known instead of
+             * after the whole body. A 5.8 MB READY took longer to stream than
+             * the 20 s identify deadline, so waiting gave
+             * "no READY after identify (timeout)" even though the frame was
+             * arriving perfectly. The remainder keeps draining on later
+             * calls: skip_left and env live in the ws_t, so the next
+             * ws_recv_frame() resumes exactly where this one stopped. */
+            if(w->env_active && !w->env_reported && ws_env_complete(&w->env)){
+                size_t n = ws_env_render(&w->env, buf, cap);
+                if(n){
+                    w->env_reported = 1;
+                    if(opcode_out)*opcode_out = w->skip_op;
+                    if(fin_out)*fin_out = w->skip_fin;
+                    log_msg("ws: envelope reported early, %lluB still draining",
+                            (unsigned long long)w->skip_left);
+                    return (int)n;
+                }
+            }
             if(w->skip_left==0){
                 if(opcode_out)*opcode_out=w->skip_op;
+                if(fin_out)*fin_out=w->skip_fin;
+                /* Drain finished. If the envelope never got reported, give it
+                 * one last chance; otherwise this frame was already seen. */
+                if(w->env_active){
+                    if(w->env_reported){
+                        /* Already delivered this frame's envelope; only the
+                         * tail needed discarding. Report "nothing yet" rather
+                         * than -3, which callers log as a lost frame. */
+                        w->env_active = 0; w->env_reported = 0;
+                        return 0;
+                    }
+                    /* No early report happened, so say what was actually
+                     * captured. Without this the console only shows a bare
+                     * timeout and the cause is invisible. */
+                    log_msg("ws: drain end, envelope incomplete "
+                            "(op=%d %s s=%d %s t=%d %s win=%zu)",
+                            w->env.have_op, w->env.op,
+                            w->env.have_s, w->env.s,
+                            w->env.have_t, w->env.t, w->env.winlen);
+                    size_t n = ws_env_render(&w->env, buf, cap);
+                    w->env_active = 0; w->env_reported = 0;
+                    if(n) return (int)n;
+                }
                 return -3; /* whole oversized frame skipped */
             }
         } else {
@@ -371,17 +416,33 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
                         b[0]&0x0f, (b[0]&0x80)!=0, (unsigned long long)plen, b[0], b[1]);
                     return -2;
                 }
-                /* absurd length: skip BEFORE arithmetic (hdr+plen could
-                 * overflow uint64 and smuggle a tiny "total" past the cap) */
-                if(plen > WS_RBUF_MAX){
-                    log_msg("ws: oversized frame op=%d fin=%d plen=%llu (cap %u)",
-                        b[0]&0x0f, (b[0]&0x80)!=0, (unsigned long long)plen, WS_RBUF_MAX);
+                /* Oversized: never buffer. Start the drain and scrape op/s/t as the
+                 * bytes go past, so a 12 MB READY costs a fixed 2 KB window.
+                 * Buffering it used to force rbuf to double to 16 MB, which
+                 * exhausted console memory across a long session (2026-10-09).
+                 * Size checked BEFORE arithmetic: hdr+plen could overflow
+                 * uint64 and smuggle a tiny "total" past the cap. */
+                if(plen > WS_BODY_MAX){
+                    log_msg("ws: oversized frame op=%d fin=%d plen=%llu (streamed, body cap %u)",
+                        b[0]&0x0f, (b[0]&0x80)!=0, (unsigned long long)plen, WS_BODY_MAX);
                     size_t avail = w->rlen - w->rpos;
                     size_t h = (hdr < avail) ? hdr : avail;
                     w->rpos += h;                       /* eat the header */
                     size_t payload_here = avail - h;
-                    ws_skip_plan(plen, payload_here, &w->skip_left);
+                    if(payload_here) ws_env_feed(&w->env, w->rbuf + w->rpos, payload_here);
+                    /* skip_left counts EVERY payload byte still to consume,
+                     * including the ones already sitting in rbuf. Passing
+                     * payload_here here was a double-count: ws_skip_plan()
+                     * subtracted them, then the drain below consumed them
+                     * again, so the drain ended early and the next parse
+                     * read mid-payload as a frame header (observed 2026-10-09
+                     * as op=10 plen=116 b1=0x3a b2=0x74 -- ':' and 't' from
+                     * the middle of READY's "d" object). */
+                    ws_skip_plan(plen, 0, &w->skip_left);
                     w->skip_op = wire_op;
+                    w->skip_fin = fin;
+                    w->env_active = 1;
+                    w->env_reported = 0;
                     if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
                     continue;
                 }
@@ -391,7 +452,16 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
                     while(ncap < (size_t)total && ncap < WS_RBUF_MAX) ncap*=2;
                     unsigned char *nb=(unsigned char*)realloc(w->rbuf,ncap);
                     if(nb){ w->rbuf=nb; w->rcap=ncap; log_msg("ws: rbuf grown to %zu", ncap); }
-                    else { log_msg("ws: rbuf grow fail"); }
+                    else {
+                        /* Once per connection. This used to log on every
+                         * loop pass and buried the actual cause under 20
+                         * identical lines. */
+                        if(!w->grow_warned){
+                            w->grow_warned = 1;
+                            log_msg("ws: rbuf grow fail (want %zu, have %zu); "
+                                    "console likely out of memory", ncap, w->rcap);
+                        }
+                    }
                 }
                 if((uint64_t)(w->rlen-w->rpos) >= total){
                     size_t copy = (size_t)plen;
@@ -418,11 +488,32 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
                 if(w->skip_left > 0){
                     size_t take = (size_t)w->skip_left;
                     if(take > w->rlen) take = w->rlen;
+                    if(take && w->env_active)
+                        ws_env_feed(&w->env, w->rbuf + w->rpos, take);
                     w->skip_left -= take;
                     w->rpos += take;
                     if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
+                    if(w->env_active && !w->env_reported && ws_env_complete(&w->env)){
+                        size_t n = ws_env_render(&w->env, buf, cap);
+                        if(n){
+                            w->env_reported = 1;
+                            if(opcode_out)*opcode_out = w->skip_op;
+                            if(fin_out)*fin_out = w->skip_fin;
+                            return (int)n;
+                        }
+                    }
                     if(w->skip_left == 0){
                         if(opcode_out)*opcode_out = w->skip_op;
+                        if(fin_out)*fin_out = w->skip_fin;
+                        if(w->env_active){
+                            if(w->env_reported){
+                                w->env_active = 0; w->env_reported = 0;
+                                return 0;
+                            }
+                            size_t n = ws_env_render(&w->env, buf, cap);
+                            w->env_active = 0; w->env_reported = 0;
+                            if(n) return (int)n;
+                        }
                         return -3;
                     }
                     continue;
