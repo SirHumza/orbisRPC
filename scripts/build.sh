@@ -47,7 +47,7 @@ LDFLAGS="-m elf_x86_64 -pie --eh-frame-hdr -L$SDK/lib $LIBS $SDK/lib/crt1.o --sc
 export OO_PS4_TOOLCHAIN="$SDK"
 OUT="$ROOT/build"; mkdir -p "$OUT"
 echo "=== compiling (CC=$CC LD=$LD SDK=$SDK) ==="
-for f in log cfg jsonlite b64 sfo procwalk bigapp fw pkgzone gamecache notify retro tmdb_crypto tmdb updater updater_http updater_util tls ws detect discord daemon compat lock timesync art health manifest main; do
+for f in log cfg jsonlite b64 sfo procwalk bigapp fw pkgzone gamecache notify retro tmdb_crypto tmdb updater updater_http updater_util tls ws detect discord daemon compat lock timesync art health main; do
   "$CC" $CFLAGS -c -o "$OUT/$f.o" "orbisrpc/$f.c" || fail "compile $f"
 done
 echo "=== mbedtls (skip net_sockets/timing: POSIX-only) ==="

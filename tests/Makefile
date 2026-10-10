@@ -10,7 +10,7 @@ MBEDTLS_DIR := ../third_party/mbedtls/library
 # Same exclusion set as scripts/build.sh (POSIX-only modules).
 MBEDTLS_SRCS := $(filter-out $(MBEDTLS_DIR)/net_sockets.c $(MBEDTLS_DIR)/timing.c $(MBEDTLS_DIR)/entropy_poll.c,$(wildcard $(MBEDTLS_DIR)/*.c))
 
-ORBIS_SRCS := ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c ../orbisrpc/tmdb_crypto.c ../orbisrpc/updater_util.c ../orbisrpc/art.c ../orbisrpc/log.c ../orbisrpc/health.c ../orbisrpc/manifest.c ../orbisrpc/compat.c ../orbisrpc/cfg.c ../orbisrpc/appdb.c ../orbisrpc/discord.c ../orbisrpc/procwalk.c ../orbisrpc/bigapp.c ../orbisrpc/pkgzone.c ../orbisrpc/gamecache.c ../orbisrpc/fw.c ../orbisrpc/notify.c ../orbisrpc/retro.c
+ORBIS_SRCS := ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c ../orbisrpc/tmdb_crypto.c ../orbisrpc/updater_util.c ../orbisrpc/art.c ../orbisrpc/log.c ../orbisrpc/health.c ../orbisrpc/compat.c ../orbisrpc/cfg.c ../orbisrpc/appdb.c ../orbisrpc/discord.c ../orbisrpc/procwalk.c ../orbisrpc/bigapp.c ../orbisrpc/pkgzone.c ../orbisrpc/gamecache.c ../orbisrpc/fw.c ../orbisrpc/notify.c ../orbisrpc/retro.c
 INST_SRCS := ../installer/icfg.c
 # SQLite amalgamation: -O0 for host iteration speed (payload uses -O2).
 SQLITE_DIR := ../third_party/sqlite/sqlite-amalgamation-3510100
@@ -47,7 +47,11 @@ $(OBJDIR):
 $(ASAN_OBJDIR):
 	mkdir -p $(ASAN_OBJDIR)
 
-$(OBJDIR)/test_utils.o: test_utils.c | $(OBJDIR)
+# test_utils.c #includes ws_skip.c and ws_env.c directly (they are the pure
+# parts of ws.c, which cannot be linked on the host because it owns a
+# tls_ctx_t). They must be listed here or make treats the object as up to date
+# after they change -- which silently tested stale code.
+$(OBJDIR)/test_utils.o: test_utils.c ../orbisrpc/ws_skip.c ../orbisrpc/ws_env.c ../orbisrpc/ws_env.h | $(OBJDIR)
 	$(CC) $(CFLAGS) -c -o $@ test_utils.c
 
 $(OBJDIR)/orbis_%.o: ../orbisrpc/%.c | $(OBJDIR)
@@ -65,7 +69,7 @@ $(OBJDIR)/sqlite3.o: $(SQLITE_DIR)/sqlite3.c | $(OBJDIR)
 $(ASAN_OBJDIR)/sqlite3.o: $(SQLITE_DIR)/sqlite3.c | $(ASAN_OBJDIR)
 	$(CC) $(SQLITE_FLAGS) $(ASAN_FLAGS) -c -o $@ $<
 
-$(ASAN_OBJDIR)/test_utils.o: test_utils.c | $(ASAN_OBJDIR)
+$(ASAN_OBJDIR)/test_utils.o: test_utils.c ../orbisrpc/ws_skip.c ../orbisrpc/ws_env.c ../orbisrpc/ws_env.h | $(ASAN_OBJDIR)
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) -c -o $@ test_utils.c
 
 $(ASAN_OBJDIR)/orbis_%.o: ../orbisrpc/%.c | $(ASAN_OBJDIR)

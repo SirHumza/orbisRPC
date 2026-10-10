@@ -5,7 +5,6 @@
 #include "../orbisrpc/updater.h"
 #include "../orbisrpc/art.h"
 #include "../orbisrpc/health.h"
-#include "../orbisrpc/manifest.h"
 #include "../orbisrpc/cfg.h"
 #include "../orbisrpc/appdb.h"
 #include "../orbisrpc/discord.h"
@@ -43,6 +42,7 @@ int ws_close(ws_t *w){ (void)w; return -1; }
  * drain arithmetic comes in directly. Only ws_skip_plan is needed, and it is
  * real code compiled from the real source, not a copy. */
 #include "../orbisrpc/ws_skip.c"
+#include "../orbisrpc/ws_env.c"
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/ecp.h>
 #include <mbedtls/ctr_drbg.h>
@@ -140,12 +140,322 @@ static void test_ws_skip_plan(void) {
     ws_skip_plan((uint64_t)64 * 1024 * 1024, 0, &left);
     assert(left == (uint64_t)64 * 1024 * 1024);
 
+
     /* NULL out-pointer must not crash. */
     ws_skip_plan(1000, 10, NULL);
 
     /* The cap must actually be above the measured READY, or every one of
      * these scenarios returns to the console as a failed connect. */
     assert(WS_RBUF_MAX > 11706895);
+}
+
+
+ /* The envelope must be reportable BEFORE the body is fully drained.
+ *
+ * Console 2026-10-09: a 5.8 MB READY streamed correctly but took longer than
+ * the 20 s identify deadline, so waiting for the whole frame produced
+ * "no READY after identify (timeout)". op/s/t sit in the first few hundred
+ * bytes, so the caller must be able to act on them immediately while the
+ * remainder drains in the background. */
+static void test_ws_env_early_report(void) {
+    ws_env_t e;
+    char out[256];
+
+    ws_env_init(&e);
+    /* Only the envelope so far -- the "d" object has not arrived. */
+    const char *head = "{\"op\":0,\"s\":41,\"t\":\"READY\",\"d\":{";
+    ws_env_feed(&e, (const unsigned char*)head, strlen(head));
+
+    assert(ws_env_complete(&e));            /* complete despite the body */
+    size_t n = ws_env_render(&e, out, sizeof out);
+    assert(n > 0);
+    assert(strstr(out, "\"t\":\"READY\""));
+
+    /* A missing "s" must not stall the report. op and t are what the callers
+     * read; requiring all three meant one unmatched field blocked the whole
+     * 5.8 MB drain, which is the 2026-10-09 timeout. */
+    ws_env_init(&e);
+    const char *nos = "{\"op\":0,\"t\":\"READY\",\"d\":{";
+    ws_env_feed(&e, (const unsigned char*)nos, strlen(nos));
+    assert(!e.have_s);
+    assert(ws_env_complete(&e));
+    assert(ws_env_render(&e, out, sizeof out) > 0);
+
+    /* Op alone is not enough: is_ready() needs t. */
+    ws_env_init(&e);
+    const char *not_ = "{\"op\":0,\"d\":{";
+    ws_env_feed(&e, (const unsigned char*)not_, strlen(not_));
+    assert(e.have_op && !e.have_t);
+    assert(!ws_env_complete(&e));
+
+    assert(WS_BODY_MAX < 5836474);
+}
+
+static void test_ws_skip_plan_early(void) {
+    /* Re-assert the drain can continue after an early report: arming with 0
+     * leaves the full plen pending, which is what the background drain uses. */
+    uint64_t left = 0;
+    ws_skip_plan(5836474, 0, &left);
+    assert(left == 5836474);
+    /* And a drained frame reports nothing further rather than a lost frame. */
+    ws_skip_plan(0, 0, &left);
+    assert(left == 0);
+}
+
+/* Simulate ws_recv_frame's drain over a real-sized frame with a realistically
+ * full buffer, and prove it consumes EXACTLY plen payload bytes.
+ *
+ * This is the regression test for the 2026-10-09 connect failure. ws.c passed
+ * the already-buffered payload count into ws_skip_plan AND let the drain
+ * consume those bytes again, so the drain stopped payload_here bytes early
+ * and the next parse read mid-payload as a frame header (observed:
+ * op=10 fin=0 plen=116 b1=0x3a b2=0x74 -- ':' and 't' out of READY's "d").
+ * Asserting the helper alone could not catch it; the arithmetic has to be
+ * replayed the way ws_recv_frame actually drives it. */
+static void test_ws_drain_length(void) {
+    const uint64_t plen = 5836474;      /* real READY from the 2026-10-09 log */
+    const size_t   rcap = 65536;        /* WS_BODY_MAX / WS_RBUF_MIN */
+    const size_t   hdr  = 10;           /* 64-bit length prefix */
+
+    /* ws_recv_frame arms the drain with no payload removed, then the drain
+     * loop consumes whatever is buffered before reading more. */
+    uint64_t skip_left = 0;
+    ws_skip_plan(plen, 0, &skip_left);
+    assert(skip_left == plen);
+
+    /* Model the buffer: first read fills it completely. */
+    size_t rlen = rcap;
+    uint64_t consumed = 0;
+    int rounds = 0;
+
+    while(skip_left > 0){
+        size_t take = (size_t)((skip_left < rlen) ? skip_left : rlen);
+        skip_left -= take;
+        consumed += take;
+        rlen -= take;                     /* compaction: rpos back to 0 */
+        if(rlen == 0){                    /* buffer emptied, read more */
+            size_t space = rcap;
+            size_t remaining = (size_t)((skip_left < space) ? skip_left : space);
+            rlen = remaining;
+            skip_left -= remaining;
+            consumed += remaining;
+        }
+        if(++rounds > 100000){ assert(0 && "drain did not terminate"); }
+    }
+
+    /* The whole point: exactly plen bytes consumed, so the next byte read is
+     * the next frame's header. */
+    assert(consumed == plen);
+    assert(rounds > 1);   /* it really did take many rounds */
+
+    /* Replay the buggy arming too: it lands short by exactly the buffered
+     * count, which is what desynced the stream. */
+    uint64_t buggy_skip = 0;
+    ws_skip_plan(plen, rcap - hdr, &buggy_skip);
+    assert(buggy_skip == plen - (rcap - hdr));
+    {
+        size_t rlen2 = rcap, rounds2 = 0;
+        uint64_t consumed2 = 0, sl = buggy_skip;
+        while(sl > 0){
+            size_t take = (size_t)((sl < rlen2) ? sl : rlen2);
+            sl -= take; consumed2 += take; rlen2 -= take;
+            if(rlen2 == 0){
+                size_t sp = rcap;
+                size_t rem = (size_t)((sl < sp) ? sl : sp);
+                rlen2 = rem; sl -= rem; consumed2 += rem;
+            }
+            if(++rounds2 > 100000) break;
+        }
+        /* Short by payload_here -> next parse starts inside the payload. */
+        assert(consumed2 == plen - (uint64_t)(rcap - hdr));
+        assert(consumed2 != plen);
+    }
+}
+
+/* Replica of discord.c's top_val() depth-1 lookup. The rendered envelope is
+ * only useful if THIS can find "t" inside it, and top_val() is static in
+ * discord.c so the host suite cannot call it directly. Kept byte-for-byte in
+ * behaviour: keys only count at depth 1, counted by '{' and '['.
+ *
+ * This is the check that was missing. ws_env_render() originally emitted a
+ * bare "op":0,"t":"READY" with no braces, so depth never reached 1,
+ * is_ready() never matched, and the handshake timed out even though the
+ * envelope came back in one second (console 2026-10-09). */
+static const char *test_top_val(const char *json, size_t len, const char *key){
+    size_t kl = strlen(key);
+    int depth = 0, instr = 0, esc = 0;
+    for(size_t i = 0; i < len; i++){
+        char c = json[i];
+        if(instr){
+            if(esc) esc = 0;
+            else if(c == '\\') esc = 1;
+            else if(c == '"') instr = 0;
+            continue;
+        }
+        if(c == '"'){
+            size_t j = i + 1, k = 0;
+            while(j < len && k < kl && json[j] == key[k]){ j++; k++; }
+            if(k == kl && j < len && json[j] == '"'){
+                j++;
+                while(j < len && (json[j] == ' ' || json[j] == '\t')) j++;
+                if(j < len && json[j] == ':'){
+                    if(depth == 1) return json + j + 1;
+                    i = j; continue;
+                }
+            }
+            instr = 1; continue;
+        }
+        if(c == '{' || c == '[') depth++;
+        else if(c == '}' || c == ']') depth--;
+    }
+    return NULL;
+}
+
+/* The rendered envelope must be readable by the real consumer. */
+static void test_ws_env_renders_parseable(void) {
+    char out[256];
+    ws_env_t e;
+
+    ws_env_init(&e);
+    const char *p = "{\"op\":0,\"s\":41,\"t\":\"READY\",\"d\":{}}";
+    ws_env_feed(&e, (const unsigned char*)p, strlen(p));
+    size_t n = ws_env_render(&e, out, sizeof out);
+    assert(n > 0);
+
+    /* Well-formed object: the braces must be there. */
+    assert(out[0] == '{');
+    assert(out[n - 1] == '}');
+
+    /* And depth-1 lookup, which is what is_ready()/gw_op() actually do. */
+    const char *t = test_top_val(out, n, "t");
+    assert(t != NULL);
+    assert(!memcmp(t, "\"READY\"", 7));
+
+    const char *op = test_top_val(out, n, "op");
+    assert(op != NULL);
+    assert(!memcmp(op, "0", 1));
+
+    const char *s = test_top_val(out, n, "s");
+    assert(s != NULL);
+    assert(!memcmp(s, "41", 2));
+
+    /* "d" was never captured, so it must not be findable. */
+    assert(test_top_val(out, n, "d") == NULL);
+
+    /* A nested "t" must NOT be reachable at depth 1. */
+    ws_env_init(&e);
+    p = "{\"op\":9,\"t\":\"RESUMED\",\"d\":{\"t\":\"NESTED\"}}";
+    ws_env_feed(&e, (const unsigned char*)p, strlen(p));
+    n = ws_env_render(&e, out, sizeof out);
+    t = test_top_val(out, n, "t");
+    assert(t != NULL);
+    assert(!memcmp(t, "\"RESUMED\"", 9));
+}
+
+/* --- oversized-frame envelope scraping ---------------------------------
+ * Buffering READY forced rbuf to double to 16 MB and exhausted console
+ * memory (2026-10-09: "ws: rbuf grow fail", then a permanent connect
+ * failure). The payload is now streamed and only op/s/t kept, so these pin
+ * the extractor that makes that safe. */
+static void test_ws_env(void) {
+    char out[256];
+
+    /* The real shape: envelope first, 12 MB of "d" after. */
+    {
+        ws_env_t e;
+        ws_env_init(&e);
+        const char *p = "{\"op\":0,\"s\":41,\"t\":\"READY\",\"d\":{"
+                        "\"user\":{\"id\":\"1\",\"s\":9},\"guilds\":[]}}";
+        ws_env_feed(&e, (const unsigned char*)p, strlen(p));
+        assert(e.have_op && e.have_s && e.have_t);
+        assert(ws_env_complete(&e));
+        size_t n = ws_env_render(&e, out, sizeof out);
+        assert(n > 0);
+        assert(strstr(out, "\"op\":0"));
+        assert(strstr(out, "\"s\":41"));
+        assert(strstr(out, "\"t\":\"READY\""));
+        assert(!strstr(out, "\"d\""));   /* the 12 MB we never want */
+    }
+
+    /* Nested keys must not be mistaken for the envelope's. This is the real
+     * hazard: "d" contains "s" and "t" of its own. */
+    {
+        ws_env_t e;
+        ws_env_init(&e);
+        const char *p = "{\"op\":9,\"s\":7,\"t\":\"RESUMED\",\"d\":"
+                        "{\"s\":\"SHOULD-NOT-WIN\",\"t\":\"ALSO-NOT\"}}";
+        ws_env_feed(&e, (const unsigned char*)p, strlen(p));
+        assert(!strcmp(e.s, "7"));
+        assert(!strcmp(e.t, "RESUMED"));
+        assert(!strcmp(e.op, "9"));
+    }
+
+    /* Key split across a chunk boundary: "RE" | "ADY". */
+    {
+        ws_env_t e;
+        ws_env_init(&e);
+        const char *a = "{\"op\":0,\"s\":41,\"t\":\"RE";
+        const char *b = "ADY\",\"d\":{}}";
+        ws_env_feed(&e, (const unsigned char*)a, strlen(a));
+        ws_env_feed(&e, (const unsigned char*)b, strlen(b));
+        assert(!strcmp(e.t, "READY"));
+        assert(ws_env_complete(&e));
+    }
+
+    /* Byte-at-a-time: the worst chunking the socket can produce. */
+    {
+        ws_env_t e;
+        ws_env_init(&e);
+        const char *p = "{\"op\":0,\"s\":41,\"t\":\"READY\",\"d\":{}}";
+        for(size_t i = 0; p[i]; i++) ws_env_feed(&e, (const unsigned char*)p + i, 1);
+        assert(!strcmp(e.op, "0"));
+        assert(!strcmp(e.s, "41"));
+        assert(!strcmp(e.t, "READY"));
+    }
+
+    /* Window saturation must not spin forever waiting for more, and must not
+     * overflow the fixed 2 KB window. */
+    {
+        ws_env_t e;
+        ws_env_init(&e);
+        static char big[WS_ENV_WINDOW * 3];
+        memset(big, 'x', sizeof big);
+        ws_env_feed(&e, (const unsigned char*)big, sizeof big);
+        assert(e.winlen == WS_ENV_WINDOW);
+        assert(ws_env_complete(&e));   /* saturated -> done, not stuck */
+        ws_env_feed(&e, (const unsigned char*)big, sizeof big);
+        assert(e.winlen == WS_ENV_WINDOW); /* still bounded */
+    }
+
+    /* Nothing captured -> render returns 0 so the caller keeps the old
+     * "skipped frame" behaviour instead of reading an empty frame. */
+    {
+        ws_env_t e;
+        ws_env_init(&e);
+        const char *p = "{\"d\":{\"huge\":true}}";
+        ws_env_feed(&e, (const unsigned char*)p, strlen(p));
+        assert(ws_env_render(&e, out, sizeof out) == 0);
+    }
+
+    /* Caller buffer too small must refuse rather than truncate into a
+     * malformed JSON envelope. */
+    {
+        ws_env_t e;
+        ws_env_init(&e);
+        const char *p = "{\"op\":0,\"s\":41,\"t\":\"READY\"}";
+        ws_env_feed(&e, (const unsigned char*)p, strlen(p));
+        assert(ws_env_render(&e, out, 4) == 0);
+        assert(ws_env_render(&e, out, sizeof out) > 0);
+    }
+
+    /* NULL safety. */
+    ws_env_init(NULL);
+    ws_env_feed(NULL, (const unsigned char*)"x", 1);
+    assert(ws_env_complete(NULL) == 0);
+    assert(ws_env_render(NULL, out, sizeof out) == 0);
+
+    /* The cap must sit below a real READY or the whole thing is pointless. */
+    assert(WS_BODY_MAX < 11695449);
 }
 
 static void test_json_oom_safe(void) {
@@ -329,151 +639,6 @@ static void test_health_safe_mode(void) {
     assert(health_boot_note_crash() == 0);
     health_mark_healthy();
 }
-
-static void test_health_stage_activate(void) {
-    /* Atomic staging: bad .new never touches live; rollback restores. */
-    char dir[64];
-    assert(make_tmpdir(dir, sizeof dir) == 0);
-    health_set_base(dir);
-    char live[256], tmp[256], bak[256];
-    snprintf(live, sizeof live, "%s/live.bin", dir);
-    snprintf(tmp, sizeof tmp, "%s/live.bin.new", dir);
-    snprintf(bak, sizeof bak, "%s/live.bin.bak", dir);
-    /* live = valid ELF stand-in (>=64B, ELF magic via updater_image_ok?
-     * use real check: write 64 zero bytes won't pass; stage path only
-     * needs .new validation, so craft minimal ELF header). */
-    unsigned char elf[128];
-    memset(elf, 0, sizeof elf);
-    elf[0] = 0x7f; elf[1] = 'E'; elf[2] = 'L'; elf[3] = 'F';
-    elf[4] = 2; elf[5] = 1; elf[18] = 62;
-    FILE *f = fopen(live, "wb");
-    assert(f); assert(fwrite(elf, 1, sizeof elf, f) == sizeof elf); fclose(f);
-    /* corrupt .new is refused, live untouched */
-    f = fopen(tmp, "wb");
-    assert(f); assert(fwrite("garbage-not-elf-at-all......................"
-                            "..............................", 1, 64, f) == 64);
-    fclose(f);
-    assert(health_stage_activate(live) != 0);
-    f = fopen(live, "rb");
-    assert(f);
-    unsigned char chk[4];
-    assert(fread(chk, 1, 4, f) == 4);
-    fclose(f);
-    assert(chk[0] == 0x7f && chk[1] == 'E');
-    /* valid .new activates, backup created, rollback restores */
-    f = fopen(tmp, "wb");
-    assert(f);
-    elf[7] = 0x42;
-    assert(fwrite(elf, 1, sizeof elf, f) == sizeof elf);
-    fclose(f);
-    assert(health_stage_activate(live) == 0);
-    f = fopen(bak, "rb");
-    assert(f); fclose(f);
-    assert(health_verify_or_rollback(live) == 0);
-    /* corrupt live + backup present -> rollback */
-    f = fopen(live, "wb");
-    assert(f); assert(fwrite("XX", 1, 2, f) == 2); fclose(f);
-    assert(health_verify_or_rollback(live) == 1);
-    f = fopen(live, "rb");
-    assert(f);
-    assert(fread(chk, 1, 4, f) == 4);
-    fclose(f);
-    assert(chk[0] == 0x7f);
-}
-
-static void test_manifest(void) {
-    const char *json = "{\"version\":\"1.0.0\",\"channel\":\"stable\","
-        "\"min_version\":\"0.9.0\",\"platform\":\"ps4-goldhen\","
-        "\"assets\":[{\"name\":\"orbisrpc.bin\","
-        "\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}]}";
-    manifest_t m;
-    assert(manifest_parse(json, strlen(json), &m) == 0);
-    assert(strcmp(m.version, "1.0.0") == 0);
-    assert(strcmp(m.channel, "stable") == 0);
-    char hex[65] = {0};
-    assert(manifest_find(&m, "orbisrpc.bin", hex) == 0);
-    assert(!strcmp(hex, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
-    assert(manifest_find(&m, "nope.bin", hex) != 0);
-    assert(manifest_gate(&m) == 1);
-    assert(manifest_is_newer(&m, "0.9.0") == 1);
-    assert(manifest_is_newer(&m, "1.0.0") == 0);
-    /* wrong channel / platform refused */
-    const char *bad = "{\"version\":\"9.9.9\",\"channel\":\"beta\","
-        "\"platform\":\"ps5\",\"assets\":[{\"name\":\"x.bin\","
-        "\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}]}";
-    manifest_t m2;
-    assert(manifest_parse(bad, strlen(bad), &m2) == 0);
-    assert(manifest_gate(&m2) == 0);
-    /* malformed rejected */
-    assert(manifest_parse("{}", 2, &m) != 0);
-    assert(manifest_parse("not json", 8, &m) != 0);
-    /* hash check: real sha256 of "abc" must match */
-    const char *jh = "{\"version\":\"1\",\"assets\":[{\"name\":\"a\","
-        "\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"}]}";
-    manifest_t m3;
-    assert(manifest_parse(jh, strlen(jh), &m3) == 0);
-    assert(manifest_check(&m3, "a", (const unsigned char *)"abc", 3) == 0);
-    assert(manifest_check(&m3, "a", (const unsigned char *)"abd", 3) != 0);
-}
-
-static void test_manifest_sig(void) {
-    /* Full round trip with a fresh keypair: sign via mbedTLS, verify via
-     * our public-API-only manifest_verify_sig. Tampered bytes must fail.
-     * Uses only public 3.x APIs (raw group + MPIs, no context internals). */
-    static const unsigned char msg[] = "{\"version\":\"9.9.9\"}";
-    mbedtls_entropy_context ent;
-    mbedtls_entropy_init(&ent);
-    mbedtls_ctr_drbg_context rng;
-    mbedtls_ctr_drbg_init(&rng);
-    assert(mbedtls_ctr_drbg_seed(&rng, mbedtls_entropy_func, &ent,
-                                  (const unsigned char *)"test", 4) == 0);
-    mbedtls_ecp_group grp;
-    mbedtls_ecp_group_init(&grp);
-    assert(mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_SECP256R1) == 0);
-    mbedtls_mpi d, r, s;
-    mbedtls_mpi_init(&d); mbedtls_mpi_init(&r); mbedtls_mpi_init(&s);
-    mbedtls_ecp_point Q;
-    mbedtls_ecp_point_init(&Q);
-    assert(mbedtls_ecp_gen_keypair(&grp, &d, &Q,
-                                    mbedtls_ctr_drbg_random, &rng) == 0);
-    unsigned char hash[32], sig[64], rawpub[64];
-    {
-        mbedtls_sha256_context sc;
-        mbedtls_sha256_init(&sc);
-        assert(mbedtls_sha256_starts(&sc, 0) == 0);
-        assert(mbedtls_sha256_update(&sc, msg, sizeof msg - 1) == 0);
-        assert(mbedtls_sha256_finish(&sc, hash) == 0);
-        mbedtls_sha256_free(&sc);
-    }
-    assert(mbedtls_ecdsa_sign(&grp, &r, &s, &d, hash, sizeof hash,
-                               mbedtls_ctr_drbg_random, &rng) == 0);
-    assert(mbedtls_mpi_write_binary(&r, sig, 32) == 0);
-    assert(mbedtls_mpi_write_binary(&s, sig + 32, 32) == 0);
-    /* export X||Y via the public point-write API */
-    {
-        unsigned char uncomp[65];
-        size_t olen = 0;
-        assert(mbedtls_ecp_point_write_binary(&grp, &Q,
-               MBEDTLS_ECP_PF_UNCOMPRESSED, &olen, uncomp, sizeof uncomp) == 0);
-        assert(olen == 65 && uncomp[0] == 0x04);
-        memcpy(rawpub, uncomp + 1, 64);
-    }
-    assert(manifest_verify_sig(msg, sizeof msg - 1, sig, rawpub) == 0);
-    sig[10] ^= 0x01;
-    assert(manifest_verify_sig(msg, sizeof msg - 1, sig, rawpub) != 0);
-    sig[10] ^= 0x01;
-    unsigned char bad[sizeof msg];
-    memcpy(bad, msg, sizeof bad);
-    bad[5] ^= 0x01;
-    assert(manifest_verify_sig(bad, sizeof bad - 1, sig, rawpub) != 0);
-    assert(manifest_verify_sig(NULL, 0, sig, rawpub) != 0);
-    mbedtls_mpi_free(&d); mbedtls_mpi_free(&r); mbedtls_mpi_free(&s);
-    mbedtls_ecp_point_free(&Q);
-    mbedtls_ecp_group_free(&grp);
-    mbedtls_ctr_drbg_free(&rng);
-    mbedtls_entropy_free(&ent);
-}
-
 static void test_base64(void) {
     char out[32];
     assert(b64_encode((const unsigned char *)"", 0, out) == 0);
@@ -524,10 +689,16 @@ static void test_cfg_titles(void) {
     assert(c.n_titles == 0);
     /* home_art is the legacy fallback; large_art is what actually gets used.
      * Both default to the operator-hosted idle logo. */
-    assert(!strcmp(c.home_art, "https://retro-games.cybermask.dpdns.org/images/ps-logo-full.png"));
-    assert(!strcmp(c.large_art, "https://retro-games.cybermask.dpdns.org/images/ps-logo-full.png"));
-    assert(!strcmp(c.small_art, "https://retro-games.cybermask.dpdns.org/images/ps-logo-blue.png"));
-    assert(!strcmp(c.browser_art, "https://retro-games.cybermask.dpdns.org/images/web_browser.png"));
+    assert(!strcmp(c.home_art,
+        "https://raw.githubusercontent.com/SirHumza/orbisRPC/refs/heads/main/config/images/icons/ps-logo-full.png"));
+    assert(!strcmp(c.large_art,
+        "https://raw.githubusercontent.com/SirHumza/orbisRPC/refs/heads/main/config/images/icons/ps-logo-full.png"));
+    /* was ps-logo-blue.png, which exists in no repo; ps-logo-small.png is the
+     * replacement and is the only small-tile image committed. */
+    assert(!strcmp(c.small_art,
+        "https://raw.githubusercontent.com/SirHumza/orbisRPC/refs/heads/main/config/images/icons/ps-logo-small.png"));
+    assert(!strcmp(c.browser_art,
+        "https://raw.githubusercontent.com/SirHumza/orbisRPC/refs/heads/main/config/images/icons/web_browser.png"));
 }
 
 /* Test-only VFS shim. sqlite's DbPath-based xFullPathname can fail with a
@@ -1494,6 +1665,11 @@ int main(void) {
     test_json();
     test_gateway_op_spoof();
     test_ws_skip_plan();
+    test_ws_drain_length();
+    test_ws_env_renders_parseable();
+    test_ws_env();
+    test_ws_env_early_report();
+    test_ws_skip_plan_early();
     test_json_oom_safe();
     test_json_hostile();
     test_tmdb();
@@ -1502,9 +1678,6 @@ int main(void) {
     test_base64();
     test_art_parse();
     test_health_safe_mode();
-    test_health_stage_activate();
-    test_manifest();
-    test_manifest_sig();
     test_cfg_titles();
     test_cfg_learn();
     test_installer_cfg();

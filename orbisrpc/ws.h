@@ -5,18 +5,25 @@
 #define WS_H
 #include <stdint.h>
 #include <stddef.h>
+#include "ws_env.h"
 
 #define WS_RBUF_MIN 65536          /* initial raw socket buffer (READY is big) */
-/* Grow limit; anything larger is drained and skipped.
+/* Grow limit. Now a backstop rather than the working size: any frame with a
+ * payload larger than WS_BODY_MAX is envelope-extracted and never buffered,
+ * so rbuf stays at WS_RBUF_MIN for a whole session.
  *
- * 32 MB, raised from 8 MB on 2026-10-06: a real account's READY measured
- * 11.7 MB across four attempts (11695449 / 11694320 / 11694256 / 11706895),
- * well past the old cap, so identify never completed and the gateway
- * reported a connect failure. The value is not stable frame-to-frame, so
- * this is sized with real headroom rather than matched to one observation.
- * rbuf doubles from 64 KB, so a full READY holds ~32 MB of PS4 heap for
- * the life of the session. */
+ * History, kept because the reason is not obvious from the code: this was
+ * 8 MB, raised to 32 MB on 2026-10-06 because a real account's READY
+ * measured 11.7 MB. But 32 MB only moved the failure -- the buffer doubles
+ * to 16 MB to hold a 12 MB frame, and two live payload instances exhausted
+ * the console's memory (observed 2026-10-09 as "ws: rbuf grow fail" and a
+ * permanent connect failure). WS_BODY_MAX is the actual fix. */
 #define WS_RBUF_MAX (32*1024*1024)
+/* Largest frame payload ever buffered whole. Above this the payload is
+ * streamed and only op/s/t are kept (see ws_env.h), so an oversized READY
+ * costs a fixed 2 KB window instead of tens of megabytes. Callers cap
+ * payloads at 2 KB anyway. */
+#define WS_BODY_MAX 65536
 
 typedef struct {
     int32_t sock; int32_t connected; int32_t fd;
@@ -28,6 +35,13 @@ typedef struct {
     size_t rpos;                /* consumed parse position */
     uint64_t skip_left;         /* bytes left of an oversized frame being drained */
     int skip_op;                /* opcode of the frame being drained */
+    int skip_fin;               /* FIN of the frame being drained */
+    /* Envelope scraped while draining an oversized frame. Bounded: only the
+     * first WS_ENV_WINDOW bytes of payload are retained. */
+    ws_env_t env;
+    int env_active;             /* 1 while an oversized frame is being drained */
+    int env_reported;          /* envelope already handed back for this frame */
+    int grow_warned;            /* rbuf realloc already logged a failure */
 } ws_t;
 
 int ws_connect(ws_t *w, const char *host, int port, const char *resource, const char *key);
@@ -42,5 +56,10 @@ int ws_close(ws_t *w);
  * already covers plen. Pure, so the host tests can pin it: the drain state
  * lives in the ws_t and a bad value is only visible on the console as a
  * desynced frame stream. */
-void ws_skip_plan(uint64_t plen, size_t payload_here, uint64_t *skip_left_out);
+/* How many payload bytes the drain still has to discard. payload_here is the
+ * count ALREADY REMOVED from rbuf, never the count sitting in it -- the drain
+ * consumes buffered bytes too, so passing those here double-counts and leaves
+ * the stream mid-frame (seen 2026-10-09). ws_recv_frame() removes none and
+ * passes 0. Returns the value written. */
+uint64_t ws_skip_plan(uint64_t plen, size_t payload_here, uint64_t *skip_left_out);
 #endif
