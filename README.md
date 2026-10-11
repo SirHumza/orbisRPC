@@ -99,7 +99,9 @@ Details: [`docs/DAEMON.md`](docs/DAEMON.md) · full index at [`docs/`](docs/)
 3. Launch it from the payload list. First run creates the config file,
    then says there's no token yet.
 4. Open `/data/orbisRPC/config.json` and add your account token in the
-   `"token": "SET_ME"` slot.
+   `"token": "SET_ME"` slot. Don't know where the token comes from?
+   Follow [docs/TOKEN_SETUP.md](docs/TOKEN_SETUP.md) — wrong tokens are
+   the #1 install failure.
 5. After setting the token, re-run the payload from `/data/payloads`.
    Launch a game and watch Discord. Give feedback in `testers-chat`.
 
