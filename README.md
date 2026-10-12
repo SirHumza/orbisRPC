@@ -119,11 +119,10 @@ for you — including autorun and the nanoDNS exception fix.
 
 ✅ Firmware: confirmed working on 9.00 through 13.52 but older fimwares should work.
 
-### What's in the latest test build (0.70)
+### What's in the latest test build (0.83)
 
-- Increased ws gateway frame buffer cap to 32MB - should fix oversized gateway frame skipping issue for some users (hopefully🤞).
-- fixed minor issue with frame draining.
-- added notification for invalid token.
+- Added a community custom list on github to resolve for apps or homebrew that are not on pkg-zone (everyone can contribute to the list).
+- dropped the payload bin validation path.
 
 ## What you'll see
 
