@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="config/icons/pslogo.png" width="420" alt="orbisRPC">
+  <img src="config/images/icons/logo.png" width="420" alt="orbisRPC">
 </p>
 
 # orbisRPC — Discord Rich Presence for PS4 (GoldHEN RPC)
@@ -228,8 +228,6 @@ nanoDNS — then reboot. (This is the step most people miss.)
 
 - Some homebrew (Apollo Save Tool, Cheats Manager, Homebrew Store) isn't
   detected yet — under investigation.
-- Hotspot/mobile connections can send oversized frames that Discord
-  rejects — use stable Wi-Fi/LAN if presence won't set.
 
 ## Building
 
@@ -273,7 +271,8 @@ Build/test/CI details: [`docs/BUILDING.md`](docs/BUILDING.md).
 - **SirHumza** — project founder, daemon core.
 - **CyberMask367** — firmware coverage to 13.52, homebrew and retro games resolving, presence flags, tester wrangling.
 - Testers in `testers-chat`  on DIscord — every log file that made a fix possible.
-- [*PKG-ZONE*](https://pkg-zone.com) — metadata on ps4 hombrew apps used for resolving
+- [OpenOrbis](https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain) - SDK/Toolchain used to make setup PKG
+- [*PKG-ZONE*](https://pkg-zone.com) — used for resolving metadata on hombrew apps
 - [*PSX DATA CENTER*](https://psxdatacenter.com) — source used to make custom json list  in [`config`](config/) for resolving retro games
 
 ## License
