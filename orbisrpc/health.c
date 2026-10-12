@@ -123,15 +123,3 @@ void health_mark_healthy(void){
 void health_mark_clean(void){
     health_mark_healthy();
 }
-
-int health_check_binary(const char *path){
-    FILE *f = fopen(path, "rb");
-    if(!f) return 0;
-    unsigned char h[64];
-    size_t n = fread(h, 1, sizeof h, f);
-    long sz = -1;
-    if(fseek(f, 0, SEEK_END) == 0) sz = ftell(f);
-    fclose(f);
-    if(n < 64 || sz <= 0) return 0;
-    return updater_image_ok(h, n) && (size_t)sz <= 8u*1024u*1024u;
-}

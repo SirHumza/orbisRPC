@@ -28,8 +28,6 @@ void health_mark_healthy(void);
  * 0 for normal boot. Increments the persisted crash counter ONLY when
  * the previous boot left a dirty marker (i.e. crashed before healthy). */
 int health_boot_note_crash(void);
-/* Verify a staged target can run: ELF magic + size sane. 1 ok, 0 bad. */
-int health_check_binary(const char *path);
 #ifdef HEALTH_TESTABLE
 /* Override the base dir for crash.count/boot.dirty (host tests). */
 void health_set_base(const char *dir);

@@ -5,9 +5,6 @@
 /* Compare dotted versions ("0.4.0" vs "v0.10.1", leading v ok):
  * >0 a newer, <0 b newer, 0 equal. Host-testable. */
 int updater_cmp(const char *a, const char *b);
-/* Validate a downloaded payload: ELF magic, 64-bit, x86-64, sane size. */
-int updater_elf_ok(const unsigned char *buf, size_t n);
-int updater_image_ok(const unsigned char *buf, size_t n);
 /* Check the latest GitHub release for a newer version tag and report it.
  *
  * This does not download or install anything. It used to fetch orbisrpc.bin

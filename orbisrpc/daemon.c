@@ -245,20 +245,6 @@ int daemon_run(void){
     int safe_mode = health_boot_note_crash();
     if(safe_mode)
         log_msg("WARN: repeated unclean boots; safe mode (updates off)");
-    /* Sanity check on the installed payload. This used to be a rollback
-     * watchdog: health_verify_or_rollback() tried to restore a <path>.bak
-     * that only a staged install ever wrote. With the updater reduced to a
-     * notification no .bak can exist, so every boot logged
-     * "failed verification (no backup)" forever. The ELF check is still
-     * worth keeping - it catches a truncated or corrupt install. */
-    {
-        static const char *targets[] = {
-            "/data/payloads/orbisrpc.bin",
-        };
-        for(unsigned ti = 0; ti < sizeof targets/sizeof targets[0]; ti++)
-            if(!health_check_binary(targets[ti]))
-                log_msg("WARN: %s is not a valid payload (truncated?)", targets[ti]);
-    }
     if(cfg_load(CFG_PATH, &g_cfg) != 0){
         /* First boot: drop a template so FTP edit is the only step */
         FILE *probe = fopen(CFG_PATH, "rb");

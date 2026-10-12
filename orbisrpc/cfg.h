@@ -33,6 +33,7 @@ typedef struct {
     int enabled;
     int pkgzone_enabled;   /* ask pkg-zone.com for homebrew names (3rd party) */
     int retro_enabled;    /* ask the retro-games indexes for retro/homebrew */
+    int custom_enabled;   /* ask the community custom.json list (last resort) */
     /* Visibility gates. Each suppresses one category of presence; the
      * daemon still detects it, it just does not tell Discord about it.
      * All default to 1, so a config that predates them behaves as before. */

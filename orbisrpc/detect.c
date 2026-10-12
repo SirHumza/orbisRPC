@@ -27,6 +27,7 @@
 #include "bigapp.h"
 #include "pkgzone.h"
 #include "gamecache.h"
+#include "custom.h"
 #ifdef ORBISRPC_SDK_PAYLOAD
 /* Payload-SDK build: dlopen/dlsym come from the SDK libc (dlfcn);
  * there is no UserService here — user_init() below degrades. */
@@ -528,18 +529,37 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
                 }
             }
         }
+        /* Community list: the final fallback, and the only arm with no prefix
+         * gate. pkg-zone misses on apps it does not carry, and retro only tries
+         * known retro prefixes, so this is what catches the long tail that
+         * neither can enumerate. */
+        int from_custom = 0;
+        if(!named && g_cfg.custom_enabled){
+            char art[CUSTOM_MAX_URL] = "";
+            if(custom_resolve(titleId, out_name, cap, art, sizeof art)==0){
+                named = 1;
+                from_custom = 1;
+                if(art[0]){
+                    strncpy(s_last_art, art, sizeof s_last_art-1);
+                    s_last_art[sizeof s_last_art-1] = 0;
+                }
+            }
+        }
         /* Only a genuine resolve is worth keeping. detect_last_ok() is 0 for
          * a raw-id fallback, so a network miss never poisons the cache. */
         if(named && detect_last_ok())
             gamecache_put(titleId, out_name, s_last_art,
-                          want_retro ? "retro" : try_pkgzone ? "pkgzone" : "tmdb");
+                          from_custom ? "custom"
+                          : want_retro ? "retro"
+                          : try_pkgzone ? "pkgzone" : "tmdb");
         if(!named){
             strncpy(out_name, titleId, cap-1); out_name[cap-1]=0;
             /* Every source missed. Without this line the presence just shows
              * a bare title id and there is no way to tell a network failure
              * from a genuinely unknown title. */
-            log_msg("name: %s UNRESOLVED (tried: config, %s)",
-                    titleId, want_retro ? "retro" : try_pkgzone ? "pkgzone" : "tmdb");
+            log_msg("name: %s UNRESOLVED (tried: config, %s%s)",
+                    titleId, want_retro ? "retro" : try_pkgzone ? "pkgzone" : "tmdb",
+                    g_cfg.custom_enabled ? ", custom" : "");
         }
         resolve_remember(titleId, out_name, s_last_art, named);
     }else{

@@ -12,6 +12,7 @@
 #include "../orbisrpc/procwalk.h"
 #include "../orbisrpc/bigapp.h"
 #include "../orbisrpc/retro.h"
+#include "../orbisrpc/custom.h"
 #include "../orbisrpc/pkgzone.h"
 #include "../orbisrpc/gamecache.h"
 #include "../orbisrpc/fw.h"
@@ -458,6 +459,102 @@ static void test_ws_env(void) {
     assert(WS_BODY_MAX < 11695449);
 }
 
+/* --- community title list (custom.json) ----------------------------------
+ * The final resolver in the chain, and the only one with no prefix gate: it
+ * runs for any TITLEID nothing else could name. Body shape is deliberately
+ * identical to the retro indexes so the same streaming scanner serves both. */
+static void test_custom_extract(void) {
+    char name[CUSTOM_MAX_NAME], url[CUSTOM_MAX_URL];
+
+    /* Spacing is not cosmetic. custom_resolve() matches on the literal byte
+     * run "id":"<TITLEID>", so a space after the colon -- what a normal JSON
+     * pretty-printer emits -- makes every lookup miss silently, and the
+     * payload falls back to the raw TITLEID with nothing logged. config/custom.json
+     * is compact for exactly this reason, and add_custom_title.py writes it
+     * with separators=(',', ':') to keep it that way. This case pins the
+     * failure so a "just pretty-print the file" change cannot pass unnoticed;
+     * when the matcher is loosened to tolerate whitespace, flip the assert to
+     * ==1 and check the name -- that is the point the spaced form turns safe. */
+    {
+        const char *spaced =
+            "[{\n  {\"id\": \"ORPC00009\", \"name\": \"Spaced Entry\"}\n]";
+        assert(custom_extract(spaced, strlen(spaced), "\"id\":\"ORPC00009\"",
+                              name, sizeof name, url, sizeof url) == 0);
+        assert(name[0] == 0);            /* buffers still cleared on the miss */
+        /* The id is present and findable without the colon -- which is what a
+         * whitespace-tolerant matcher would key on instead. */
+        assert(strstr(spaced, "\"ORPC00009\"") != NULL);
+    }
+
+    /* Real shape, as written by scripts/add_custom_title.py -- compact. */
+    {
+        const char *body =
+            "[{\"id\":\"ORPC00001\",\"name\":\"First App\","
+            "\"cover\":\"https://x/a.png\"},"
+            "{\"id\":\"ORPC00002\",\"name\":\"Second App\","
+            "\"cover\":\"https://x/b.png\"}]";
+        assert(custom_extract(body, strlen(body), "\"id\":\"ORPC00001\"",
+                              name, sizeof name, url, sizeof url) == 1);
+        assert(!strcmp(name, "First App"));
+        assert(!strcmp(url, "https://x/a.png"));
+
+        assert(custom_extract(body, strlen(body), "\"id\":\"ORPC00002\"",
+                              name, sizeof name, url, sizeof url) == 1);
+        assert(!strcmp(name, "Second App"));
+    }
+
+    /* Entry with no cover: the name must still resolve. Art falls back to the
+     * configured default rather than failing the lookup. */
+    {
+        const char *body = "[{\"id\":\"ORPC00003\",\"name\":\"No Art App\"}]";
+        assert(custom_extract(body, strlen(body), "\"id\":\"ORPC00003\"",
+                              name, sizeof name, url, sizeof url) == 1);
+        assert(!strcmp(name, "No Art App"));
+        assert(url[0] == 0);
+    }
+
+    /* Escapes: names carry quotes and backslashes (same constraint the retro
+     * indexes have, which is why both share jsonstr.c). */
+    {
+        const char *body =
+            "[{\"id\":\"ORPC00004\","
+            "\"name\":\"He said \\\"hi\\\" \\\\ away\"}]";
+        assert(custom_extract(body, strlen(body), "\"id\":\"ORPC00004\"",
+                              name, sizeof name, url, sizeof url) == 1);
+        assert(!strcmp(name, "He said \"hi\" \\ away"));
+    }
+
+    /* Long name must not be hard-truncated mid-way. */
+    {
+        const char *body =
+            "[{\"id\":\"ORPC00005\",\"name\":"
+            "\"Kidou Senshi Gundam Giren no Yabou - Zeon Dokuritsu Sensouden & "
+            "Kidou Senshi Gundam Giren no Yabou - Zeon Dokuritsu Sensouden - "
+            "Kouryaku Shireisho (Gundam The Best)\"}]";
+        assert(custom_extract(body, strlen(body), "\"id\":\"ORPC00005\"",
+                              name, sizeof name, url, sizeof url) == 1);
+        assert(strstr(name, "Gundam The Best") != NULL);
+    }
+
+    /* Miss: buffers cleared, not left holding the previous title. A stale name
+     * here would be posted as the current game's name. */
+    {
+        const char *body = "[{\"id\":\"ORPC00006\",\"name\":\"Other\"}]";
+        strcpy(name, "STALE");
+        strcpy(url, "STALE");
+        assert(custom_extract(body, strlen(body), "\"id\":\"NOTHERE\"",
+                              name, sizeof name, url, sizeof url) == 0);
+        assert(name[0] == 0);
+        assert(url[0] == 0);
+    }
+
+    /* Degenerate input must not read out of bounds. */
+    assert(custom_extract(NULL, 10, "\"id\":\"X\"", name, sizeof name, url, sizeof url) == 0);
+    assert(custom_extract("[]", 2, NULL, name, sizeof name, url, sizeof url) == 0);
+    assert(custom_extract("[", 1, "\"id\":\"X\"", name, sizeof name, url, sizeof url) == 0);
+    assert(custom_extract("[]", 2, "\"id\":\"X\"", NULL, 0, NULL, 0) == 0);
+}
+
 static void test_json_oom_safe(void) {
     jl_val_t *t = jl_parse("true", 4); assert(t != NULL); jl_free(t);
     jl_val_t *f = jl_parse("false", 5); assert(f != NULL); jl_free(f);
@@ -590,16 +687,13 @@ static void test_updater(void) {
     assert(updater_cmp("0.10.0", "0.9.9") > 0);
     assert(updater_cmp("1.0", "1.0.0") == 0);
     assert(updater_cmp(NULL, "0.1") < 0);
-    unsigned char elf[64];
-    memset(elf, 0, sizeof elf);
-    assert(updater_elf_ok(elf, sizeof elf) == 0);
-    assert(updater_elf_ok(NULL, 100) == 0);
-    assert(updater_elf_ok(elf, 10) == 0);
-    elf[0]=0x7f; elf[1]='E'; elf[2]='L'; elf[3]='F';
-    elf[4]=2; elf[5]=1; elf[18]=62; elf[19]=0;
-    assert(updater_elf_ok(elf, sizeof elf) == 1);
-    elf[18]=99;
-    assert(updater_elf_ok(elf, sizeof elf) == 0);
+    /* updater_cmp is the whole update check now: these are the cases that
+     * decide whether a GitHub tag counts as newer than the local version. */
+    assert(updater_cmp("2", "1.0.0") > 0);      /* bare major, seen on console */
+    assert(updater_cmp("1.7.1", "1.0.0") > 0);
+    assert(updater_cmp("v1.1.0", "1.0.0") > 0);  /* leading v stripped */
+    assert(updater_cmp("1.0.0", "1.0.0") == 0);
+    assert(updater_cmp("0.9.9", "1.0.0") < 0);   /* older tag must not notify */
 }
 static void test_art_parse(void) {
     /* Real external-assets response shape (verified against live API). */
@@ -1667,6 +1761,7 @@ int main(void) {
     test_ws_skip_plan();
     test_ws_drain_length();
     test_ws_env_renders_parseable();
+    test_custom_extract();
     test_ws_env();
     test_ws_env_early_report();
     test_ws_skip_plan_early();

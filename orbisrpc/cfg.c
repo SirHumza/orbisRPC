@@ -18,6 +18,7 @@ void cfg_defaults(cfg_t *c) {
      * site, so it is one boolean away from being off for good. */
     c->pkgzone_enabled = 1;
     c->retro_enabled = 1;
+    c->custom_enabled = 1;
     c->show_firmware = 1;
     c->show_idle = 1;
     c->show_media = 1;
@@ -143,7 +144,8 @@ int cfg_load(const char *path, cfg_t *c) {
     }
     o = jl_obj_get(root, "enabled");         if (o && o->type == JL_BOOL)   c->enabled = (int)o->num;
     o = jl_obj_get(root, "pkgzone_enabled"); if (o && o->type == JL_BOOL)   c->pkgzone_enabled = (int)o->num;
-    o = jl_obj_get(root, "retro_enabled"); if (o && o->type == JL_BOOL)   c->retro_enabled = (int)o->num;
+    o = jl_obj_get(root, "retro_enabled");
+    o = jl_obj_get(root, "custom_enabled"); if (o && o->type == JL_BOOL)   c->custom_enabled = (int)o->num; if (o && o->type == JL_BOOL)   c->retro_enabled = (int)o->num;
     o = jl_obj_get(root, "show_firmware"); if (o && o->type == JL_BOOL)   c->show_firmware = (int)o->num;
     o = jl_obj_get(root, "show_idle");     if (o && o->type == JL_BOOL)   c->show_idle = (int)o->num;
     o = jl_obj_get(root, "show_media");    if (o && o->type == JL_BOOL)   c->show_media = (int)o->num;
@@ -216,6 +218,7 @@ int cfg_save(const char *path, const cfg_t *c) {
     jl_obj_set(r, "art_base_url",    jl_new_string(c->art_base_url));
     jl_obj_set(r, "enabled",         jl_new_bool(c->enabled));
     jl_obj_set(r, "pkgzone_enabled", jl_new_bool(c->pkgzone_enabled));
+    jl_obj_set(r, "custom_enabled", jl_new_bool(c->custom_enabled));
     jl_obj_set(r, "retro_enabled", jl_new_bool(c->retro_enabled));
     jl_obj_set(r, "show_firmware", jl_new_bool(c->show_firmware));
     jl_obj_set(r, "show_idle",     jl_new_bool(c->show_idle));
