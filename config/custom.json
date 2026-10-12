@@ -1,0 +1,7 @@
+[
+  {"id":"SPSX14001","name":"SuperPSX Store","cover":"https://pkg.cybermask.dpdns.org/data/images/superpsx.png"},
+  {"id":"HALO00001","name":"Halo: Combat Evolved","cover":"https://pkg.cybermask.dpdns.org/data/images/haloce.jpg"},
+  {"id":"ORPC00001","name":"orbisRPC Setup app","cover":"https://raw.githubusercontent.com/SirHumza/orbisRPC/refs/heads/main/config/images/icons/logo.png"},
+  {"id":"CREM00001","name":"Crema - Wii U","cover":"https://pkg.cybermask.dpdns.org/data/images/crema.png"},
+  {"id":"DLPH00010","name":"Dolphin","cover":"https://pkg.cybermask.dpdns.org/data/images/dolphin.png"}
+]
