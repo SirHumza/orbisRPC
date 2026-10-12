@@ -1,0 +1,41 @@
+name: Missing title entry
+description: A game or homebrew app shows the wrong name (or raw ID). No PR needed.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Don't open a PR for this — just fill the three fields and a
+        maintainer adds it to `config/custom.json`.
+  - type: input
+    id: title-id
+    attributes:
+      label: Title ID
+      description: Exactly as it appears (e.g. CUSA12345, PKG-ABCD0123)
+      placeholder: "CUSA12345"
+    validations:
+      required: true
+  - type: input
+    id: name
+    attributes:
+      label: Correct display name
+      description: Full title as it should show on Discord
+      placeholder: "My Cool Game"
+    validations:
+      required: true
+  - type: input
+    id: cover
+    attributes:
+      label: Cover art URL (optional)
+      description: Direct https link to a square cover image. Leave blank and one gets picked.
+      placeholder: "https://…/cover.png"
+    validations:
+      required: false
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware you saw it on
+      description: e.g. 11.00
+      placeholder: "11.00"
+    validations:
+      required: false
