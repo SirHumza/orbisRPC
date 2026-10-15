@@ -72,7 +72,7 @@ check("discord/media-types", "detect_media_type" in disc)
 # 5. crash recovery wired
 check("health/boot-marker", "health_boot_note_crash" in d)
 check("health/safe-mode-gates-updater", "safe_mode" in d)
-check("health/rollback-at-boot", "health_verify_or_rollback" in d)
+check("health/no-rollback-path", "health_verify_or_rollback" not in d and "health_rollback" not in d and "stage_activate" not in d)
 # 6. time correction
 check("clock/sntp", "time_sync" in d and "time_fixed" in d)
 check("clock/monotonic-deadlines", "orbis_mono_s" in src("orbisrpc/ws.c"))
@@ -94,7 +94,7 @@ check("art/disk-cache", "artwork_cache.json" in src("orbisrpc/art.c"))
 check("cfg/schema-save-checked", "cfg_save" in d and "unwritable" in d)
 # 9. signed updates, no unsigned fallback
 upd = src("orbisrpc/updater.c")
-check("update/manifest-required", "manifest" in upd.lower())
+check("update/check-notify-only", "updater_check_notify" in upd)
 check("update/unsigned-refused", "refus" in upd.lower())
 # 10. payload linkage gate (daemon-world libs only)
 elf = os.path.join(ROOT, "build-sdk", "orbisrpc_sdk.elf")
