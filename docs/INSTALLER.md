@@ -1,80 +1,109 @@
-# Installer (Setup PKG, `ORPC00001`)
+# Installer (orbisRPC Setup, `ORPC00001`)
 
-> Status: design + code exist in `installer/`, but **no PKG ships with
-> test builds** — testers install the `.elf` directly (see repo README).
-> The PKG arrives with the official release and will also set up autorun
-> and the nanoDNS exception.
+The PS4 side ships as one app: **orbisRPC Setup**. It installs the daemon
+payload, holds the settings UI, updates, and uninstalls. Title ID `ORPC00001`,
+content ID `IV0000-ORPC00001_00-ORBISRPCSETUP000`.
 
-## What it does
+Source lives in [`installer/`](../installer), built by the root
+[`Makefile`](../Makefile).
 
-One linear flow, forward-only (every No skips ahead, nothing loops back):
-confirm → evict old daemon (via `sceKernelLoadStartModule`) → copy
-`evict.elf` + `orbisrpc.bin` to `/data/payloads/` (mkdir -p +
-byte-count + FNV hash read-back) → pre-saved config with token
-(skips entry when valid) → done.
-Read-only status screen available via decline.
+## The menu
 
-There is no WiFi check. The installer runs sandboxed, so its socket probe
-measures the app's network stack, not the payload's — and a FAILED line
-reads like a verdict on Discord itself. The daemon reports real reachability
-in its own log once started.
+| Entry | What it does |
+|---|---|
+| **INSTALL / UPDATE** | Installs or updates the daemon payload and config |
+| **SETTINGS** | Presence text, toggles, preferences — writes `config.json` |
+| **UNINSTALL** | Removes the payload and the configs from the console |
 
-The installer never boots anything directly. Starting the daemon is
-the `/data/payloads/` directory — pick `evict.elf` first
-(removes old orbisrpc instance), then pick `orbisrpc.bin`.
-No loopback ports, no injection, no boot proof to go wrong.
+## What it writes
+
+All paths from [`installer/paths.h`](../installer/paths.h). The payload name is
+`orbisRPC.elf` everywhere — packaged as `assets/orbisRPC.elf`, installed to
+`/data/payloads/orbisRPC.elf`.
+
+| Path | What |
+|---|---|
+| `/data/payloads/orbisRPC.elf` | the daemon payload |
+| `/data/payloads/orbisRPC.elf.png` | icon for the GoldHEN launch row |
+| `/data/orbisRPC/config.json` | config, including the Discord token |
+| `/data/orbisRPC/version` | installed version marker |
+| `/data/orbisRPC/install.log` | install-step log |
+| `/data/orbisRPC/net.log` | connectivity log |
+| `/data/orbisRPC/icon.png` | icon |
+| `/data/GoldHEN/payloads.ini` | auto-run queue entry |
+| `/data/nanodns/nanodns.ini` | optional Sony TMDB exception |
+| `/data/temp/` | staging for downloads (`orbisRPC.elf`, `config.json`) |
 
 ## Install flow
 
 ```
-confirm → sceKernelLoadStartModule(evict.elf) — kills old daemon
-        → copy evict.elf to /data/payloads/evict.elf
-        → copy orbisrpc.bin to /data/payloads/orbisrpc.bin
-        → save config.json with Discord token (pre-populated)
-        → (token entry skipped if already valid)
-        → done
+already installed?  -> yes: report and stop (uninstall first)
+                  \-> no:
+GitHub release newer than local?  -> yes: download payload + config to /data/temp/
+preflight: /app0/assets/orbisRPC.elf present?  -> no: stop with "missing its payload"
+copy payload    -> /data/payloads/orbisRPC.elf
+copy icon       -> /data/payloads/orbisRPC.elf.png
+write config    -> /data/orbisRPC/config.json   (atomic: tmp + fsync + rename)
+write version   -> /data/orbisRPC/version
+ask: GoldHEN present?  -> add /user/data/payloads entry + payloads.ini
+ask: nanoDNS present?  -> add tmdb.np.dl.playstation.net exception
+restart prompt if an update replaced a running payload
 ```
 
-The `evict.elf` is launched via `sceKernelLoadStartModule` during
-install — it reads `daemon.lock`, kills the running daemon, exits.
-`evict.elf` stays in `/data/payloads/` for future manual use.
-
-## Navigation law
-
-No branch ever returns to start. Cancel/skip always moves forward. The only
-exits are Done, explicit close, or a payload write failure.
-
-Buttons: X = enter, O = back. The confirm dialog uses `YESNO` focused on
-Yes — the OpenOrbis default `YESNO_FOCUS_NO` puts the console's confirm
-button on No, which inverts the whole wizard.
+Both the GoldHEN and nanoDNS prompts are **opt-in**, **idempotent** (an entry
+that is already present reports "Nothing was changed"), and **skipped silently**
+when that tool isn't installed. Neither is required — the daemon works without
+them.
 
 ## Console facts encoded
 
-- Splash is hidden first thing in `main()` so module loading in
-  `ui_init()` happens with the splash already gone — no visible delay
-  between splash hide and first dialog.
-- Dialog/IME/IME-backend sysmodules + internal SYSTEM/USER/COMMON/PAD
-  modules load before use (order matters — `sceCommonDialogInitialize()`
-  precedes external module loads; PAD is unloaded on exit).
-- `stat()`/`fstat()` lie about sizes inside the sandbox (observed 4096/4160
-  for a 2071552-byte file), so install proof is byte count + FNV hash on
-  read-back, and status uses open-existence, never stat.
-- Config writes are atomic (tmp+fsync+rename) with read-back proof.
-- IME wait is bounded; asset key charset validated (bad keys blank the
-  activity).
-- `evict.elf` is loaded via `sceKernelLoadStartModule` because `kill()`
-  is blocked by the sandbox (EPERM).
-
-## Auto-start
-
-GoldHEN AutoRun: enable it for `orbisrpc` once and the daemon
-starts on every jailbreak. The queue is menu-managed; the installer
-shows where, it can't write the queue itself.
+- `stat()`/`fstat()` lie about sizes inside the sandbox (observed 4096/4160 for
+  a 2 MB file), so install proof is byte count + FNV hash on read-back, and
+  existence checks use `open()`, never `stat()`.
+- Config writes are atomic (tmp + fsync + rename) with read-back proof.
+- The splash is hidden first thing in `main()` so sysmodule loading happens with
+  no visible gap before the first dialog.
+- Dialog / IME / IME-backend sysmodules and the internal SYSTEM, USER, COMMON
+  and PAD modules load before use. Order matters:
+  `sceCommonDialogInitialize()` precedes the external module loads. PAD is
+  unloaded on exit.
+- Buttons: X = enter, O = back. The confirm dialog uses `YESNO` focused on Yes —
+  OpenOrbis's `YESNO_FOCUS_NO` default puts the console's confirm button on No,
+  which inverts the whole wizard.
+- No branch returns to start; cancel and skip always move forward.
+- `updatecheck` hits the GitHub releases API. It reports a newer version and
+  downloads to `/data/temp/`; the daemon separately only *notifies* and never
+  replaces itself.
 
 ## Building
 
-`make -f installer/Makefile` (`OO_PS4_TOOLCHAIN`, llvmshim). Staged assets:
-`daemon.elf`, `evict.elf`, `config.json`. The PKG ships all three —
-the installer copies both payloads, launches evict.elf to kill the
-old daemon, and pre-saves the config token.
-Output: `IV0000-ORPC00001_00-ORBISRPCSETUP000.pkg`.
+```bash
+export OO_PS4_TOOLCHAIN="$HOME/OpenOrbis-PS4-Toolchain"
+make installer        # or `make all` for payload + PKG
+```
+
+| Target | Output |
+|---|---|
+| `make all` | `output/orbisRPC-<version>.elf` + `output/orbisRPC-<version>.pkg` |
+| `make installer` | `output/orbisRPC-<version>.pkg` |
+| `make elf` | compile + link only, no packaging |
+| `make gfx` | `installer/artwork/*.png` → `installer/assets/images/*.bmp` |
+
+The version comes from `VERSION` at the top of the [`Makefile`](../Makefile),
+and is stamped into the output filenames.
+
+`make installer` stages `build-sdk/orbisrpc_sdk.elf` into
+`installer/assets/orbisRPC.elf` first — run `make payload` (or `make all`) at
+least once beforehand, or staging fails with a clear error. Staging refuses to
+run if any *other* `.elf` is sitting in `installer/assets/`, because `pkg.gp4`
+is a checked-in file and a stray entry there would ship forever.
+
+Artwork: PNGs live in `installer/artwork/`, converted to BMP by
+`scripts/gfx2bmp.py`. `make gfx` is enough after changing one.
+
+## Uninstall
+
+The **UNINSTALL** entry removes the payload and its icon from
+`/data/payloads/`, the GoldHEN auto-run entry, the nanoDNS exception, and
+`/data/orbisRPC/`. It leaves the app itself installed — remove the PKG
+afterwards if you want it gone.
