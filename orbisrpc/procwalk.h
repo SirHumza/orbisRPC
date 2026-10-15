@@ -70,4 +70,14 @@ int procwalk_find_comm(const unsigned char *buf, size_t sz, const char *needle,
  * alongside the first, so erring toward matching is the safe direction. */
 int procwalk_record_has_i32(const unsigned char *rec, size_t recsz, int want);
 
+/* Does ANY well-formed record in the table contain `want` as a 32-bit
+ * integer? 1 hit, 0 clean miss, -1 malformed table (fail closed).
+ * This is the fallback when procwalk_find_comm() finds no record under
+ * the expected process name: a live holder running under another name
+ * must still read as live, because for the single-instance lock a false
+ * positive costs only an unnecessary stand-down while a false negative
+ * runs a second daemon. want <= 0 reads as 0 (never a live pid; record
+ * padding is full of int32 0). */
+int procwalk_any_record_has_i32(const unsigned char *buf, size_t sz, int want);
+
 #endif /* PROCWALK_H */

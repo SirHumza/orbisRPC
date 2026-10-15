@@ -1191,6 +1191,35 @@ static void test_procwalk_find_and_pid(void) {
     assert(procwalk_record_has_i32(buf, 64, 0) == 1);
 }
 
+/* --- lock fallback: pid search without a "Payload" name ----------------
+ * On a tester's 13.52 setup the daemon's process is not literally named
+ * "Payload", so lock.c's name-first search missed a live holder and two
+ * daemons ran side by side (doubled + torn log lines, dueling gateway
+ * sessions). The fallback scans every well-formed record for the pid. */
+static void test_procwalk_any_record_pid(void) {
+    unsigned char buf[4096];
+    size_t at;
+
+    at = put_rec(buf, 0, 479, 447, "SceShellUI");
+    put_i32(buf + 72, 4321);
+    at = put_rec(buf, at, 512, 300, "orbisrpc");
+    put_i32(buf + 479 + 91, 4321);
+    /* no "Payload" record anywhere, yet the pid is found */
+    assert(procwalk_any_record_has_i32(buf, at, 4321) == 1);
+    /* pid absent: clean miss */
+    assert(procwalk_any_record_has_i32(buf, at, 9999) == 0);
+    /* pid <= 0 is never a live process (padding is full of int32 0) */
+    assert(procwalk_any_record_has_i32(buf, at, 0) == 0);
+    assert(procwalk_any_record_has_i32(buf, at, -5) == 0);
+
+    /* malformed table fails closed, never "not live" */
+    memset(buf, 0, 16);
+    assert(procwalk_any_record_has_i32(buf, 16, 4321) == -1);
+
+    /* degenerate args */
+    assert(procwalk_any_record_has_i32(NULL, 100, 4321) == -1);
+}
+
 /* --- bigapp: foreground-app classification ----------------------------
  * The daemon's entire "is a game running" signal. The distinctions that matter
  * are the ones a single boolean would throw away:
@@ -1756,6 +1785,7 @@ int main(void) {
     test_fw_normalize();
     test_procwalk();
     test_procwalk_find_and_pid();
+    test_procwalk_any_record_pid();
     test_json();
     test_gateway_op_spoof();
     test_ws_skip_plan();

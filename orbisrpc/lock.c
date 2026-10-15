@@ -14,15 +14,17 @@
 /* Is `pid` still a live spawned payload?
  *
  * Field offsets inside a kinfo_proc record are not self-describing and shift
- * between firmwares. The previous name-at-+447 / pid-at-+72 lookup therefore
- * silently failed on anything newer than 9.00: it reported live peers as dead,
- * so a second daemon would reclaim the lock while the first was still running
- * and both would fight over the gateway.
+ * between firmwares, so a name-plus-offset lookup silently fails on newer
+ * firmware: it reports live peers as dead, so a second daemon reclaims the
+ * lock while the first is still running and both fight over the gateway
+ * (observed on 13.52 as doubled + torn log lines and dueling sessions).
  *
  * Narrow to the record whose name is exactly "Payload" (unambiguous), then
- * look for the pid anywhere inside it. Spelled-out bias: a false positive only
- * costs an unnecessary stand-down, a false negative costs two daemons, so
- * err toward matching. */
+ * look for the pid anywhere inside it. If no record carries that name the
+ * daemon may run under another comm, so fall back to scanning every
+ * well-formed record for the pid instead of declaring it dead.
+ * Spelled-out bias: a false positive only costs an unnecessary stand-down,
+ * a false negative costs two daemons, so err toward matching. */
 static int pid_live(int pid){
     if(pid <= 0 || pid == (int)getpid()) return 0;
     int mib[4] = { 1, 14, 8, 0 };
@@ -36,8 +38,11 @@ static int pid_live(int pid){
     /* rc -1 = unreadable table: fail closed, assume a peer holds the lock */
     int rc = procwalk_find_comm(buf, sz, "Payload", &rec, &recsz);
     if(rc == -1) return 1;
-    if(rc != 0) return 0;         /* no Payload process at all */
-    return procwalk_record_has_i32(rec, recsz, pid);
+    if(rc == 0) return procwalk_record_has_i32(rec, recsz, pid);
+    /* No "Payload" record at all (-2): the holder may live under another
+     * comm. A table-wide pid hit still reads as live; -1 (malformed)
+     * also reads as live. Only a clean walk with no hit reads as dead. */
+    return procwalk_any_record_has_i32(buf, sz, pid) != 0;
 }
 #else
 #include <signal.h>

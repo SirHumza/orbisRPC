@@ -95,3 +95,18 @@ int procwalk_record_has_i32(const unsigned char *rec, size_t recsz, int want){
     }
     return 0;
 }
+
+int procwalk_any_record_has_i32(const unsigned char *buf, size_t sz, int want){
+    if(want <= 0) return 0;   /* padding is full of int32 0; never live */
+    if(!buf) return -1;
+    size_t off = 0;
+    while(off + sizeof(int) <= sz){
+        int rsz_i = rd_int(buf + off);
+        if(rsz_i <= 0) return -1;
+        size_t rsz = (size_t)rsz_i;
+        if(off + rsz > sz) return -1;
+        if(procwalk_record_has_i32(buf + off, rsz, want)) return 1;
+        off += rsz;
+    }
+    return 0;
+}
