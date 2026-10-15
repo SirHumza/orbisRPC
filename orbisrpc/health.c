@@ -68,7 +68,7 @@ static void write_count(int n){
     int fd = fileno(f);
     if(fd >= 0) fsync(fd);
     fclose(f);
-    rename(tmp, cp);
+    if(rename(tmp, cp) != 0){ log_msg("health: counter rename failed"); remove(tmp); }
 }
 
 static void write_dirty(void){
@@ -89,7 +89,7 @@ static void write_dirty(void){
     int fd = fileno(f);
     if(fd >= 0) fsync(fd);
     fclose(f);
-    rename(tmp, dp);
+    if(rename(tmp, dp) != 0){ log_msg("health: dirty-marker rename failed"); remove(tmp); }
 }
 
 static void clear_path(const char *p){

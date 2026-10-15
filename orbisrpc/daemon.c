@@ -201,9 +201,12 @@ static void sess_save(const char *tid, const char *name, int64_t started){    jl
         /* force bytes to disk before rename (same as cfg_save) */
         if(ok){ int fd = fileno(f); if(fd < 0 || fsync(fd) != 0) ok = 0; }
         if(fclose(f) != 0) ok = 0;
-        if(ok) rename("/data/orbisRPC/session.json.new",
-                      "/data/orbisRPC/session.json");
-        else remove("/data/orbisRPC/session.json.new");
+        if(ok && rename("/data/orbisRPC/session.json.new",
+                        "/data/orbisRPC/session.json") != 0){
+            log_msg("session save failed; will retry on next transition");
+            ok = 0;
+        }
+        if(!ok) remove("/data/orbisRPC/session.json.new");
     }
     free(s);
 }
