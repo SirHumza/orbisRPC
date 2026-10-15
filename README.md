@@ -86,45 +86,62 @@ Details: [`docs/DAEMON.md`](docs/DAEMON.md) · full index at [`docs/`](docs/)
 
 ## Install (5 minutes)
 
-> ⚠️ **No PKG — beta is `.elf` only.** Grab the latest test build
-> (`orbisrpc_test-build-*.elf`) from the Discord
-> (**[discord.gg/BWEyfcT7ZQ](https://discord.gg/BWEyfcT7ZQ)**). This is still
-> a test build, not a full release — expect bugs, report them in
-> `testers-chat`.
+> ✅ **Released as 1.0.0.** Grab `orbisRPC-1.0.0.pkg` from
+> [releases](https://github.com/SirHumza/orbisRPC/releases/latest).
 
-1. Before launching, delete the `/data/orbisRPC` folder from your PS4 if
-   you have one there from an earlier build.
-2. Put the `.elf` on the console at `/data/payloads/` (FTP it over, or
-   USB) — that's where GoldHEN looks for payloads.
-3. Launch it from the payload list. First run creates the config file,
-   then says there's no token yet.
-4. Open `/data/orbisRPC/config.json` and add your account token in the
-   `"token": "SET_ME"` slot. Don't know where the token comes from?
-   Follow [docs/TOKEN_SETUP.md](docs/TOKEN_SETUP.md) — wrong tokens are
+1. Install the PKG on the PS4.
+2. Open **orbisRPC Setup** from the home screen.
+3. Pick **INSTALL / UPDATE**. It copies the payload into
+   `/data/payloads/`, writes your config, and offers to add orbisRPC to the
+   GoldHEN auto-run queue so it starts on every boot. It also offers to add a
+   Sony TMDB exception to [nanoDNS](https://github.com/peterrsr/nanoDNS) if
+   you run it — skip either prompt if you don't want it.
+4. Enter your Discord token when asked. Don't know where the token comes
+   from? Follow [docs/TOKEN_SETUP.md](docs/TOKEN_SETUP.md) — wrong tokens are
    the #1 install failure.
-5. After setting the token, re-run the payload from `/data/payloads`.
-   Launch a game and watch Discord. Give feedback in `testers-chat`.
+5. Restart the console (or re-jailbreak). Launch a game and watch Discord.
 
-After a reboot just re-jailbreak and launch the payload from
-`/data/payloads` again.
+After that the daemon starts on boot. The app's **UNINSTALL** entry removes
+the payload and your configs again.
 
-**Upgrading test builds:** as usual, delete the `/data/orbisRPC` folder
-before using a new test build — and you'll have to re-add your token in
-the config.
+<details>
+<summary>Installing the payload by hand instead</summary>
 
-**Auto-run (not recommended on test builds):** you can drop the `.elf` in
-`/data/payloads` and add it to the autorun queue in GoldHEN settings, but
-test builds change fast — stick to manual runs for now.
+You can skip the PKG and run the daemon yourself:
 
-**Official release:** will ship a PKG installer that sets everything up
-for you — including autorun and the nanoDNS exception fix.
+1. Delete the `/data/orbisRPC` folder from your PS4 if you have one from an
+   earlier build.
+2. Put `orbisRPC.elf` on the console at `/data/payloads/` (FTP it over, or
+   USB) — that's where GoldHEN looks for payloads.
+3. Launch it from the payload list. First run creates the config file, then
+   says there's no token yet.
+4. Open `/data/orbisRPC/config.json` and put your account token in the
+   `"token": "SET_ME"` slot.
+5. Re-run the payload from `/data/payloads`. Launch a game and watch Discord.
+
+The installer is the better path — it does the token, the auto-run entry and
+the nanoDNS exception for you — but the manual route works, and it's what you
+want if you'd rather not install an app.
+
+To start on boot by hand, add `orbisRPC.elf` to the auto-run queue in GoldHEN
+settings.
+
+</details>
 
 ✅ Firmware: confirmed working on 9.00 through 13.52 but older fimwares should work.
 
-### What's in the latest test build (0.83)
+### What's new in 1.0.0
 
-- Added a community custom list on github to resolve for apps or homebrew that are not on pkg-zone (everyone can contribute to the list).
-- dropped the payload bin validation path.
+- **orbisRPC Setup** — a real installer app with install/update, settings and
+  uninstall. Handles the token, GoldHEN auto-run, and the nanoDNS TMDB
+  exception.
+- **In-app update check** — both the app and the daemon notice a newer
+  release and tell you. Neither replaces the payload on its own; the installer
+  is what does that.
+- **Community title list** — [`config/custom.json`](config/custom.json)
+  resolves apps and homebrew pkg-zone doesn't carry. Anyone can contribute by
+  opening a pull request.
+- Dropped the payload `.bin` validation path.
 
 ## What you'll see
 
@@ -231,12 +248,38 @@ nanoDNS — then reboot. (This is the step most people miss.)
 
 ## Building
 
+Two toolchains are involved. Point them at yours once per shell:
+
 ```bash
-./scripts/build_sdk_from_source.sh   # SDK from git (REQUIRED - see note)
-PS4_SDK_SRC=~/ps4-payload-sdk-src \
-PS4_PAYLOAD_SDK=~/ps4-payload-sdk ./scripts/build_sdk.sh   # daemon payload
-make -f installer/Makefile        # Setup PKG (OpenOrbis toolchain, llvmshim)
-make -C tests test                # host unit tests
+export OO_PS4_TOOLCHAIN="$HOME/OpenOrbis-PS4-Toolchain"  # installer app
+export PS4_PAYLOAD_SDK="$HOME/ps4-payload-sdk"            # daemon payload
+export PS4_SDK_SRC="$HOME/ps4-payload-sdk-src"            # 13.52 firmware gate
+```
+
+Build the PS4 SDK from git once, before anything else:
+
+```bash
+./scripts/build_sdk_from_source.sh
+```
+
+Then, from the repo root:
+
+| Command | Builds | Output |
+|---|---|---|
+| `make all` | payload → stage into the app → package | `output/orbisRPC-1.0.0.elf` + `output/orbisRPC-1.0.0.pkg` |
+| `make payload` | daemon payload only | `output/orbisRPC-1.0.0.elf` |
+| `make installer` | Setup PKG only | `output/orbisRPC-1.0.0.pkg` |
+| `make elf` | compile + link the app, no packaging | — |
+| `make gfx` | artwork only (PNG → BMP) | — |
+| `make clean` | remove build output | — |
+
+`make all` stages the freshly built payload into `installer/assets/` before
+packaging, so the PKG never ships a stale ELF.
+
+Host-side checks, no PS4 toolchain needed:
+
+```bash
+make -C tests test                # unit tests
 make -C tests asan                # ASan/UBSan
 python3 tests/e2e_consumer.py     # contracts + linkage gate
 ```
@@ -244,10 +287,28 @@ python3 tests/e2e_consumer.py     # contracts + linkage gate
 ⚠️ **Build the SDK from git, not the release ZIP.** The SDK's CRT refuses to
 start on firmware it does not list, and terminates the payload before `main()`
 with no log line. The released SDK (v0.9) lists 13.50 but not 13.52, so a
-ZIP-built payload cannot boot on 13.52. See
-[`docs/research/sdk-13.52.md`](docs/research/sdk-13.52.md).
+ZIP-built payload cannot boot on 13.52. `PS4_SDK_SRC` is what enables the
+build-time check for this; without it the build still succeeds and dies at
+runtime. See [`docs/research/sdk-13.52.md`](docs/research/sdk-13.52.md).
 
+Installer app internals: [`docs/INSTALLER.md`](docs/INSTALLER.md).
 Build/test/CI details: [`docs/BUILDING.md`](docs/BUILDING.md).
+
+### Adding a title to the community list
+
+Names for apps pkg-zone doesn't carry live in
+[`config/custom.json`](config/custom.json). Add one with:
+
+```bash
+python3 scripts/add_custom_title.py     # asks for TITLEID, name, cover URL
+python3 scripts/add_custom_title.py --list
+python3 scripts/add_custom_title.py --remove ORPC00042
+```
+
+Then open a pull request. **The file must stay compact** — `"id":"ORPC00042"`,
+no space after the colon. The payload scans for that exact byte run, so
+pretty-printing the file makes every lookup miss silently. The script writes it
+correctly for you.
 
 ## Developing
 
