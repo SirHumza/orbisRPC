@@ -48,7 +48,7 @@ playing to Discord: name, cover art, timer. No PC at runtime.</p>
 | 🖼️ **Real cover art** | Game art served per title, PlayStation logo when idle. |
 | ⏱️ **True timers** | Survive reconnects and restarts, resume across quick game switches. |
 | 🧠 **Self-learning** | First-seen titles are remembered, so later boots resolve instantly. |
-| 🔄 **Self-updating** | Daemon updates land from GitHub releases with automatic rollback. No reinstall treadmill. |
+| 🔔 **Update notices** | The daemon spots newer releases and tells you — you install the new build yourself. |
 | 📦 **Simple install** | Payload (`.elf`) install → token → presence. |
 | 👀 **Your call what shows** | `show_firmware`, `show_idle`, `show_media`, `show_homebrew` — all on by default, each toggled separately. |
 
