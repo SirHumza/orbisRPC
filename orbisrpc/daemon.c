@@ -277,8 +277,10 @@ int daemon_run(void){
      * console. Non-fatal if the bind fails. */
     /* Wall-clock correction for Discord timestamps (PSN time sync is
      * typically blocked on jailbroken consoles). Boot sweep is bounded;
-     * hourly ticks are single-host attempts (never stall heartbeats). */
-    time_sync_all();
+     * hourly ticks are single-host attempts (never stall heartbeats).
+     * A fresh sync also steps the system clock itself so TLS cert
+     * verification never fails after an RTC loss. */
+    if(time_sync_all() == 0) time_apply_offset();
     if(!have_token(&g_cfg)){
         /* Waiting for configuration is a HEALTHY boot, not a crash:
          * mark clean so token-less boots never trip safe mode. */
@@ -481,7 +483,7 @@ int daemon_run(void){
             /* Poll every tick, not every detect poll: STOP must land within a
              * second even while a title is being resolved. */
             int64_t now = orbis_mono_s();
-            if(now - last_tsync >= 3600){ last_tsync = now; time_sync(); }
+            if(now - last_tsync >= 3600){ last_tsync = now; if(time_sync() == 0) time_apply_offset(); }
             if(now != last_poll){
                 last_poll = now;
                 if(now - last_alive >= 60){
