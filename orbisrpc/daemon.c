@@ -6,6 +6,7 @@
  *
  * A `stop` flag is polled so a signal handler can shut the loop down cleanly. */
 #include "cfg.h"
+#include "daemon.h"
 #include "clock.h"
 #include "lock.h"
 #include "timesync.h"
@@ -31,6 +32,35 @@
 extern cfg_t g_cfg;
 
 static volatile sig_atomic_t s_stop = 0;
+
+/* Session/detection state, hoisted to file scope. These were function
+ * statics inside daemon_run, which meant a supervisor retry — a second
+ * daemon_run call after a fault — inherited the faulted run's leftovers.
+ * daemon_sess_reset() (supervise.c) clears them at every daemon_run
+ * entry. */
+static daemon_sess_t s_sess;
+
+/* The live connection, so the crash hook can close it from normal
+ * context. File scope (not a daemon_run local): after a fault the old
+ * frame is gone, and the hook must never read an unwound stack. */
+static discord_t s_dc;
+/* Gate for the hook: 1 only while s_dc is a provably zeroed, fully
+ * constructed connection. Makes the hook one-shot and refusable — a
+ * second fault inside the hook must not recurse. */
+static volatile sig_atomic_t s_dc_armed = 0;
+
+int daemon_crash_cleanup(void){
+    /* The pid lock is released unconditionally and first: it is held
+     * from before the connection exists, so even a pre-arm fault must
+     * not leave the retry standing down against its own stale lock. */
+    lock_release();
+    if(!s_dc_armed) return 1;   /* nothing else provably exists yet */
+    s_dc_armed = 0;             /* one-shot: never touch s_dc twice */
+    if(daemon_stop_requested()) return 0;  /* stop asked mid-fault */
+    if(s_dc.connected) discord_clear_presence(&s_dc);
+    ws_close(&s_dc.ws);
+    return 1;
+}
 
 /* Tells a running daemon_run() to shut down. */
 void daemon_request_stop(void){ s_stop = 1; }
@@ -214,7 +244,7 @@ static int reconnect_delay(int *fails, int base, unsigned *jctr){
 
 /* Explicit presence state (logged on every transition; no ambiguous
  * states): NONE -> HOME <-> GAME, with reconnects re-posting. */
-typedef enum { PS_NONE = 0, PS_HOME, PS_GAME } pres_state_t;
+/* pres_state_t lives in daemon.h (session struct needs it). */
 static const char *pres_name(pres_state_t s){
     return s == PS_GAME ? "GAME" : s == PS_HOME ? "HOME" : "NONE";
 }
@@ -225,7 +255,13 @@ static void pres_set(pres_state_t *cur, pres_state_t next){
 }
 /* Returns 0 normal stop, 1 config error, 2 auth-fatal (bad token). */
 int daemon_run(void){
-    s_stop = 0;
+    /* A supervisor retry enters here again after a fault: start from a
+     * clean session state instead of the faulted run's leftovers.
+     * s_stop is deliberately NOT cleared: a stop requested while the
+     * supervisor was backing off must stick. */
+    daemon_sess_reset(&s_sess);
+    memset(&s_dc, 0, sizeof s_dc);
+    s_dc_armed = 1;
 #ifdef SIGTERM
     daemon_arm_signal(SIGTERM);
 #endif
@@ -328,7 +364,6 @@ int daemon_run(void){
         log_msg("updater: skipped (safe mode)");
     }
 
-    discord_t dc;
     int base_poll = g_cfg.poll_interval_s;
     if(base_poll < 5) base_poll = 5;
     if(base_poll > 60) base_poll = 60;
@@ -355,7 +390,7 @@ int daemon_run(void){
     for(;;){ /* outer: connect cycles with backoff on failure */
         if(s_stop) break;
         /* re-read config every cycle so token edits land without a reboot.
-         * On parse failure keep last-good config instead of stale defaults. */
+         * On parse failure keep s_sess.last-good config instead of stale defaults. */
         {
             cfg_t next = g_cfg;
             if(cfg_load(CFG_PATH, &next) == 0){
@@ -372,7 +407,7 @@ int daemon_run(void){
             if(sleep_stop(backoff)) break;
             continue;
         }
-        int rc = discord_connect(&dc, g_cfg.token);
+        int rc = discord_connect(&s_dc, g_cfg.token);
         if(rc == -2){
             /* Rejected token: do NOT exit (that would strand the daemon
              * until the next manual injection). The per-cycle config
@@ -412,32 +447,24 @@ int daemon_run(void){
         if(backoff < 5) backoff = 5;
         if(backoff > 60) backoff = 60;
 
-        /* last/started live OUTSIDE the session loop so the playing timer
+        /* s_sess.last/s_sess.started live OUTSIDE the session loop so the playing timer
          * survives gateway reconnects (same game keeps its original start).
-         * A reconnect re-posts presence only when needed, timer intact. */
-        static int active = 0;
-        static pres_state_t pres = PS_NONE;
-        static char last[128] = "";
-        static char sess_tid[16] = "";
-        static int64_t started = 0;
-        static int64_t last_tsync = 0;
-        static int home_posted = 0;
+         * A reconnect re-posts presence only when needed, timer intact.
+         * (State itself lives in file-scope s_sess; see daemon.h.) */
         /* Fresh (re)connect invalidates whatever Discord shows: re-post the
-         * current state (game via need_post below, home via home_posted
+         * current state (game via need_post below, home via s_sess.home_posted
          * reset) so a drop can never leave a stale/blank tile behind. */
-        home_posted = 0;
+        s_sess.home_posted = 0;
         /* Resume window: if the same title vanishes briefly (detection
          * flicker, quick menu hop) and returns within 10 minutes, the
-         * timer resumes instead of resetting to 0:00. */
-        static char prev_tid[16] = "";
-        static int64_t prev_started = 0, prev_end = 0;
+         * timer resumes instead of resetting to 0:00.
+         * (prev_* live in file-scope s_sess; see daemon.h.) */
         /* Cross-restart resume: a previous run's session (saved on every
          * transition) seeds the resume window, so reboots and updates
          * keep the timer instead of resetting it. */
         {
-            static int sess_restored = 0;
-            if(!sess_restored){
-                sess_restored = 1;
+            if(!s_sess.sess_restored){
+                s_sess.sess_restored = 1;
                 FILE *sf = fopen("/data/orbisRPC/session.json", "rb");
                 if(sf){
                     fseek(sf, 0, SEEK_END);
@@ -460,15 +487,15 @@ int daemon_run(void){
                                     if(strlen(t->str) == 9 &&
                                        st >= 1577836800LL &&
                                        st <= 4102444800LL){
-                                        strncpy(prev_tid, t->str, sizeof prev_tid-1);
-                                        prev_started = st;
+                                        strncpy(s_sess.prev_tid, t->str, sizeof s_sess.prev_tid-1);
+                                        s_sess.prev_started = st;
                                         /* Wall saved_at can't mix with the
                                          * monotonic resume window: start the
                                          * window at boot. Same title seen
                                          * within minutes of boot resumes. */
-                                        prev_end = orbis_mono_s();
+                                        s_sess.prev_end = orbis_mono_s();
                                         log_msg("session restored: %s (timer may resume)",
-                                                prev_tid);
+                                                s_sess.prev_tid);
                                     } else {
                                         log_msg("session file failed validation; starting fresh");
                                     }
@@ -483,24 +510,22 @@ int daemon_run(void){
             }
         }
         /* Transition debounce: shell flickers during launches, so a new
-         * title (or disappearance) needs consecutive polls (2 at ~1s). */
-        static char cand_title[16] = "";
-        static int cand_hits = 0, miss_hits = 0;
+         * title (or disappearance) needs consecutive polls (2 at ~1s).
+         * (Counters live in file-scope s_sess; see daemon.h.) */
         int64_t last_poll = 0;
         int64_t last_alive = 0;
-        static int healthy_marked = 0;
         /* re-post after every (re)connect so Discord never sticks on stale */
-        int need_post = active && last[0];
+        int need_post = s_sess.active && s_sess.last[0];
         while(!s_stop){ /* inner: live session, serviced every second */
             /* Poll every tick, not every detect poll: STOP must land within a
              * second even while a title is being resolved. */
             int64_t now = orbis_mono_s();
-            if(now - last_tsync >= 3600){ last_tsync = now; if(time_sync() == 0) time_apply_offset(); }
+            if(now - s_sess.last_tsync >= 3600){ s_sess.last_tsync = now; if(time_sync() == 0) time_apply_offset(); }
             if(now != last_poll){
                 last_poll = now;
                 if(now - last_alive >= 60){
                     last_alive = now;
-                    log_msg("alive: %s", active ? last : "idle");
+                    log_msg("alive: %s", s_sess.active ? s_sess.last : "idle");
                 }
                 /* State reconciliation: re-post current presence every
                  * 15 min so a silently desynced tile (dropped update,
@@ -508,12 +533,11 @@ int daemon_run(void){
                  * any state change. Timer/source values are re-read at
                  * post time, so this never disturbs a live session. */
                 {
-                    static int64_t last_reconcile = 0;
-                    if(last_reconcile == 0) last_reconcile = now;
-                    if(now - last_reconcile >= 900){
-                        last_reconcile = now;
-                        if(active && last[0]) need_post = 1;
-                        else home_posted = 0;
+                    if(s_sess.last_reconcile == 0) s_sess.last_reconcile = now;
+                    if(now - s_sess.last_reconcile >= 900){
+                        s_sess.last_reconcile = now;
+                        if(s_sess.active && s_sess.last[0]) need_post = 1;
+                        else s_sess.home_posted = 0;
                         log_msg("reconcile: reposting current state");
                     }
                 }
@@ -527,8 +551,8 @@ int daemon_run(void){
                 /* A boot that survives HEALTH_STABLE_SECS of runtime was
                  * healthy: clear the unclean-boot marker so only real
                  * crashes count toward safe mode. */
-                if(!healthy_marked && now - boot_mono >= HEALTH_STABLE_SECS){
-                    healthy_marked = 1;
+                if(!s_sess.healthy_marked && now - boot_mono >= HEALTH_STABLE_SECS){
+                    s_sess.healthy_marked = 1;
                     health_mark_healthy();
                     log_msg("health: boot marked healthy");
                 }
@@ -542,11 +566,11 @@ int daemon_run(void){
                      * suppress the clear path below: neither is a close. */
                     scan_unknown = (dr == -2 || dr == -3);
                     if(dr == -2) log_dbg("detect read failed; holding");
-                    else if(dr == -3) log_dbg("system UI in front; holding %s", last);
+                    else if(dr == -3) log_dbg("system UI in front; holding %s", s_sess.last);
                     if(scan_unknown) name[0] = 0;
                     }
                     /* Settings screen. Only a definite answer moves the state:
-                     * a probe that cannot see kern.msgbuf leaves the last known
+                     * a probe that cannot see kern.msgbuf leaves the s_sess.last known
                      * value alone instead of flapping the presence off and on. */
                     {
                     int sstate = detect_settings_active();
@@ -561,8 +585,8 @@ int daemon_run(void){
                          * looks at, so leaving Settings wedged the daemon. */
                         if(!sstate){
                             s_settings_posted = 0;
-                            need_post = active && last[0];
-                            home_posted = 0;
+                            need_post = s_sess.active && s_sess.last[0];
+                            s_sess.home_posted = 0;
                         }
                     }
                     }
@@ -576,13 +600,13 @@ int daemon_run(void){
                         log_msg("browser screen: %s", bstate ? "in" : "out");
                         if(!bstate){
                             s_browser_posted = 0;
-                            need_post = active && last[0];
-                            home_posted = 0;
+                            need_post = s_sess.active && s_sess.last[0];
+                            s_sess.home_posted = 0;
                         }
                     }
                     /* While Settings is up it replaces the whole presence: its
                      * own name, no artwork, no timer, no small icon. The game
-                     * underneath keeps `started`, so returning restores the
+                     * underneath keeps `s_sess.started`, so returning restores the
                      * original elapsed time rather than restarting the clock.
                      * It also counts as "hold" below -- Settings must never
                      * look like a game closing. */
@@ -608,7 +632,7 @@ int daemon_run(void){
                     else if(in_settings && !s_settings_posted){
                         char st[64];
                         firmware_state_line(st, sizeof st);
-                        int pr = discord_set_presence_ex(&dc, st,
+                        int pr = discord_set_presence_ex(&s_dc, st,
                             "PlayStation 4", details_for_settings(),
                             g_cfg.asset_idle, NULL,
                             "settings", g_cfg.application_id, NULL,
@@ -628,7 +652,7 @@ int daemon_run(void){
                          * browser closes. */
                         char st[64];
                         firmware_state_line(st, sizeof st);
-                        int pr = discord_set_presence_ex(&dc, st,
+                        int pr = discord_set_presence_ex(&s_dc, st,
                             "PlayStation 4", "Using Web Browser",
                             NULL, NULL,
                             "browser", g_cfg.application_id, NULL,
@@ -648,56 +672,56 @@ int daemon_run(void){
                 else if(name[0]){
                     const char *cur_tid = detect_last_titleid();
                     if(!cur_tid) cur_tid = "";
-                    if(!strcmp(cur_tid, cand_title)){
-                        cand_hits++;
+                    if(!strcmp(cur_tid, s_sess.cand_title)){
+                        s_sess.cand_hits++;
                     } else {
-                        strncpy(cand_title, cur_tid, sizeof cand_title-1);
-                        cand_title[sizeof cand_title-1] = 0;
-                        cand_hits = 1;
+                        strncpy(s_sess.cand_title, cur_tid, sizeof s_sess.cand_title-1);
+                        s_sess.cand_title[sizeof s_sess.cand_title-1] = 0;
+                        s_sess.cand_hits = 1;
                     }
-                    miss_hits = 0;
-                    if(cand_hits >= 2){
-                    if(!active || strcmp(cur_tid,sess_tid)!=0){
+                    s_sess.miss_hits = 0;
+                    if(s_sess.cand_hits >= 2){
+                    if(!s_sess.active || strcmp(cur_tid,s_sess.sess_tid)!=0){
                         /* Switching away from a live session: bank its time.
                          * (Fresh starts and resumes have nothing to bank;
                          * the clear path already banked ended sessions.) */
-                        if(active && sess_tid[0] &&
-                           strcmp(cur_tid,sess_tid)!=0)
-                            ledger_append(sess_tid, last, started, time_fixed());
-                        active = 1;
-                        strncpy(sess_tid, cur_tid, sizeof sess_tid-1);
-                        strncpy(last, name, sizeof last-1);
-                        last[sizeof last-1] = 0;
-                        if(!strcmp(cur_tid, prev_tid) &&
-                           prev_started > 0 &&
-                           now - prev_end < 600){
-                            started = prev_started;
+                        if(s_sess.active && s_sess.sess_tid[0] &&
+                           strcmp(cur_tid,s_sess.sess_tid)!=0)
+                            ledger_append(s_sess.sess_tid, s_sess.last, s_sess.started, time_fixed());
+                        s_sess.active = 1;
+                        strncpy(s_sess.sess_tid, cur_tid, sizeof s_sess.sess_tid-1);
+                        strncpy(s_sess.last, name, sizeof s_sess.last-1);
+                        s_sess.last[sizeof s_sess.last-1] = 0;
+                        if(!strcmp(cur_tid, s_sess.prev_tid) &&
+                           s_sess.prev_started > 0 &&
+                           now - s_sess.prev_end < 600){
+                            s_sess.started = s_sess.prev_started;
                             log_msg("SESSION_RESUMED title=%s (gap %llds, timer kept)",
-                                    cur_tid[0]?cur_tid:"?", (long long)(now - prev_end));
+                                    cur_tid[0]?cur_tid:"?", (long long)(now - s_sess.prev_end));
                         } else {
-                            started = time_fixed();
+                            s_sess.started = time_fixed();
                         }
                         need_post = 1;
                         log_msg("GAME_DETECTED title=%s name=%s", cur_tid[0]?cur_tid:"?", name);
                         art_cache_clear();
-                        sess_save(cur_tid, name, started);
+                        sess_save(cur_tid, name, s_sess.started);
                         /* No metadata is written to config.json any more.
                          * detect.c persists id+name+cover to games_cache.json
                          * when a title resolves; that file is the only place
                          * the daemon learns anything. config.json keeps only
                          * operator settings and hand-edited overrides. */
-                    } else if(strcmp(name,last)!=0){
-                        strncpy(last, name, sizeof last-1);
-                        last[sizeof last-1] = 0;
+                    } else if(strcmp(name,s_sess.last)!=0){
+                        strncpy(s_sess.last, name, sizeof s_sess.last-1);
+                        s_sess.last[sizeof s_sess.last-1] = 0;
                         need_post = 1;
                     }
                     /* A media app or homebrew title that is switched off is
                      * never announced. Sending nothing leaves whatever was
-                     * last posted standing, so a game underneath keeps
+                     * s_sess.last posted standing, so a game underneath keeps
                      * showing and an empty console simply stays quiet. */
                     int gate_this_title = gate_media || gate_homebrew;
                     if(need_post && gate_this_title){
-                        log_dbg("presence: %s suppressed", last);
+                        log_dbg("presence: %s suppressed", s_sess.last);
                         need_post = 0;
                     }
                     if(need_post){
@@ -706,73 +730,73 @@ int daemon_run(void){
                         char gst[64];
                         firmware_state_line(gst, sizeof gst);
                         const char *state = gst[0] ? gst : NULL;
-                        const char *details = details_for_game(sess_tid);
+                        const char *details = details_for_game(s_sess.sess_tid);
                         const char *tart = detect_last_art();
                         /* Playback queue of one: only clear need_post after
                          * the bytes actually go out. A failed send stays
                          * queued and rides the next tick/reconnect. */
-                        int pr = discord_set_presence_ex(&dc, state, last, details,
+                        int pr = discord_set_presence_ex(&s_dc, state, s_sess.last, details,
                             NULL, g_cfg.asset_playing,
-                            sess_tid[0]?sess_tid:NULL, g_cfg.application_id,
+                            s_sess.sess_tid[0]?s_sess.sess_tid:NULL, g_cfg.application_id,
                             g_cfg.art_base_url, tart,
-                            small_art_url(), started);
+                            small_art_url(), s_sess.started);
                         if(pr == 0){
-                            log_msg("presence: %s", last);
-                            pres_set(&pres, PS_GAME);
+                            log_msg("presence: %s", s_sess.last);
+                            pres_set(&s_sess.pres, PS_GAME);
                             n_posts++;
-                            active = 1; need_post = 0;
+                            s_sess.active = 1; need_post = 0;
                         } else {
                             log_msg("presence send failed; will retry");
                         }
                     }
                     }
-                }else if(active && !scan_unknown){
-                    cand_title[0] = 0;
-                    cand_hits = 0;
-                    if(++miss_hits >= 2){
-                        discord_clear_presence(&dc);
+                }else if(s_sess.active && !scan_unknown){
+                    s_sess.cand_title[0] = 0;
+                    s_sess.cand_hits = 0;
+                    if(++s_sess.miss_hits >= 2){
+                        discord_clear_presence(&s_dc);
                         log_msg("presence cleared");
-                        pres_set(&pres, PS_NONE);
-                        ledger_append(sess_tid, last, started, time_fixed());
-                        strncpy(prev_tid, sess_tid, sizeof prev_tid-1);
-                        prev_started = started;
-                        prev_end = now;
+                        pres_set(&s_sess.pres, PS_NONE);
+                        ledger_append(s_sess.sess_tid, s_sess.last, s_sess.started, time_fixed());
+                        strncpy(s_sess.prev_tid, s_sess.sess_tid, sizeof s_sess.prev_tid-1);
+                        s_sess.prev_started = s_sess.started;
+                        s_sess.prev_end = now;
                         remove("/data/orbisRPC/session.json");
-                        last[0]=0; sess_tid[0]=0; active=0; started=0;
-                        home_posted = 0;
+                        s_sess.last[0]=0; s_sess.sess_tid[0]=0; s_sess.active=0; s_sess.started=0;
+                        s_sess.home_posted = 0;
                     }
-                } else if(gate_idle && active){
+                } else if(gate_idle && s_sess.active){
                     /* Home with idle switched off. Clear rather than leave the
                      * previous game up: nothing is running underneath on the
                      * home screen, so holding would strand a closed game's
                      * tile for good. This is the one place where "don't send"
                      * would be wrong. */
-                    discord_clear_presence(&dc);
+                    discord_clear_presence(&s_dc);
                     log_msg("presence cleared (home, idle suppressed)");
-                    pres_set(&pres, PS_NONE);
-                    ledger_append(sess_tid, last, started, time_fixed());
-                    strncpy(prev_tid, sess_tid, sizeof prev_tid-1);
-                    prev_started = started;
-                    prev_end = now;
+                    pres_set(&s_sess.pres, PS_NONE);
+                    ledger_append(s_sess.sess_tid, s_sess.last, s_sess.started, time_fixed());
+                    strncpy(s_sess.prev_tid, s_sess.sess_tid, sizeof s_sess.prev_tid-1);
+                    s_sess.prev_started = s_sess.started;
+                    s_sess.prev_end = now;
                     remove("/data/orbisRPC/session.json");
-                    last[0]=0; sess_tid[0]=0; active=0; started=0;
-                    home_posted = 0;
-                } else if(!home_posted && !scan_unknown){
+                    s_sess.last[0]=0; s_sess.sess_tid[0]=0; s_sess.active=0; s_sess.started=0;
+                    s_sess.home_posted = 0;
+                } else if(!s_sess.home_posted && !scan_unknown){
                     /* Home screen support: no game running. Post a timerless
                      * home presence once (instead of bare online), clear it
                      * the moment a game commits. */
                     char hst[64];
                     firmware_state_line(hst, sizeof hst);
                     const char *state = hst[0] ? hst : NULL;
-                    if(discord_set_presence_ex(&dc, state, "PlayStation 4",
+                    if(discord_set_presence_ex(&s_dc, state, "PlayStation 4",
                         details_for_home(),
                         g_cfg.asset_idle, NULL, "home",
                         g_cfg.application_id, g_cfg.art_base_url,
                         large_art_url(), NULL, 0) == 0){
                         log_msg("presence: home");
-                        pres_set(&pres, PS_HOME);
+                        pres_set(&s_sess.pres, PS_HOME);
                         n_posts++;
-                        home_posted = 1;
+                        s_sess.home_posted = 1;
                     } else {
                         log_msg("home presence send failed; will retry");
                     }
@@ -781,15 +805,15 @@ int daemon_run(void){
 
             /* service the gateway every pass (~1s): heartbeats must never be
              * more than a second or two late or the server drops us */
-            int tr = discord_tick(&dc);
+            int tr = discord_tick(&s_dc);
             if(tr == -2){
                 /* Token rejected mid-session: same policy as connect-time
                  * 4004 (never strand the daemon). Drop to the outer loop:
                  * backoff + config reload picks up a fixed token alone. */
                 log_msg("WARN: token rejected (close 4004). Fix %s; retrying", CFG_PATH);
                 notify_throttled("token4004", TOKEN_REJECTED_MSG, 300);
-                ws_close(&dc.ws);
-                pres_set(&pres, PS_NONE);
+                ws_close(&s_dc.ws);
+                pres_set(&s_sess.pres, PS_NONE);
                 if(sleep_stop(reconnect_delay(&conn_fails, base_poll, &jctr))) break;
                 break;
             }
@@ -797,8 +821,8 @@ int daemon_run(void){
                 int wait = reconnect_delay(&conn_fails, base_poll, &jctr);
                 log_msg("invalid session; fresh identify (attempt %d) in %ds",
                         conn_fails, wait);
-                ws_close(&dc.ws);
-                pres_set(&pres, PS_NONE);
+                ws_close(&s_dc.ws);
+                pres_set(&s_sess.pres, PS_NONE);
                 if(sleep_stop(wait)) break;
                 break;
             }
@@ -806,16 +830,16 @@ int daemon_run(void){
                 int wait = reconnect_delay(&conn_fails, base_poll, &jctr);
                 log_msg("gateway dropped (attempt %d); reconnecting in %ds",
                         conn_fails, wait);
-                ws_close(&dc.ws);
-                pres_set(&pres, PS_NONE);
+                ws_close(&s_dc.ws);
+                pres_set(&s_sess.pres, PS_NONE);
                 if(sleep_stop(wait)) break;
                 break;
             }
 
             for(int i = 0; i < 10 && !s_stop; i++) usleep(100000);
         }
-        if(s_stop && dc.connected) discord_clear_presence(&dc);
-        ws_close(&dc.ws);
+        if(s_stop && s_dc.connected) discord_clear_presence(&s_dc);
+        ws_close(&s_dc.ws);
     }
     /* Session file already reflects the live session (saved on every
      * transition), so shutdown is: clear presence (above), release the

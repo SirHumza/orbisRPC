@@ -9,6 +9,8 @@
 #include "../orbisrpc/appdb.h"
 #include "../orbisrpc/discord.h"
 #include "../orbisrpc/timesync.h"
+#include "../orbisrpc/daemon.h"
+#include "../orbisrpc/supervise.h"
 #include "../orbisrpc/detect.h"
 #include "../orbisrpc/procwalk.h"
 #include "../orbisrpc/bigapp.h"
@@ -986,6 +988,43 @@ static void test_time_apply_set_fails_keeps_offset(void){
     assert(time_apply_offset() == 0 && s_stub_calls == 2);
 }
 
+static void test_sess_reset_clears_session(void){
+    daemon_sess_t s;
+    memset(&s, 0xAA, sizeof s);
+    daemon_sess_reset(&s);
+    assert(s.active == 0);
+    assert(s.pres == PS_NONE);
+    assert(s.last[0] == 0);
+    assert(s.sess_tid[0] == 0);
+    assert(s.started == 0);
+    assert(s.last_tsync == 0);
+    assert(s.home_posted == 0);
+    assert(s.prev_tid[0] == 0);
+    assert(s.prev_started == 0 && s.prev_end == 0);
+    assert(s.cand_title[0] == 0);
+    assert(s.cand_hits == 0 && s.miss_hits == 0);
+    assert(s.healthy_marked == 0);
+    assert(s.sess_restored == 0);
+    assert(s.last_reconcile == 0);
+}
+
+static int stub_body_ok(void){ return 7; }
+
+static void test_supervise_run_returns_body_code(void){
+    supervise_set_crash_hook(NULL);
+    assert(supervise_run(stub_body_ok) == 7);
+}
+
+static void test_fault_delay_progression(void){
+    assert(supervise_fault_delay(0) == 5);
+    assert(supervise_fault_delay(1) == 10);
+    assert(supervise_fault_delay(2) == 20);
+    assert(supervise_fault_delay(6) == 320);
+    assert(supervise_fault_delay(7) == 600);
+    assert(supervise_fault_delay(100) == 600);
+    assert(supervise_fault_delay(-3) == 5);
+}
+
 static void test_cfg_learn(void) {
     cfg_t c;
     cfg_defaults(&c);
@@ -1842,6 +1881,9 @@ int main(void) {
     test_time_apply_small_drift();
     test_time_apply_steps_and_zeroes();
     test_time_apply_set_fails_keeps_offset();
+    test_sess_reset_clears_session();
+    test_supervise_run_returns_body_code();
+    test_fault_delay_progression();
     puts("utility tests passed");
     return 0;
 }
