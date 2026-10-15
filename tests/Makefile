@@ -10,7 +10,7 @@ MBEDTLS_DIR := ../third_party/mbedtls/library
 # Same exclusion set as scripts/build.sh (POSIX-only modules).
 MBEDTLS_SRCS := $(filter-out $(MBEDTLS_DIR)/net_sockets.c $(MBEDTLS_DIR)/timing.c $(MBEDTLS_DIR)/entropy_poll.c,$(wildcard $(MBEDTLS_DIR)/*.c))
 
-ORBIS_SRCS := ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c ../orbisrpc/tmdb_crypto.c ../orbisrpc/updater_util.c ../orbisrpc/art.c ../orbisrpc/log.c ../orbisrpc/health.c ../orbisrpc/compat.c ../orbisrpc/cfg.c ../orbisrpc/appdb.c ../orbisrpc/discord.c ../orbisrpc/procwalk.c ../orbisrpc/bigapp.c ../orbisrpc/pkgzone.c ../orbisrpc/gamecache.c ../orbisrpc/fw.c ../orbisrpc/notify.c ../orbisrpc/retro.c ../orbisrpc/custom.c ../orbisrpc/jsonstr.c
+ORBIS_SRCS := ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c ../orbisrpc/tmdb_crypto.c ../orbisrpc/updater_util.c ../orbisrpc/art.c ../orbisrpc/log.c ../orbisrpc/health.c ../orbisrpc/compat.c ../orbisrpc/cfg.c ../orbisrpc/appdb.c ../orbisrpc/discord.c ../orbisrpc/procwalk.c ../orbisrpc/bigapp.c ../orbisrpc/pkgzone.c ../orbisrpc/gamecache.c ../orbisrpc/fw.c ../orbisrpc/notify.c ../orbisrpc/retro.c ../orbisrpc/custom.c ../orbisrpc/jsonstr.c ../orbisrpc/timesync.c
 INST_SRCS := ../installer/icfg.c
 # SQLite amalgamation: -O0 for host iteration speed (payload uses -O2).
 SQLITE_DIR := ../third_party/sqlite/sqlite-amalgamation-3510100
@@ -57,6 +57,9 @@ $(OBJDIR)/test_utils.o: test_utils.c ../orbisrpc/ws_skip.c ../orbisrpc/ws_env.c 
 $(OBJDIR)/orbis_%.o: ../orbisrpc/%.c | $(OBJDIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+$(OBJDIR)/orbis_timesync.o: ../orbisrpc/timesync.c | $(OBJDIR)
+	$(CC) $(CFLAGS) -DORBISRPC_SDK_PAYLOAD -c -o $@ $<
+
 $(OBJDIR)/inst_%.o: ../installer/%.c | $(OBJDIR)
 	$(CC) $(CFLAGS) -I../installer -c -o $@ $<
 
@@ -74,6 +77,9 @@ $(ASAN_OBJDIR)/test_utils.o: test_utils.c ../orbisrpc/ws_skip.c ../orbisrpc/ws_e
 
 $(ASAN_OBJDIR)/orbis_%.o: ../orbisrpc/%.c | $(ASAN_OBJDIR)
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) -c -o $@ $<
+
+$(ASAN_OBJDIR)/orbis_timesync.o: ../orbisrpc/timesync.c | $(ASAN_OBJDIR)
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) -DORBISRPC_SDK_PAYLOAD -c -o $@ $<
 
 $(ASAN_OBJDIR)/inst_%.o: ../installer/%.c | $(ASAN_OBJDIR)
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) -I../installer -c -o $@ $<

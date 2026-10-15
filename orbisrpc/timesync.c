@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <time.h>
+#include <sys/time.h>
 #include <stdint.h>
 #ifdef ORBISRPC_SDK_PAYLOAD
 #include <sys/socket.h>
