@@ -89,7 +89,6 @@ process table and now use `procwalk.c`, which keeps the self-describing
 position:
 
 - `lock.c` — single-instance guard
-- `tools/evict.c` — stop a running daemon before replacing it
 
 Measured, old logic vs `procwalk.c`:
 
@@ -99,9 +98,9 @@ Measured, old logic vs `procwalk.c`:
 | record 736 B, name @611 | **0** | 1 |
 | record 520 B, name @120 | **0** | 1 |
 
-A hit is corroboration, not proof: records are zero-padded, so both callers
-reject `pid <= 0` before searching, and their failure biases are opposite
-(`lock.c` assumes a peer on an unreadable table; `evict.c` refuses to kill).
+A hit is corroboration, not proof: records are zero-padded, so the caller
+rejects `pid <= 0` before searching, and its failure bias is to assume a peer
+holds the lock (an unreadable table means stand down, not that the peer died).
 
 ## Cost of the change
 
