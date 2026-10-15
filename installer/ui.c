@@ -33,15 +33,17 @@ static void base_init(OrbisMsgDialogParam *param){
 static int ui_ready = 0;
 static int ime_dialog_running = 0;
 
+/* What show_message() last read out of a dialog. Exposed for the install log:
+ * the yes/no verdict is lossy (everything unknown collapses to "decline") and
+ * this is the raw value behind it. */
+static int g_last_button = -1;
+
 /* Reap any stale dialog from a previous session that died
  * mid-flow. Called by ui_init() to ensure a clean start. */
 static void reap_stale(void);
 
 int ui_init(void){
     if(ui_ready) return 0;
-    /* Reap any stale dialog from a previous session that died
-     * mid-flow. This ensures a clean start. */
-    reap_stale();
     {
         /* UserService first: dialogs + pad + IME all key off the user.
          * Best-effort (already-initialized is fine); uid fallbacks
@@ -74,6 +76,11 @@ int ui_init(void){
         sceSysmoduleUnloadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG);
         return -1;
     }
+    /* Must come AFTER the loads above. reap_stale() calls into MsgDialog and
+     * ImeDialog, so running it before their sysmodules are loaded is an
+     * unresolved-NID call at startup -- the exact crash ui_init exists to
+     * prevent. It was the first statement in this function. */
+    reap_stale();
     ui_ready = 1;
     return 0;
 }
@@ -90,66 +97,166 @@ static void reap_stale(void){
         sceImeDialogTerm();
 }
 
-int ui_ok(const char *msg){
+/* Reads back the button the user actually pressed.
+ *
+ * The header's OrbisMsgDialogResult is not trusted for layout. This toolchain's
+ * headers have already been shown to be wrong twice -- SysUtil.h declared every
+ * notification NID as void(void), and FreeType's headers were trimmed -- so a
+ * plausible-but-mismatched struct would explain the observed failure exactly:
+ * the dialog renders Yes/No correctly, GetResult returns success, and yet every
+ * field reads zero because the real values landed at offsets this declaration
+ * does not describe.
+ *
+ * So the result is read into an oversized zeroed buffer and scanned for the two
+ * values an answer can take. That both recovers the answer and reports which
+ * offset carried it, which is what a permanent fix needs. The buffer is also
+ * what makes the call safe: if the real struct is larger than declared, a
+ * stack-allocated OrbisMsgDialogResult would be overflowed by the write.
+ *
+ * Every non-zero word and its offset goes to the install log, so one run
+ * settles the layout rather than a series of guesses. */
+#define DIALOG_RAW_BYTES 256
+
+static void dialog_scan_log(const char *tag, int rc, const unsigned char *buf){
+    FILE *f = fopen("/data/orbisRPC/install.log", "a");
+    int i;
+    if(!f) f = fopen("/data/install.log", "a");
+    if(!f) return;
+    fprintf(f, "ui %s rc=%d raw:", tag, rc);
+    for(i = 0; i + 4 <= DIALOG_RAW_BYTES; i += 4){
+        unsigned int v = (unsigned int)buf[i]
+                       | ((unsigned int)buf[i+1] << 8)
+                       | ((unsigned int)buf[i+2] << 16)
+                       | ((unsigned int)buf[i+3] << 24);
+        if(v) fprintf(f, " +%d=%u", i, v);
+    }
+    fprintf(f, "\n");
+    fclose(f);
+}
+
+/* Returns the button value found in the raw result, or -1 when it cannot be
+ * determined with confidence.
+ *
+ * Deliberately strict. The answer is 1 (OK/YES) or 2 (NO) and nothing else, so
+ * exactly one matching word has to be present. Two candidates means the layout
+ * is not what is assumed here, and guessing between them could invert the
+ * answer -- which would be far worse than declining. */
+static int dialog_scan_button(const unsigned char *buf){
+    int found = -1;
+    int hits = 0;
+    int i;
+
+    for(i = 0; i + 4 <= DIALOG_RAW_BYTES; i += 4){
+        unsigned int v = (unsigned int)buf[i]
+                       | ((unsigned int)buf[i+1] << 8)
+                       | ((unsigned int)buf[i+2] << 16)
+                       | ((unsigned int)buf[i+3] << 24);
+
+        if(v == 1 || v == 2){
+            found = (int)v;
+            hits++;
+        }
+    }
+
+    return hits == 1 ? found : -1;
+}
+
+/* Shared body of ui_ok and ui_yesno: both are the same dialog with a
+ * different buttonType, and the wait/teardown dance is the fiddly part, so it
+ * lives in one place. Returns the button the user pressed, or -1. */
+static int show_message(const char *msg, OrbisMsgDialogButtonType buttons){
     OrbisMsgDialogParam param;
     OrbisMsgDialogUserMessageParam um;
-    OrbisMsgDialogResult res;
-    memset(&res, 0, sizeof res);
+    int answer = -1;
+
     sceMsgDialogTerminate();
     if(sceMsgDialogInitialize() < 0) return -1;
     base_init(&param);
     memset(&um, 0, sizeof um);
     um.msg = msg;
-    um.buttonType = ORBIS_MSG_DIALOG_BUTTON_TYPE_OK;
+    um.buttonType = buttons;
     param.userMsgParam = &um;
     if(sceMsgDialogOpen(&param) < 0){ sceMsgDialogTerminate(); return -1; }
     /* Yield while waiting: a hot spin starves the dialog service on the
      * console (the proven pattern on this box sleeps 20 ms per tick). */
     while(sceMsgDialogUpdateStatus() != ORBIS_COMMON_DIALOG_STATUS_FINISHED)
         sceKernelUsleep(20000);
-    sceMsgDialogClose();
-    sceMsgDialogGetResult(&res);
-    sceMsgDialogTerminate();
-    return 0;
-}
+    /* Read the result BEFORE closing: Close() discards it.
+     *
+     * buttonId sits at offset 8, which is where the header puts it (mode at 0,
+     * result at 4, buttonId at 8) and where the raw dumps confirm it: a Yes/No
+     * dialog reports +8=1 for X and +8=2 for O. So the declared field is read
+     * normally, and the raw scan is only a fallback for when it comes back
+     * unusable -- which is what it was invented for, before the offset was
+     * known. Both are logged either way. */
+    {
+        unsigned char raw[DIALOG_RAW_BYTES];
+        int rc;
 
-static int progress_open = 0;
+        memset(raw, 0, sizeof raw);
+        rc = sceMsgDialogGetResult((OrbisMsgDialogResult *)raw);
+        dialog_scan_log("pre-close", rc, raw);
 
-int ui_progress_open(const char *msg){
-    OrbisMsgDialogParam param;
-    OrbisMsgDialogProgressBarParam bar;
-    if(progress_open){
-        /* Self-healing: a prior session that died between open and close
-         * leaves the flag set with no dialog behind it. Reclaim it. */
-        ui_progress_close();
+        if(rc >= 0){
+            const OrbisMsgDialogResult *res = (const OrbisMsgDialogResult *)raw;
+            if(res->buttonId > 0) answer = (int)res->buttonId;
+        }
+
+        if(answer < 0){
+            int scanned = dialog_scan_button(raw);
+            if(scanned > 0) answer = scanned;
+        }
     }
-    sceMsgDialogTerminate();
-    if(sceMsgDialogInitialize() < 0) return -1;
-    base_init(&param);
-    param.mode = ORBIS_MSG_DIALOG_MODE_PROGRESS_BAR;
-    memset(&bar, 0, sizeof bar);
-    bar.barType = ORBIS_MSG_DIALOG_PROGRESSBAR_TYPE_PERCENTAGE;
-    bar.msg = msg;
-    param.progBarParam = &bar;
-    if(sceMsgDialogOpen(&param) < 0){ sceMsgDialogTerminate(); return -1; }
-    progress_open = 1;
-    return 0;
-}
 
-void ui_progress_msg(const char *msg){
-    if(progress_open && msg) sceMsgDialogProgressBarSetMsg(0, msg);
-}
-
-void ui_progress_set(unsigned pct){
-    if(progress_open) sceMsgDialogProgressBarSetValue(0, pct > 100 ? 100 : pct);
-}
-
-void ui_progress_close(void){
-    if(!progress_open) return;
-    progress_open = 0;
     sceMsgDialogClose();
+
+    {
+        unsigned char raw[DIALOG_RAW_BYTES];
+        int rc;
+
+        memset(raw, 0, sizeof raw);
+        rc = sceMsgDialogGetResult((OrbisMsgDialogResult *)raw);
+        dialog_scan_log("post-close", rc, raw);
+
+        /* Only consulted when the first read gave nothing usable, so a real
+         * answer is never overwritten by an empty one. */
+        if(answer < 0){
+            if(rc >= 0){
+                const OrbisMsgDialogResult *res = (const OrbisMsgDialogResult *)raw;
+                if(res->buttonId > 0) answer = (int)res->buttonId;
+            }
+            if(answer < 0){
+                int scanned = dialog_scan_button(raw);
+                if(scanned > 0) answer = scanned;
+            }
+        }
+    }
+
     sceMsgDialogTerminate();
+    g_last_button = answer;
+    return answer;
 }
+
+int ui_ok(const char *msg){
+    return show_message(msg, ORBIS_MSG_DIALOG_BUTTON_TYPE_OK) < 0 ? -1 : 0;
+}
+
+int ui_yesno(const char *msg){
+    int r = show_message(msg, ORBIS_MSG_DIALOG_BUTTON_TYPE_YESNO);
+    /* OK and YES share the value 1, so only NO is 0. Anything unrecognised --
+     * including the 0 that a discarded result leaves behind -- is treated as a
+     * decline rather than consent, so a failure here cannot silently install
+     * something. */
+    if(r == ORBIS_MSG_DIALOG_BUTTON_ID_NO) return 0;
+    if(r == ORBIS_MSG_DIALOG_BUTTON_ID_YES || r == ORBIS_MSG_DIALOG_BUTTON_ID_OK)
+        return 1;
+    return -1;
+}
+
+/* The value show_message() read, for the install log. Lets installer.c report
+ * what the dialog actually returned instead of only the yes/no verdict, which
+ * is what makes "both buttons do the same thing" diagnosable. */
+int ui_last_button(void){ return g_last_button; }
 
 int ui_input(const char *title, const char *placeholder, char *out, size_t cap){
     static wchar_t wbuf[256];
@@ -158,7 +265,9 @@ int ui_input(const char *title, const char *placeholder, char *out, size_t cap){
     OrbisImeDialogSetting st;
     int32_t uid = 0;
     size_t i;
-    if(!out || cap == 0 || cap > 200) return -1;
+    /* Bound first, before anything is opened. Over it, nothing is shown at all,
+     * which is a silent failure for the caller -- hence ui.h's UI_INPUT_MAX. */
+    if(!out || cap == 0 || cap > UI_INPUT_MAX) return -1;
     /* Prefill with current value (ASCII round-trip). */
     for(i = 0; i < cap - 1 && out[i]; i++) wbuf[i] = (wchar_t)(unsigned char)out[i];
     wbuf[i] = 0;
@@ -233,12 +342,16 @@ int ui_input(const char *title, const char *placeholder, char *out, size_t cap){
 void ui_shutdown(void){
     if(!ui_ready) return;
     ui_ready = 0;
-    progress_open = 0;
     ime_dialog_running = 0;
     sceMsgDialogTerminate();
     sceImeDialogTerm();
     sceSysmoduleUnloadModule(ORBIS_SYSMODULE_IME_BACKEND);
     sceSysmoduleUnloadModule(ORBIS_SYSMODULE_IME_DIALOG);
     sceSysmoduleUnloadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG);
-    sceSysmoduleUnloadModule(ORBIS_SYSMODULE_INTERNAL_PAD);
+    /* Must be the ...Internal unload, to match the load in ui_init. PAD is an
+     * OrbisSysModuleInternal value (0x80000024), but sceSysmoduleUnloadModule
+     * takes an OrbisSysModule, whose underlying type is uint16_t -- so passing
+     * it there truncates to 0x0024 and asks the kernel to unload some unrelated
+     * public module. */
+    sceSysmoduleUnloadModuleInternal(ORBIS_SYSMODULE_INTERNAL_PAD);
 }

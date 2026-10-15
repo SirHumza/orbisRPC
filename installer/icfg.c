@@ -87,68 +87,6 @@ int icfg_token_load(const char *path, char *out, size_t cap){
     return 0;
 }
 
-int icfg_token_save(const char *path, const char *token){
-    jl_val_t *r;
-    int rc;
-    char back[160];
-    if(!token_valid(token)) return -1;
-    r = icfg_read(path);
-    if(!r){
-        r = jl_new_object();
-        if(!r) return -2;
-    }
-    jl_obj_set(r, "token", jl_new_string(token));
-    rc = icfg_write(path, r);
-    jl_free(r);
-    if(rc != 0) return -2;
-    /* Read-back proof: an OOM inside the JSON build saves silently
-     * WITHOUT the key. Never report success on faith. */
-    back[0] = 0;
-    if(icfg_token_load(path, back, sizeof back) != 0 ||
-       strcmp(back, token) != 0)
-        return -2;
-    return 0;
-}
-
-int icfg_set_str(const char *path, const char *key, const char *val){
-    jl_val_t *r;
-    int rc;
-    char back[256];
-    if(!key || !key[0] || !val) return -1;
-    r = icfg_read(path);
-    if(!r){
-        r = jl_new_object();
-        if(!r) return -1;
-    }
-    jl_obj_set(r, key, jl_new_string(val));
-    rc = icfg_write(path, r);
-    jl_free(r);
-    if(rc != 0) return -1;
-    back[0] = 0;
-    if(icfg_get_str(path, key, back, sizeof back) != 0 ||
-       strcmp(back, val) != 0)
-        return -1;
-    return 0;
-}
-
-int icfg_set_int(const char *path, const char *key, long val){
-    jl_val_t *r;
-    int rc;
-    long back = 0;
-    if(!key || !key[0]) return -1;
-    r = icfg_read(path);
-    if(!r){
-        r = jl_new_object();
-        if(!r) return -1;
-    }
-    jl_obj_set(r, key, jl_new_int(val));
-    rc = icfg_write(path, r);
-    jl_free(r);
-    if(rc != 0) return -1;
-    if(icfg_get_int(path, key, &back) != 0 || back != val) return -1;
-    return 0;
-}
-
 int icfg_get_str(const char *path, const char *key, char *out, size_t cap){
     jl_val_t *r = icfg_read(path);
     const jl_val_t *v;
@@ -164,19 +102,6 @@ int icfg_get_str(const char *path, const char *key, char *out, size_t cap){
     return 0;
 }
 
-int icfg_titles_count(const char *path){
-    jl_val_t *r = icfg_read(path);
-    const jl_val_t *t;
-    int n = 0;
-    if(!r) return 0;
-    t = jl_obj_get(r, "titles");
-    if(t && t->type == JL_OBJECT){
-        for(jl_val_t *p = t->child; p; p = p->next) n++;
-    }
-    jl_free(r);
-    return n;
-}
-
 int icfg_get_int(const char *path, const char *key, long *out){
     jl_val_t *r = icfg_read(path);
     const jl_val_t *v;
@@ -190,4 +115,99 @@ int icfg_get_int(const char *path, const char *key, long *out){
     }
     jl_free(r);
     return -1;
+}
+
+/* ---- carry-over ---------------------------------------------------- */
+
+int icfg_carry_capture(const char *path, const char *const *keys,
+                       icfg_carry_t *out, int cap){
+    jl_val_t *r;
+    int n = 0, i;
+
+    if(!out || cap <= 0) return 0;
+
+    /* Clear the caller's array first. The whole point of capture is that
+     * the file it reads may not exist (fresh install) or may not parse
+     * (corrupt). Both must yield an all-absent result, never uninitialised
+     * memory that apply() would then write into the new config. */
+    memset(out, 0, sizeof(*out) * (size_t)cap);
+
+    r = icfg_read(path);
+    if(!r) return 0;
+
+    for(i = 0; i < cap && keys && keys[i]; i++){
+        const jl_val_t *v = jl_obj_get(r, keys[i]);
+        icfg_carry_t *slot = &out[i];
+
+        if(strlen(keys[i]) >= ICFG_KEY_MAX) continue;
+        strncpy(slot->key, keys[i], ICFG_KEY_MAX - 1);
+        slot->key[ICFG_KEY_MAX - 1] = 0;
+
+        /* Objects and arrays are deliberately not carried: an option is a
+         * scalar, and flattening one would silently change its shape. */
+        if(!v) continue;
+
+        switch(v->type){
+        case JL_STRING:
+            if(!v->str || strlen(v->str) >= ICFG_VAL_MAX) break;
+            strncpy(slot->str, v->str, ICFG_VAL_MAX - 1);
+            slot->str[ICFG_VAL_MAX - 1] = 0;
+            slot->type = ICFG_T_STRING;
+            n++;
+            break;
+        case JL_NUMBER:
+            slot->inum = v->num_is_int ? v->inum : (long)v->num;
+            slot->num = v->num;
+            slot->type = v->num_is_int ? ICFG_T_INT : ICFG_T_DOUBLE;
+            n++;
+            break;
+        case JL_BOOL:
+            slot->boolean = v->boolean;
+            slot->type = ICFG_T_BOOL;
+            n++;
+            break;
+        default:
+            break;
+        }
+    }
+
+    jl_free(r);
+    return n;
+}
+
+int icfg_carry_apply(const char *path, const icfg_carry_t *vals, int count){
+    jl_val_t *r;
+    int i, written = 0;
+
+    if(!vals || count <= 0) return 0;
+
+    r = icfg_read(path);
+    if(!r){
+        /* The new config should exist by now. Creating an empty object would
+         * mask a failed download with a plausible-looking file, so treat an
+         * unreadable target as an error and let the caller's report stand. */
+        return -1;
+    }
+
+    for(i = 0; i < count; i++){
+        jl_val_t *v = NULL;
+        switch(vals[i].type){
+        case ICFG_T_STRING: v = jl_new_string(vals[i].str); break;
+        case ICFG_T_INT:    v = jl_new_int(vals[i].inum); break;
+        case ICFG_T_DOUBLE: v = jl_new_double(vals[i].num); break;
+        case ICFG_T_BOOL:   v = jl_new_bool(vals[i].boolean); break;
+        default: continue;
+        }
+        if(!v) continue;   /* OOM: leave the incoming value in place */
+        jl_obj_set(r, vals[i].key, v);
+        written++;
+    }
+
+    if(written > 0 && icfg_write(path, r) != 0){
+        jl_free(r);
+        return -1;
+    }
+
+    jl_free(r);
+    return written;
 }
