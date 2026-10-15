@@ -7,6 +7,9 @@
 #include <errno.h>
 #include <time.h>
 #include <stdint.h>
+#ifdef ORBISRPC_SDK_PAYLOAD
+#include <sys/time.h>
+#endif
 #include "clock.h"
 
 #ifdef ORBISRPC_SDK_PAYLOAD
@@ -34,6 +37,13 @@ int64_t orbis_mono_s(void){
     struct timespec ts;
     if(clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return (int64_t)time(NULL);
     return (int64_t)ts.tv_sec;
+}
+
+int compat_set_clock(int64_t unix_time){
+    struct timeval tv;
+    tv.tv_sec = (time_t)unix_time;
+    tv.tv_usec = 0;
+    return settimeofday(&tv, NULL);
 }
 
 #else

@@ -11,4 +11,7 @@
 #include <stdint.h>
 /* Monotonic seconds (arbitrary epoch, never goes backward). */
 int64_t orbis_mono_s(void);
+/* Step the wall clock to the given Unix time (NTP self-heal; the only
+ * sanctioned wall-clock write). 0 = ok, -1 = failed. */
+int compat_set_clock(int64_t unix_time);
 #endif

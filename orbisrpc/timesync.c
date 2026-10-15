@@ -2,6 +2,7 @@
  * One UDP exchange per call; 3s I/O budget; any failure keeps the old
  * offset. Host-testable (POSIX only). */
 #include "timesync.h"
+#include "clock.h"
 #include "log.h"
 #include <string.h>
 #include <stdio.h>
@@ -115,3 +116,23 @@ int time_sync_all(void){
 int64_t time_fixed(void){
     return (int64_t)time(NULL) + s_offset;
 }
+
+int time_apply_offset(void){
+    if(!s_synced) return -1;
+    if(s_offset > -60 && s_offset < 60) return 0;
+    int64_t target = (int64_t)time(NULL) + s_offset;
+    if(compat_set_clock(target) != 0){
+        log_msg("clock: settimeofday failed; keeping offset %+llds", (long long)s_offset);
+        return -1;
+    }
+    log_msg("clock: stepped system time %+llds from NTP", (long long)s_offset);
+    s_offset = 0;
+    return 0;
+}
+
+#ifdef HEALTH_TESTABLE
+void time_set_offset_for_test(int64_t off){
+    s_offset = off;
+    s_synced = 1;
+}
+#endif

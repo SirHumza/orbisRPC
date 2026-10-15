@@ -17,4 +17,12 @@ int time_sync(void);
 int time_sync_all(void);
 /* Corrected wall clock for Discord epoch stamps. */
 int64_t time_fixed(void);
+/* Step the system clock by the stored NTP offset when it is sane to do
+ * so (synced, |offset| >= 60s). 0 = stepped or already sane, -1 =
+ * unsynced or set failed (offset kept, never fatal). */
+int time_apply_offset(void);
+#ifdef HEALTH_TESTABLE
+/* Test-only: force an offset/synced state. */
+void time_set_offset_for_test(int64_t off);
+#endif
 #endif

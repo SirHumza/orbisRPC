@@ -8,6 +8,7 @@
 #include "../orbisrpc/cfg.h"
 #include "../orbisrpc/appdb.h"
 #include "../orbisrpc/discord.h"
+#include "../orbisrpc/timesync.h"
 #include "../orbisrpc/detect.h"
 #include "../orbisrpc/procwalk.h"
 #include "../orbisrpc/bigapp.h"
@@ -956,6 +957,35 @@ static void test_discord_builder(void) {
     assert(discord_build_activity(NULL, NULL,"Idling on Home Menu",NULL,NULL, "home", "app", NULL, NULL, NULL, 0, "") == NULL);
 }
 
+static int64_t s_stub_arg = -1;
+static int s_stub_calls = 0, s_stub_fail = 0;
+int compat_set_clock(int64_t t){ s_stub_arg = t; s_stub_calls++; return s_stub_fail ? -1 : 0; }
+
+static void test_time_apply_unsynced(void){
+    s_stub_calls = 0;
+    assert(time_apply_offset() == -1 && s_stub_calls == 0);
+}
+
+static void test_time_apply_small_drift(void){
+    s_stub_calls = 0; time_set_offset_for_test(30);
+    assert(time_apply_offset() == 0 && s_stub_calls == 0);
+}
+
+static void test_time_apply_steps_and_zeroes(void){
+    s_stub_calls = 0; s_stub_fail = 0; time_set_offset_for_test(54829587);
+    int64_t before = (int64_t)time(NULL);
+    assert(time_apply_offset() == 0 && s_stub_calls == 1);
+    assert(s_stub_arg >= before + 54829587 - 5 && s_stub_arg <= before + 54829587 + 5);
+    assert(time_apply_offset() == 0 && s_stub_calls == 1);
+}
+
+static void test_time_apply_set_fails_keeps_offset(void){
+    s_stub_calls = 0; s_stub_fail = 1; time_set_offset_for_test(3600);
+    assert(time_apply_offset() == -1 && s_stub_calls == 1);
+    s_stub_fail = 0;
+    assert(time_apply_offset() == 0 && s_stub_calls == 2);
+}
+
 static void test_cfg_learn(void) {
     cfg_t c;
     cfg_defaults(&c);
@@ -1808,6 +1838,10 @@ int main(void) {
     test_installer_cfg();
     test_appdb();
     test_discord_builder();
+    test_time_apply_unsynced();
+    test_time_apply_small_drift();
+    test_time_apply_steps_and_zeroes();
+    test_time_apply_set_fails_keeps_offset();
     puts("utility tests passed");
     return 0;
 }
