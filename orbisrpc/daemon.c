@@ -45,6 +45,18 @@ static void daemon_on_signal(int sig){
     s_stop = 1;
 }
 
+/* sigaction with SA_RESTART instead of signal(): signal() has
+ * implementation-defined semantics (handler reset, interrupted syscalls),
+ * sigaction pins ours — flag store only, syscalls resume. */
+static void daemon_arm_signal(int sig){
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = daemon_on_signal;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    sigaction(sig, &sa, NULL);
+}
+
 /* Sleep up to `secs` but wake within a second when stop is requested,
  * so we never hang on a long backoff. Returns 1 stopped. */
 static int sleep_stop(int secs){
@@ -215,10 +227,10 @@ static void pres_set(pres_state_t *cur, pres_state_t next){
 int daemon_run(void){
     s_stop = 0;
 #ifdef SIGTERM
-    signal(SIGTERM, daemon_on_signal);
+    daemon_arm_signal(SIGTERM);
 #endif
 #ifdef SIGINT
-    signal(SIGINT, daemon_on_signal);
+    daemon_arm_signal(SIGINT);
 #endif
     if(mkdir(DATA_DIR, 0777) != 0){
         /* EEXIST is fine; anything else means payload can't persist config/log */
