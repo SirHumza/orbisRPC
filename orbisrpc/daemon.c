@@ -213,11 +213,21 @@ static void sess_save(const char *tid, const char *name, int64_t started){    jl
 
 /* Playtime ledger: append-only "<title_id> <name> <seconds>" per finished
  * session. Totals are computed by readers (app/docs); the daemon only
- * appends, so a corrupt ledger can never break the runtime. */
+ * appends, so a corrupt ledger can never break the runtime. Bounded by
+ * one rotation generation: ~40 bytes per line means 64KB is years of
+ * sessions, and readers that want full history sum both files. */
+#define LEDGER_CAP (64*1024)
+#define LEDGER_PATH "/data/orbisRPC/playtime.log"
+#define LEDGER_PREV "/data/orbisRPC/playtime.log.1"
 static void ledger_append(const char *tid, const char *name,
                           int64_t started, int64_t ended){
     if(!tid || !tid[0] || ended <= started || started <= 0) return;
-    FILE *f = fopen("/data/orbisRPC/playtime.log", "ab");
+    struct stat st;
+    if(stat(LEDGER_PATH, &st) == 0 && (uint64_t)st.st_size > LEDGER_CAP){
+        remove(LEDGER_PREV);
+        rename(LEDGER_PATH, LEDGER_PREV);
+    }
+    FILE *f = fopen(LEDGER_PATH, "ab");
     if(!f) return;
     fprintf(f, "%s %s %lld\n", tid, (name && name[0]) ? name : "?",
             (long long)(ended - started));
