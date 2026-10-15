@@ -94,3 +94,13 @@ fix — reinstall.
 ## No FTP (connection refused)
 
 GoldHEN FTP toggle off, or console rebooted to stock. Re-jailbreak.
+
+## TLS handshake fail -9984 (wrong console clock)
+
+Log shows `tls: handshake fail -9984` on every gateway/updater attempt and
+the log timestamps are months behind real time. The console RTC lost its
+date (common after full power loss); -9984 is cert-verify failure because
+the certs look "not yet valid" to a 2025 clock. Current builds step the
+system clock from NTP automatically after each successful sync, so this
+heals itself on the next boot with working network. Manual fix: Settings
+→ Date and Time → set correctly, then reboot the payload.
