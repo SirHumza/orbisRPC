@@ -1,11 +1,1 @@
-[
-  {"id":"SPSX14001","name":"SuperPSX Store","cover":"https://pkg.cybermask.dpdns.org/data/images/superpsx.png"},
-  {"id":"HALO00001","name":"Halo: Combat Evolved","cover":"https://pkg.cybermask.dpdns.org/data/images/haloce.jpg"},
-  {"id":"ORPC00001","name":"orbisRPC Setup app","cover":"https://raw.githubusercontent.com/SirHumza/orbisRPC/refs/heads/main/config/images/icons/logo.png"},
-  {"id":"CREM00001","name":"Crema - Wii U","cover":"https://pkg.cybermask.dpdns.org/data/images/crema.png"},
-  {"id":"DLPH00010","name":"Dolphin","cover":"https://pkg.cybermask.dpdns.org/data/images/dolphin.png"},
-  {"id":"RPCS30010","name":"RPCS3","cover":"https://pkg.cybermask.dpdns.org/data/images/rpcs3.png"},
-  {"id":"GNMS00001","name":"GnmScale"},
-  {"id":"CUSA94448","name":"Um Jammer Lammy","cover":"https://coverproject.sfo2.cdn.digitaloceanspaces.com/playstation_1/playstation_1.umjammerlammy_GB.1681164541469936141_thumb.jpg"},
-  {"id":"DCST00001","name":"Resonance - Dreamcast","cover":"https://pkg.cybermask.dpdns.org/data/images/resonance.png"}
-]
+[{"id":"SPSX14001","name":"SuperPSX Store","cover":"https://pkg.cybermask.dpdns.org/data/images/superpsx.png"},{"id":"HALO00001","name":"Halo: Combat Evolved","cover":"https://pkg.cybermask.dpdns.org/data/images/haloce.jpg"},{"id":"ORPC00001","name":"orbisRPC Setup app","cover":"https://raw.githubusercontent.com/SirHumza/orbisRPC/refs/heads/main/config/images/icons/logo.png"},{"id":"CREM00001","name":"Crema - Wii U","cover":"https://pkg.cybermask.dpdns.org/data/images/crema.png"},{"id":"DLPH00010","name":"Dolphin","cover":"https://pkg.cybermask.dpdns.org/data/images/dolphin.png"},{"id":"RPCS30010","name":"RPCS3","cover":"https://pkg.cybermask.dpdns.org/data/images/rpcs3.png"},{"id":"GNMS00001","name":"GnmScale"},{"id":"CUSA94448","name":"Um Jammer Lammy","cover":"https://coverproject.sfo2.cdn.digitaloceanspaces.com/playstation_1/playstation_1.umjammerlammy_GB.1681164541469936141_thumb.jpg"},{"id":"DCST00001","name":"Resonance - Dreamcast","cover":"https://pkg.cybermask.dpdns.org/data/images/resonance.png"},{"id":"SCUS00000","name":"Friday Night Funkin'","cover":"https://romsfun.com/wp-content/uploads/2024/12/Friday-Night-Funkin039.jpg"},{"id":"SMSR00001","name":"Sonic SMS Remake","cover":"https://www.gamebrew.org/thumb.php?f=Sonic1smsremakevita2.jpg&width=300"},{"id":"LAPY10015","name":"Super Console Wars","cover":""}]
