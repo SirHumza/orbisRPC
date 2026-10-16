@@ -11,7 +11,7 @@ MBEDTLS_DIR := ../third_party/mbedtls/library
 MBEDTLS_SRCS := $(filter-out $(MBEDTLS_DIR)/net_sockets.c $(MBEDTLS_DIR)/timing.c $(MBEDTLS_DIR)/entropy_poll.c,$(wildcard $(MBEDTLS_DIR)/*.c))
 
 ORBIS_SRCS := ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c ../orbisrpc/tmdb_crypto.c ../orbisrpc/updater_util.c ../orbisrpc/art.c ../orbisrpc/log.c ../orbisrpc/health.c ../orbisrpc/compat.c ../orbisrpc/cfg.c ../orbisrpc/appdb.c ../orbisrpc/discord.c ../orbisrpc/procwalk.c ../orbisrpc/bigapp.c ../orbisrpc/pkgzone.c ../orbisrpc/gamecache.c ../orbisrpc/fw.c ../orbisrpc/notify.c ../orbisrpc/retro.c ../orbisrpc/custom.c ../orbisrpc/jsonstr.c ../orbisrpc/timesync.c ../orbisrpc/supervise.c
-INST_SRCS := ../installer/icfg.c
+INST_SRCS := ../installer/icfg.c ../installer/jsonlite.c
 # SQLite amalgamation: -O0 for host iteration speed (payload uses -O2).
 SQLITE_DIR := ../third_party/sqlite/sqlite-amalgamation-3510100
 SQLITE_FLAGS := -O2 -I$(SQLITE_DIR) # clean default compile; OMIT/THREADSAFE=0 overrides break sqlite3_open_v2 on the ubuntu runner
@@ -19,25 +19,25 @@ SQLITE_FLAGS := -O2 -I$(SQLITE_DIR) # clean default compile; OMIT/THREADSAFE=0 o
 ORBIS_OBJS := $(patsubst ../orbisrpc/%.c,$(OBJDIR)/orbis_%.o,$(ORBIS_SRCS))
 INST_OBJS := $(patsubst ../installer/%.c,$(OBJDIR)/inst_%.o,$(INST_SRCS))
 MBEDTLS_OBJS := $(patsubst $(MBEDTLS_DIR)/%.c,$(OBJDIR)/mbed_%.o,$(MBEDTLS_SRCS))
-TEST_OBJS := $(OBJDIR)/test_utils.o $(ORBIS_OBJS) $(INST_OBJS) $(MBEDTLS_OBJS) $(OBJDIR)/sqlite3.o
+TEST_OBJS := $(OBJDIR)/test_utils.o $(ORBIS_OBJS) $(MBEDTLS_OBJS) $(OBJDIR)/sqlite3.o
 
 ASAN_FLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
 ASAN_ORBIS_OBJS := $(patsubst ../orbisrpc/%.c,$(ASAN_OBJDIR)/orbis_%.o,$(ORBIS_SRCS))
 ASAN_INST_OBJS := $(patsubst ../installer/%.c,$(ASAN_OBJDIR)/inst_%.o,$(INST_SRCS))
 ASAN_MBEDTLS_OBJS := $(patsubst $(MBEDTLS_DIR)/%.c,$(ASAN_OBJDIR)/mbed_%.o,$(MBEDTLS_SRCS))
-ASAN_OBJS := $(ASAN_OBJDIR)/test_utils.o $(ASAN_ORBIS_OBJS) $(ASAN_INST_OBJS) $(ASAN_MBEDTLS_OBJS) $(ASAN_OBJDIR)/sqlite3.o
+ASAN_OBJS := $(ASAN_OBJDIR)/test_utils.o $(ASAN_ORBIS_OBJS) $(ASAN_MBEDTLS_OBJS) $(ASAN_OBJDIR)/sqlite3.o
 
 .PHONY: all clean test asan
 
 all: $(TARGET)
 
-test: $(TARGET)
+test: $(TARGET) test_icfg
 	./$(TARGET)
 
 $(TARGET): $(TEST_OBJS)
 	$(CC) $(CFLAGS) -o $@ $(TEST_OBJS) -lm
 
-asan: $(ASAN_OBJS)
+asan: $(ASAN_OBJS) test_icfg_asan
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) -o test_utils_asan $(ASAN_OBJS) -lm
 	./test_utils_asan
 
@@ -87,5 +87,19 @@ $(ASAN_OBJDIR)/inst_%.o: ../installer/%.c | $(ASAN_OBJDIR)
 $(ASAN_OBJDIR)/mbed_%.o: $(MBEDTLS_DIR)/%.c | $(ASAN_OBJDIR)
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) -Wno-unused-parameter -c -o $@ $<
 
+$(OBJDIR)/test_icfg.o: test_icfg.c | $(OBJDIR)
+	$(CC) $(CFLAGS) -I../installer -c -o $@ test_icfg.c
+
+$(ASAN_OBJDIR)/test_icfg.o: test_icfg.c | $(ASAN_OBJDIR)
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) -I../installer -c -o $@ test_icfg.c
+
+test_icfg: $(OBJDIR)/test_icfg.o $(INST_OBJS)
+	$(CC) $(CFLAGS) -o $@ $(OBJDIR)/test_icfg.o $(INST_OBJS) -lm
+	./test_icfg
+
+test_icfg_asan: $(ASAN_OBJDIR)/test_icfg.o $(ASAN_INST_OBJS)
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) -o $@ $(ASAN_OBJDIR)/test_icfg.o $(ASAN_INST_OBJS) -lm
+	./test_icfg_asan
+
 clean:
-	rm -rf $(TARGET) test_utils_asan $(OBJDIR) $(ASAN_OBJDIR) *.o
+	rm -rf $(TARGET) test_utils_asan test_icfg test_icfg_asan $(OBJDIR) $(ASAN_OBJDIR) *.o
