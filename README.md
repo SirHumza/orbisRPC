@@ -86,7 +86,7 @@ Details: [`docs/DAEMON.md`](docs/DAEMON.md) · full index at [`docs/`](docs/)
 
 ## Install (5 minutes)
 
-> ✅ **Released as 1.0.0.** Grab `orbisRPC-1.0.0.pkg` from
+> ✅ **Released as 1.0.0.** Grab `orbisRPC-setup.pkg` from
 > [releases](https://github.com/SirHumza/orbisRPC/releases/latest).
 
 1. Install the PKG on the PS4.
