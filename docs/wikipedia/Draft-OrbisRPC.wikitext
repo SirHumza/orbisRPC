@@ -1,0 +1,67 @@
+<!--
+  Wikipedia DRAFT for orbisRPC.
+
+  READ THIS FIRST:
+  - This is meant for the DRAFT namespace (Draft:OrbisRPC), NOT article
+    mainspace. New accounts cannot create mainspace articles; drafts go through
+    Articles for Creation (AfC).
+  - This WILL be declined right now. Wikipedia requires significant coverage in
+    independent, reliable, secondary sources (WP:GNG / WP:NSOFTWARE). orbisRPC
+    currently has none — no press, no third-party writeups. The only sources
+    below are the project's own repo/site, which are not independent.
+  - Do not remove the {{notability}} / {{COI}} tags to sneak it through. That
+    gets the page speedily deleted and your account warned.
+  - Use this to have the text ready the day independent coverage exists (a
+    GBAtemp/PSX-Place writeup, a YouTube review counted as a source is weak, a
+    news article is ideal). Then fill in <ref> citations and submit.
+  - You are the maintainer — disclose it ({{COI}} and a note on your user page).
+-->
+{{Draft article|orbisRPC|subject=software}}
+{{notability|date=October 2026}}
+{{COI|date=October 2026}}
+{{Infobox software
+| name               = orbisRPC
+| logo               =
+| screenshot         =
+| caption            =
+| author             = SirHumza, CyberMask367
+| developer          =
+| released           =
+| latest release version = 1.0.0
+| latest release date    =
+| programming language  = C
+| operating system   = [[PlayStation 4]] ([[FreeBSD]]-based Orbis OS)
+| platform           = [[PlayStation 4]]
+| genre              = [[Discord]] [[Rich Presence]] utility
+| license            =
+| website            = https://sirhumza.github.io/orbisRPC/
+}}
+
+'''orbisRPC''' is a free, [[open-source software|open-source]] [[Discord]] [[Rich Presence]] utility for the [[PlayStation 4]]. It runs as a payload on [[GoldHEN]]-jailbroken consoles and displays the game currently being played — title, cover art and a play timer — on a user's Discord profile.<ref name="repo">{{cite web |title=orbisRPC repository |url=https://github.com/SirHumza/orbisRPC |access-date=18 October 2026}}</ref> Unlike earlier PlayStation 4 rich-presence tools, which are PC-side scripts, orbisRPC runs entirely on the console and connects directly to the Discord gateway over [[Transport Layer Security|TLS]].<ref name="repo" />
+
+== Features ==
+
+orbisRPC detects the foreground application on the console and reports it to Discord. Coverage includes retail PlayStation 4 titles, homebrew software, and a curated list of PlayStation, PlayStation 2 and PlayStation Portable titles, with automatic cover art drawn from image databases.<ref name="repo" />
+
+The software supports [[PlayStation 4 system software|firmware]] versions 5.05 through 13.52, and is installed as a single package that can start automatically on boot.<ref name="repo" />
+
+== See also ==
+
+* [[GoldHEN]]
+* [[Rich Presence]]
+* [[PlayStation 4 homebrew]]
+
+== References ==
+
+{{reflist}}
+
+<!--
+  TODO before submitting:
+  1. Replace every {{cite web}} pointing at the repo/site with INDEPENDENT
+     coverage (news article, reputable blog, magazine). Self-sources do not
+     satisfy WP:GNG.
+  2. Remove {{notability}} once 2+ independent reliable sources exist.
+  3. Add [[Category:PlayStation 4 software]] and a short [[Category:Discord]]
+     style category only after the article is accepted.
+  4. Submit via AfC: add {{subst:submit}} at the top and save.
+-->

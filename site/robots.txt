@@ -29,4 +29,16 @@ Allow: /
 User-agent: CCBot
 Allow: /
 
+User-agent: Bingbot
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: DuckDuckBot
+Allow: /
+
+User-agent: Applebot
+Allow: /
+
 Sitemap: https://sirhumza.github.io/orbisRPC/sitemap.xml
