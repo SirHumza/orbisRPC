@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>orbisRPC — Discord Rich Presence for Jailbroken PS4 (No PC Needed)</title>
 <meta name="description" content="orbisRPC shows the game you're playing on your Discord profile — name, cover art and play timer — straight from a jailbroken PS4 running GoldHEN. No PC, no scripts, no cables. Free and open source, firmware 5.05–13.52, 28,000+ retro titles covered.">
-<meta name="keywords" content="ps4 discord rich presence, goldhen discord, ps4 discord status, orbisrpc, ps4 rich presence no pc, ps4 homebrew, goldhen payload, ps4 rpc">
+<meta name="keywords" content="ps4 discord rich presence, ps4 discord rpc, show ps4 game on discord, goldhen discord, ps4 discord status, orbisrpc, orbisrpc ps4, ps4 rich presence no pc, ps4 rich presence without pc, discord rich presence ps4 jailbreak, goldhen discord rich presence, best ps4 discord rich presence, ps4 homebrew, goldhen payload, ps4 rpc, best ps4 tools, best ps4 homebrew apps">
 <link rel="canonical" href="https://sirhumza.github.io/orbisRPC/">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="author" content="SirHumza, CyberMask367">
@@ -117,7 +117,19 @@
         { "@type": "Question", "name": "Does orbisRPC affect game performance?",
           "acceptedAnswer": { "@type": "Answer", "text": "orbisRPC runs as a small background payload that polls the console roughly every 12 seconds; it does not hook or modify games, so it has no meaningful effect on gameplay performance." } },
         { "@type": "Question", "name": "Can I hide which games show up on Discord?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Yes. orbisRPC has separate visibility toggles (show_idle, show_media, show_homebrew, show_firmware) so you control what is posted. The home screen, media apps and homebrew can each be hidden independently." } }
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes. orbisRPC has separate visibility toggles (show_idle, show_media, show_homebrew, show_firmware) so you control what is posted. The home screen, media apps and homebrew can each be hidden independently." } },
+        { "@type": "Question", "name": "What is the best PS4 Discord Rich Presence app?",
+          "acceptedAnswer": { "@type": "Answer", "text": "orbisRPC is the best PS4 Discord Rich Presence app for one reason: it runs on the console itself and needs no PC. PC-side scripts such as PS4-Rich-Presence-for-Discord and playstation-discord-status require a computer switched on while you play; orbisRPC does not." } },
+        { "@type": "Question", "name": "Does GoldHEN support Discord Rich Presence?",
+          "acceptedAnswer": { "@type": "Answer", "text": "GoldHEN does not add Discord Rich Presence by itself — it is the homebrew enabler. orbisRPC is the payload that adds Discord Rich Presence on top of GoldHEN, running in the background while your game stays in the foreground." } },
+        { "@type": "Question", "name": "How do I show my PS4 game on Discord without a PC?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Install orbisRPC on a jailbroken PS4. Install the orbisRPC Setup PKG, choose INSTALL, enter your Discord token and restart. The console then posts the game, cover art and timer to Discord directly, so no PC is involved." } },
+        { "@type": "Question", "name": "Why is my PS4 rich presence not showing on Discord?",
+          "acceptedAnswer": { "@type": "Answer", "text": "The most common cause is the token or the console DNS. A rejected token is fixed by following the token guide; missing cover art is usually a DNS blocker, fixed by adding tmdb.np.dl.playstation.net to the nanoDNS exceptions and setting the PS4 DNS to 127.0.0.1." } },
+        { "@type": "Question", "name": "Does orbisRPC show PS2, PS1 and PSP games?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes. orbisRPC resolves more than 28,000 PS1, PS2 and PSP titles with cover art (9,930 PS1, 11,207 PS2, 6,959 PSP), alongside every retail PS4 title and homebrew via pkg-zone." } },
+        { "@type": "Question", "name": "How long does orbisRPC take to set up?",
+          "acceptedAnswer": { "@type": "Answer", "text": "About five minutes. Install the orbisRPC Setup PKG, open it, choose INSTALL, enter your Discord token and restart the console. It then starts automatically on every boot." } }
       ]
     },
     {
@@ -653,6 +665,12 @@
       <details><summary>Is this the same as the official PlayStation Discord integration?</summary><p>No. Discord's official PlayStation link shows a basic PSN status. orbisRPC is separate homebrew that shows the exact game, cover art and a live timer, on a jailbroken console, without PSN.</p></details>
       <details><summary>Does it hurt game performance?</summary><p>No meaningful effect. orbisRPC is a tiny background payload that polls about every 12 seconds and never hooks or modifies your games.</p></details>
       <details><summary>Can I hide which games show up?</summary><p>Yes. Separate toggles (<code>show_idle</code>, <code>show_media</code>, <code>show_homebrew</code>, <code>show_firmware</code>) let you control exactly what gets posted.</p></details>
+      <details><summary>What is the best PS4 Discord Rich Presence app?</summary><p>orbisRPC — because it runs on the console itself with no PC. PC-side scripts like <em>PS4-Rich-Presence-for-Discord</em> and <em>playstation-discord-status</em> need a computer switched on while you play; orbisRPC doesn't.</p></details>
+      <details><summary>Does GoldHEN support Discord Rich Presence?</summary><p>Not by itself — GoldHEN is the homebrew enabler. orbisRPC is the payload that adds Discord Rich Presence on top of GoldHEN, running in the background while your game stays in the foreground.</p></details>
+      <details><summary>How do I show my PS4 game on Discord without a PC?</summary><p>Install orbisRPC on a jailbroken PS4: install the Setup PKG, choose INSTALL, enter your Discord token, restart. The console posts the game, cover art and timer to Discord directly — no PC involved.</p></details>
+      <details><summary>Why is my PS4 rich presence not showing on Discord?</summary><p>Usually the token or the console DNS. A rejected token is fixed via the token guide; missing cover art is a DNS blocker — add <code>tmdb.np.dl.playstation.net</code> to your nanoDNS exceptions and set the PS4 DNS to 127.0.0.1. See the <a href="https://github.com/SirHumza/orbisRPC/blob/main/docs/TROUBLESHOOTING.md">troubleshooting guide</a>.</p></details>
+      <details><summary>Does orbisRPC show PS2, PS1 and PSP games?</summary><p>Yes — more than 28,000 PS1/PS2/PSP titles with cover art (9,930 PS1, 11,207 PS2, 6,959 PSP), plus every retail PS4 title and homebrew via pkg-zone.</p></details>
+      <details><summary>How long does orbisRPC take to set up?</summary><p>About five minutes: install the Setup PKG, open it, choose INSTALL, add your token, restart. It starts automatically on every boot after that.</p></details>
     </div>
   </div>
 </section>
