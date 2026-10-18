@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/tables-none-brightgreen?style=flat-square" alt="no tables">
 </p>
 
-<p align="center">by <b>SirHumza & CyberMask367</b> · <a href="https://discord.gg/BWEyfcT7ZQ">discord.gg/BWEyfcT7ZQ</a></p>
+<p align="center">by <b>SirHumza & CyberMask367</b> · <a href="https://sirhumza.github.io/orbisRPC/">website</a> · <a href="https://discord.gg/BWEyfcT7ZQ">discord.gg/BWEyfcT7ZQ</a></p>
 
 <p align="center"><b>Discord Rich Presence for the jailbroken PS4 — every game, zero setup.</b><br>
 A background daemon that lives entirely on your console and posts what you're
@@ -44,8 +44,11 @@ PS4 operating system.</sub></p>
 - **Coverage:** every retail PS4 title (Sony TMDB), homebrew (pkg-zone), and
   **28,000+** PS1/PS2/PSP classics (curated list) — all with automatic cover art.
 - **Install:** one PKG, ~5 minutes, starts on boot via the GoldHEN auto-run queue.
-- **Source:** https://github.com/SirHumza/orbisRPC · **Community:**
+- **Source:** https://github.com/SirHumza/orbisRPC · **Website:**
+  https://sirhumza.github.io/orbisRPC/ · **Community:**
   https://discord.gg/BWEyfcT7ZQ
+- **More PS4 tools:** see the [best PS4 tools](https://sirhumza.github.io/orbisRPC/best-ps4-tools.html)
+  page for the rest of the essential homebrew.
 
 ---
 
