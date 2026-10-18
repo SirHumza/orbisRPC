@@ -31,7 +31,8 @@
       "@type": "SoftwareApplication",
       "@id": "https://sirhumza.github.io/orbisRPC/#software",
       "name": "orbisRPC",
-      "alternateName": "orbisRPC — Discord Rich Presence for PS4",
+      "alternateName": ["orbisRPC — Discord Rich Presence for PS4", "orbis rpc", "Orbis RPC", "ORBIS RPC PS4"],
+      "keywords": "orbisRPC, PS4 Discord Rich Presence, PS4 Discord status, GoldHEN Discord, PS4 rich presence no PC, PS4 Discord RPC, show PS4 game on Discord, PS4 homebrew Discord, Discord game status PS4, PS4 jailbreak Discord, PS4 play timer Discord, best PS4 tool",
       "applicationCategory": "UtilitiesApplication",
       "applicationSubCategory": "Discord Rich Presence",
       "operatingSystem": "PlayStation 4 (jailbroken, GoldHEN), firmware 5.05–13.52",
@@ -66,6 +67,16 @@
       "sameAs": ["https://discord.gg/BWEyfcT7ZQ"]
     },
     {
+      "@type": "WebSite",
+      "@id": "https://sirhumza.github.io/orbisRPC/#website",
+      "url": "https://sirhumza.github.io/orbisRPC/",
+      "name": "orbisRPC",
+      "alternateName": ["orbisRPC", "orbis rpc", "Orbis RPC", "ORBIS RPC"],
+      "description": "orbisRPC (also written orbis rpc) is a Discord Rich Presence tool for the jailbroken PlayStation 4 running GoldHEN. It shows your game, cover art and play timer on Discord with no PC. It is not related to Orbis Protocol, OrbisAPI or any blockchain project.",
+      "inLanguage": "en",
+      "publisher": { "@id": "https://sirhumza.github.io/orbisRPC/#org" }
+    },
+    {
       "@type": "FAQPage",
       "@id": "https://sirhumza.github.io/orbisRPC/#faq",
       "mainEntity": [
@@ -86,7 +97,23 @@
         { "@type": "Question", "name": "Is orbisRPC the same as Orbis Protocol or Orbis Cardano L2?",
           "acceptedAnswer": { "@type": "Answer", "text": "No. orbisRPC is a Discord Rich Presence daemon for the jailbroken PlayStation 4 console. It is a completely different project from Orbis Protocol (a Web3/Ceramic social protocol) and from the Orbis Layer 2 zk-rollup for Cardano. They only share the word Orbis. orbisRPC has nothing to do with blockchain, crypto or RPC nodes." } },
         { "@type": "Question", "name": "What does orbisRPC do on a PS4?",
-          "acceptedAnswer": { "@type": "Answer", "text": "orbisRPC shows the PlayStation 4 game you are currently playing on your Discord profile: the game name, its cover art, and an elapsed play timer. It detects the foreground game, resolves its name and art, and posts the activity to Discord from the console itself." } }
+          "acceptedAnswer": { "@type": "Answer", "text": "orbisRPC shows the PlayStation 4 game you are currently playing on your Discord profile: the game name, its cover art, and an elapsed play timer. It detects the foreground game, resolves its name and art, and posts the activity to Discord from the console itself." } },
+        { "@type": "Question", "name": "How do I show my PS4 game on Discord?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Install orbisRPC on your jailbroken PS4: install the orbisRPC Setup PKG, open it, choose INSTALL, enter your Discord token and restart. From then on the game you launch is shown on your Discord profile automatically, with cover art and a timer." } },
+        { "@type": "Question", "name": "Is there a PS4 Discord Rich Presence that does not need a PC?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes — orbisRPC. It is the PS4 Discord Rich Presence tool that runs entirely on the console. Other tools such as zorua98741/PS4-Rich-Presence-for-Discord and voidel/playstation-discord-status are PC scripts that need a computer running while you play. orbisRPC needs no PC." } },
+        { "@type": "Question", "name": "Does orbisRPC work on a normal, non-jailbroken PS4?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. orbisRPC requires a jailbroken PS4 running GoldHEN, because it is installed as a payload. A stock console cannot run it." } },
+        { "@type": "Question", "name": "Does orbisRPC require PSN or an internet connection?",
+          "acceptedAnswer": { "@type": "Answer", "text": "It does not use PSN or a PlayStation account. It needs internet only so the console can reach Discord and look up game metadata; nothing is routed through a PSN login." } },
+        { "@type": "Question", "name": "Does orbisRPC work on PS5?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. orbisRPC is built for the PlayStation 4 (GoldHEN). It targets PS4 firmware 5.05 through 13.52." } },
+        { "@type": "Question", "name": "Is orbisRPC the same as the official PlayStation Discord integration?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. Discord's official PlayStation integration links a PSN account and shows a basic PS4/PS5 status. orbisRPC is a separate homebrew tool that shows the exact game, its cover art and a play timer, and works on a jailbroken console without PSN." } },
+        { "@type": "Question", "name": "Does orbisRPC affect game performance?",
+          "acceptedAnswer": { "@type": "Answer", "text": "orbisRPC runs as a small background payload that polls the console roughly every 12 seconds; it does not hook or modify games, so it has no meaningful effect on gameplay performance." } },
+        { "@type": "Question", "name": "Can I hide which games show up on Discord?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes. orbisRPC has separate visibility toggles (show_idle, show_media, show_homebrew, show_firmware) so you control what is posted. The home screen, media apps and homebrew can each be hidden independently." } }
       ]
     },
     {
@@ -613,6 +640,14 @@
       <details><summary>Will it get my Discord account banned?</summary><p>orbisRPC uses a Discord user session token, and token-based presence is against Discord's Terms of Service. This is standard for headless presence tools — every alternative in this category makes the same trade-off. The risk is yours to weigh.</p></details>
       <details><summary>Is it free and open source?</summary><p>Yes — free, and the full source is on <a href="https://github.com/SirHumza/orbisRPC">GitHub</a>.</p></details>
       <details><summary>What if cover art doesn't show?</summary><p>That's almost always a DNS blocker on the console. Add <code>tmdb.np.dl.playstation.net</code> to your nanoDNS exceptions and set the PS4 DNS to 127.0.0.1. The <a href="https://github.com/SirHumza/orbisRPC/blob/main/docs/TROUBLESHOOTING.md">troubleshooting guide</a> covers it step by step.</p></details>
+      <details><summary>How do I show my PS4 game on Discord?</summary><p>Install orbisRPC on your jailbroken PS4 — install the orbisRPC Setup PKG, open it, choose INSTALL, enter your Discord token, restart. After that, whatever game you launch appears on your Discord profile automatically, with cover art and a play timer.</p></details>
+      <details><summary>Is there a PS4 Discord Rich Presence that doesn't need a PC?</summary><p>Yes — orbisRPC. It runs entirely on the console. Other tools like <em>PS4-Rich-Presence-for-Discord</em> and <em>playstation-discord-status</em> are PC scripts that need a computer running while you play. orbisRPC needs no PC.</p></details>
+      <details><summary>Does it work on a normal, non-jailbroken PS4?</summary><p>No. orbisRPC requires a jailbroken PS4 running GoldHEN, because it installs as a payload. A stock console can't run it.</p></details>
+      <details><summary>Do I need PSN or an internet connection?</summary><p>No PlayStation account or PSN login is used. It just needs internet so the console can reach Discord and look up game metadata.</p></details>
+      <details><summary>Does it work on PS5?</summary><p>No — orbisRPC is built for the PlayStation 4 (GoldHEN), firmware 5.05 through 13.52.</p></details>
+      <details><summary>Is this the same as the official PlayStation Discord integration?</summary><p>No. Discord's official PlayStation link shows a basic PSN status. orbisRPC is separate homebrew that shows the exact game, cover art and a live timer, on a jailbroken console, without PSN.</p></details>
+      <details><summary>Does it hurt game performance?</summary><p>No meaningful effect. orbisRPC is a tiny background payload that polls about every 12 seconds and never hooks or modifies your games.</p></details>
+      <details><summary>Can I hide which games show up?</summary><p>Yes. Separate toggles (<code>show_idle</code>, <code>show_media</code>, <code>show_homebrew</code>, <code>show_firmware</code>) let you control exactly what gets posted.</p></details>
     </div>
   </div>
 </section>

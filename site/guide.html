@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How to Show Your PS4 Game on Discord (No PC) — orbisRPC Guide</title>
+<meta name="description" content="Step-by-step guide to showing the PS4 game you're playing on Discord with orbisRPC — no PC, no scripts. Works on jailbroken PS4 with GoldHEN, firmware 5.05–13.52, with cover art and a play timer.">
+<meta name="keywords" content="how to show ps4 game on discord, ps4 discord rich presence, ps4 game status discord, show what youre playing ps4 discord, goldhen discord, ps4 rpc no pc">
+<link rel="canonical" href="https://sirhumza.github.io/orbisRPC/guide.html">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta property="og:type" content="article">
+<meta property="og:title" content="How to show your PS4 game on Discord (no PC) — orbisRPC">
+<meta property="og:description" content="A 5-minute guide to putting your PS4 game, cover art and play timer on Discord — straight from the console.">
+<meta property="og:image" content="https://raw.githubusercontent.com/SirHumza/orbisRPC/main/config/images/icons/logo.png">
+<meta property="og:url" content="https://sirhumza.github.io/orbisRPC/guide.html">
+<meta name="theme-color" content="#003791">
+<link rel="icon" href="https://raw.githubusercontent.com/SirHumza/orbisRPC/main/config/images/icons/logo.png">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "HowTo",
+      "@id": "https://sirhumza.github.io/orbisRPC/guide.html#howto",
+      "name": "How to show your PS4 game on Discord without a PC",
+      "description": "Install orbisRPC on a jailbroken PS4 to display the current game, cover art and play timer on Discord, with no PC or companion script.",
+      "totalTime": "PT5M",
+      "supply": [{ "@type": "HowToSupply", "name": "Jailbroken PS4 with GoldHEN" }, { "@type": "HowToSupply", "name": "Discord user session token" }],
+      "tool": [{ "@type": "HowToTool", "name": "orbisRPC Setup PKG" }],
+      "step": [
+        { "@type": "HowToStep", "position": 1, "name": "Install the PKG", "text": "Install the orbisRPC Setup PKG on the PS4 and open it from the home screen." },
+        { "@type": "HowToStep", "position": 2, "name": "Choose INSTALL", "text": "Pick INSTALL / UPDATE. It copies the payload to /data/payloads/ and writes your config." },
+        { "@type": "HowToStep", "position": 3, "name": "Enter your Discord token", "text": "Enter your Discord user session token when asked. Follow the token guide if unsure." },
+        { "@type": "HowToStep", "position": 4, "name": "Enable auto-run", "text": "Let setup add orbisRPC to the GoldHEN auto-run queue so it starts on every boot." },
+        { "@type": "HowToStep", "position": 5, "name": "Launch a game", "text": "Restart the console and open a game. It now appears on your Discord profile with cover art and a timer." }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://sirhumza.github.io/orbisRPC/guide.html#faq",
+      "mainEntity": [
+        { "@type": "Question", "name": "How do I show what I'm playing on PS4 on Discord?",
+          "acceptedAnswer": { "@type": "Answer", "text": "With a jailbroken PS4, install orbisRPC. It is a background payload that posts the current game, cover art and play timer to Discord automatically, with no PC involved." } },
+        { "@type": "Question", "name": "Why doesn't Discord show my PS4 game?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Discord's official PlayStation integration only shows a basic PSN status and can be overridden by local activity. To show the exact game with cover art and a timer from a jailbroken PS4, use orbisRPC." } },
+        { "@type": "Question", "name": "Do I need a PC for PS4 Discord Rich Presence?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Not with orbisRPC. It is the only PS4 Discord Rich Presence tool that runs entirely on the console. Older tools such as PS4-Rich-Presence-for-Discord require a PC script running while you play." } }
+      ]
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "orbisRPC", "item": "https://sirhumza.github.io/orbisRPC/" },
+        { "@type": "ListItem", "position": 2, "name": "Guide", "item": "https://sirhumza.github.io/orbisRPC/guide.html" }
+      ]
+    }
+  ]
+}
+</script>
+
+<style>
+  :root{--ps-blue:#003791;--dc:#5865F2;--dc-bright:#7c86ff;--bg:#05070f;--card:#0e1425;--line:#1e2942;--ink:#eaf0ff;--muted:#93a1c4;--ok:#4ade80;--radius:16px;--maxw:820px}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:#9db4ff}
+  code{font-family:ui-monospace,Menlo,monospace;font-size:.88em;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:6px;padding:1px 6px;color:#c7d3f5}
+  .glow{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+  .glow i{position:absolute;border-radius:50%;filter:blur(90px);opacity:.3;width:480px;height:480px}
+  .glow i.a{background:var(--ps-blue);top:-160px;left:-100px}
+  .glow i.b{background:var(--dc);top:80px;right:-140px}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 22px;position:relative;z-index:1}
+  header{border-bottom:1px solid var(--line);padding:16px 0;position:sticky;top:0;background:rgba(5,7,15,.75);backdrop-filter:blur(12px);z-index:5}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:800;color:var(--ink)}
+  .brand img{width:30px;height:30px;border-radius:8px}
+  .brand a{margin-left:auto;color:var(--muted);font-weight:600;font-size:14px}
+  main{padding:56px 0 40px}
+  .eyebrow{display:inline-block;font-size:12px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:var(--dc-bright);border:1px solid rgba(88,101,242,.35);background:rgba(88,101,242,.1);padding:6px 12px;border-radius:999px}
+  h1{font-size:clamp(28px,5vw,44px);letter-spacing:-1.2px;line-height:1.1;margin:20px 0 0;font-weight:850}
+  .lead{color:var(--muted);font-size:18px;margin-top:16px}
+  h2{font-size:24px;letter-spacing:-.5px;margin:44px 0 14px;font-weight:800}
+  p{color:#cdd6ee;margin-top:12px}
+  ol,ul{margin:16px 0 0 22px;color:#cdd6ee}
+  li{margin-bottom:12px}
+  li b{color:#fff}
+  .cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:26px}
+  .btn{display:inline-flex;align-items:center;gap:8px;font-weight:700;border-radius:11px;padding:12px 18px;font-size:14.5px;border:1px solid transparent}
+  .btn.p{background:linear-gradient(180deg,var(--dc-bright),var(--dc));color:#fff;box-shadow:0 8px 26px rgba(88,101,242,.4)}
+  .btn.g{background:rgba(255,255,255,.04);border-color:var(--line);color:var(--ink)}
+  table{width:100%;border-collapse:collapse;margin-top:18px;font-size:15px;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  th,td{padding:13px 16px;text-align:left;border-bottom:1px solid var(--line)}
+  thead th{background:#0a1020;color:var(--muted);font-size:12.5px;text-transform:uppercase;letter-spacing:.5px}
+  tr:last-child td{border-bottom:0}
+  .faq{margin-top:24px}
+  details{background:var(--card);border:1px solid var(--line);border-radius:13px;margin-bottom:10px}
+  summary{cursor:pointer;padding:16px 18px;font-weight:700;list-style:none;display:flex;justify-content:space-between;gap:12px}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"+";color:var(--dc-bright);font-size:20px}
+  details[open] summary::after{content:"–"}
+  details p{padding:0 18px 16px;color:var(--muted);margin-top:0}
+  footer{border-top:1px solid var(--line);margin-top:50px;padding:26px 0;color:#6f7ea6;font-size:13.5px;text-align:center}
+  footer a{color:var(--muted);margin:0 8px}
+</style>
+</head>
+<body>
+<div class="glow" aria-hidden="true"><i class="a"></i><i class="b"></i></div>
+<header><div class="wrap brand">
+  <img src="https://raw.githubusercontent.com/SirHumza/orbisRPC/main/config/images/icons/logo.png" alt="orbisRPC">
+  <b>orbisRPC</b>
+  <a href="/orbisRPC/">← Back to overview</a>
+</div></header>
+
+<main class="wrap">
+  <span class="eyebrow">PS4 → Discord guide</span>
+  <h1>How to show your PS4 game on Discord — with no PC</h1>
+  <p class="lead">orbisRPC puts the game you're playing, its cover art and an elapsed play timer on your Discord profile, posted straight from a jailbroken PS4. There is no PC, script or cable in the loop.</p>
+
+  <div class="cta">
+    <a class="btn p" href="https://github.com/SirHumza/orbisRPC/releases/latest">Download orbisRPC</a>
+    <a class="btn g" href="https://github.com/SirHumza/orbisRPC">View on GitHub</a>
+  </div>
+
+  <h2>What you need</h2>
+  <ul>
+    <li>A <b>jailbroken PS4</b> on firmware 5.05–13.52 with <b>GoldHEN</b> running</li>
+    <li>A payload loader (elfldr on port 9021, or GoldHEN BinLoader on 9090) — or just the setup PKG</li>
+    <li>A <b>Discord account</b> and your user session token</li>
+    <li>Internet on the PS4 that can reach Discord</li>
+  </ul>
+
+  <h2>Install in five minutes</h2>
+  <ol>
+    <li><b>Install the PKG.</b> Put <em>orbisRPC Setup</em> on the PS4 and open it from the home screen.</li>
+    <li><b>Choose INSTALL / UPDATE.</b> It copies the payload into <code>/data/payloads/</code> and writes your config.</li>
+    <li><b>Enter your Discord token</b> when asked. (This is the #1 setup issue — the token guide walks through it.)</li>
+    <li><b>Enable auto-run.</b> Let it add orbisRPC to the GoldHEN auto-run queue so it starts on every boot.</li>
+    <li><b>Restart and play.</b> Launch a game and watch your Discord profile update with the game, cover art and timer.</li>
+  </ol>
+
+  <h2>What Discord will show</h2>
+  <table>
+    <thead><tr><th>Where you are</th><th>Discord shows</th></tr></thead>
+    <tbody>
+      <tr><td>In a game</td><td>Playing &lt;Game&gt; + cover + elapsed timer</td></tr>
+      <tr><td>Home screen</td><td>PlayStation 4 + logo</td></tr>
+      <tr><td>Settings / Browser</td><td>In Settings / Using Web Browser</td></tr>
+      <tr><td>Netflix &amp; media apps</td><td>Watching &lt;App&gt;</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Why not the official integration or a PC script?</h2>
+  <p>Discord's official PlayStation link shows a basic PSN status you can't control, and it gets overridden by local activity. The older community tools (<a href="https://github.com/zorua98741/PS4-Rich-Presence-for-Discord">PS4-Rich-Presence-for-Discord</a>, <a href="https://github.com/voidel/playstation-discord-status">playstation-discord-status</a>) are PC scripts that need a computer running while you play. orbisRPC is the one that runs on the console and needs no PC.</p>
+
+  <h2>Common questions</h2>
+  <div class="faq">
+    <details open><summary>How do I show what I'm playing on PS4 on Discord?</summary><p>Install orbisRPC on a jailbroken PS4. It posts the current game, cover art and play timer to Discord automatically — no PC needed.</p></details>
+    <details><summary>Why doesn't Discord show my PS4 game?</summary><p>The official PlayStation integration only shows a basic PSN status. For the exact game with cover art and a timer from a jailbroken PS4, use orbisRPC.</p></details>
+    <details><summary>Do I need a PC for PS4 Discord Rich Presence?</summary><p>Not with orbisRPC. It runs entirely on the console. Other tools require a PC script running while you play.</p></details>
+    <details><summary>Does it work on a non-jailbroken PS4?</summary><p>No — orbisRPC is a payload and requires GoldHEN.</p></details>
+  </div>
+
+  <div class="cta" style="margin-top:34px">
+    <a class="btn p" href="https://github.com/SirHumza/orbisRPC/releases/latest">Download orbisRPC 1.0.0</a>
+    <a class="btn g" href="https://discord.gg/BWEyfcT7ZQ">Join the Discord</a>
+  </div>
+</main>
+
+<footer>
+  orbisRPC — Discord Rich Presence for PS4 · by SirHumza &amp; CyberMask367<br>
+  <a href="/orbisRPC/">Overview</a> · <a href="https://github.com/SirHumza/orbisRPC">GitHub</a> · <a href="https://discord.gg/BWEyfcT7ZQ">Discord</a>
+</footer>
+</body>
+</html>

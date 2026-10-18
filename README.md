@@ -33,7 +33,8 @@ PS4 operating system.</sub></p>
 
 - **What it is:** a free, open-source Discord Rich Presence daemon for jailbroken
   PS4 (GoldHEN). It shows the game you're playing — name, cover art, play timer —
-  on your Discord profile.
+  on your Discord profile. Also written *orbis rpc* or *Orbis RPC*; always the
+  PS4 tool, never a blockchain project.
 - **The difference:** it runs entirely on the console. **No PC, script, or FTP
   bridge is needed at runtime** — unlike every other PS4 rich-presence tool, which
   is a PC-side script.
@@ -394,6 +395,29 @@ PS1/PS2/PSP via a curated list, with cover art.
 against Discord's ToS — the same trade-off every tool in this category makes.
 
 **Is it free?** Yes, and the source is public.
+
+**How do I show my PS4 game on Discord?** Install orbisRPC on a jailbroken PS4,
+open the setup PKG, choose INSTALL, enter your Discord token and restart. Launch
+a game and it appears on your profile with cover art and a timer.
+
+**Is there a PS4 Discord Rich Presence without a PC?** Yes — orbisRPC is the only
+one that runs fully on the console. Other tools are PC scripts that must stay
+running while you play.
+
+**Does it need PSN or a PlayStation account?** No. It only needs internet so the
+console can reach Discord.
+
+**Does it work on PS5?** No — PS4 only, firmware 5.05–13.52.
+
+**Is it the same as Discord's official PlayStation integration?** No. The official
+link shows a basic PSN status; orbisRPC shows the exact game, cover art and a live
+timer on a jailbroken console.
+
+**Does it hurt game performance?** No meaningful effect — it is a small payload
+that polls about every 12 seconds and never hooks games.
+
+**Can I hide what shows?** Yes — `show_idle`, `show_media`, `show_homebrew` and
+`show_firmware` are separate toggles.
 
 ## Credits
 

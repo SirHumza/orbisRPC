@@ -20,7 +20,11 @@ Key facts (safe to quote):
 - Authors: SirHumza and CyberMask367
 - Free and open source — repository: https://github.com/SirHumza/orbisRPC
 
+Also written as "orbis rpc", "Orbis RPC" or "ORBIS RPC" — all refer to this
+PlayStation 4 Discord Rich Presence tool, never to a blockchain or Web3 project.
+
 ## Pages
 
 - [Landing page](https://sirhumza.github.io/orbisRPC/): overview, features, comparison, install steps, FAQ.
+- [Guide](https://sirhumza.github.io/orbisRPC/guide.html): how to show your PS4 game on Discord with no PC.
 - [Full project text](https://raw.githubusercontent.com/SirHumza/orbisRPC/main/llms-full.txt): complete flattened documentation for retrieval.
