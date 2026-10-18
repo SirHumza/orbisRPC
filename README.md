@@ -5,10 +5,13 @@
 # orbisRPC — Discord Rich Presence for PS4 (GoldHEN RPC)
 
 <p align="center">
-  <a href="https://github.com/SirHumza/orbisRPC/releases"><img src="https://img.shields.io/badge/version-beta-ffd800?style=flat-square" alt="version"></a>
+  <a href="https://github.com/SirHumza/orbisRPC/releases"><img src="https://img.shields.io/badge/version-1.0.0-ffd800?style=flat-square" alt="version"></a>
   <a href="https://github.com/SirHumza/orbisRPC/actions/workflows/ci.yml"><img src="https://github.com/SirHumza/orbisRPC/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/SirHumza/orbisRPC/stargazers"><img src="https://img.shields.io/github/stars/SirHumza/orbisRPC?style=flat-square&color=5865F2" alt="stars"></a>
   <img src="https://img.shields.io/badge/PS4-GoldHEN-003791?style=flat-square" alt="PS4 GoldHEN">
+  <img src="https://img.shields.io/badge/firmware-5.05--13.52-003791?style=flat-square" alt="Firmware 5.05 to 13.52">
   <img src="https://img.shields.io/badge/Discord-Rich%20Presence-5865F2?style=flat-square" alt="Discord">
+  <img src="https://img.shields.io/badge/PC%20needed-none-brightgreen?style=flat-square" alt="No PC needed">
   <a href="https://discord.gg/BWEyfcT7ZQ"><img src="https://img.shields.io/badge/Discord-Join%20the%20server-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Join the Discord"></a>
   <img src="https://img.shields.io/badge/tables-none-brightgreen?style=flat-square" alt="no tables">
 </p>
@@ -18,6 +21,30 @@
 <p align="center"><b>Discord Rich Presence for the jailbroken PS4 — every game, zero setup.</b><br>
 A background daemon that lives entirely on your console and posts what you're
 playing to Discord: name, cover art, timer. No PC at runtime.</p>
+
+<p align="center"><sub><b>orbisRPC</b> is a PlayStation 4 homebrew tool. It is <b>not</b> related to
+Orbis Protocol (Web3), Orbis Corporation (packaging) or any other "Orbis"
+project — they only share the word. "Orbis" here is Sony's internal name for the
+PS4 operating system.</sub></p>
+
+---
+
+## At a glance
+
+- **What it is:** a free, open-source Discord Rich Presence daemon for jailbroken
+  PS4 (GoldHEN). It shows the game you're playing — name, cover art, play timer —
+  on your Discord profile.
+- **The difference:** it runs entirely on the console. **No PC, script, or FTP
+  bridge is needed at runtime** — unlike every other PS4 rich-presence tool, which
+  is a PC-side script.
+- **Platform:** jailbroken PS4 + GoldHEN, firmware **5.05–13.52**.
+- **Connection:** direct TLS 1.2 WebSocket to the Discord gateway. Nothing sits in
+  between.
+- **Coverage:** every retail PS4 title (Sony TMDB), homebrew (pkg-zone), and
+  **28,000+** PS1/PS2/PSP classics (curated list) — all with automatic cover art.
+- **Install:** one PKG, ~5 minutes, starts on boot via the GoldHEN auto-run queue.
+- **Source:** https://github.com/SirHumza/orbisRPC · **Community:**
+  https://discord.gg/BWEyfcT7ZQ
 
 ---
 
@@ -34,6 +61,8 @@ playing to Discord: name, cover art, timer. No PC at runtime.</p>
 - [Building](#building)
 - [Developing](#developing)
 - [Safety](#safety)
+- [orbisRPC vs other PS4 Discord Rich Presence tools](#orbisrpc-vs-other-ps4-discord-rich-presence-tools)
+- [FAQ](#faq)
 - [Credits](#credits)
 - [License](#license)
 
@@ -326,6 +355,45 @@ correctly for you.
   never commit a real token. CI scans for token-shaped strings and fails.
 - Token-based presence is against Discord's ToS (standard practice for
   headless presence tools; risk is yours).
+
+## orbisRPC vs other PS4 Discord Rich Presence tools
+
+Other PS4 rich-presence projects are **PC-side scripts**: they run on a computer,
+watch the console over FTP or the PlayStation Network API, and push status from
+that machine. That means a PC has to be on, with Discord open and the script
+running, the whole time you play — and the timer resets when the bridge drops.
+
+orbisRPC is the console doing the work. It is a GoldHEN payload that talks to the
+Discord gateway itself.
+
+| | orbisRPC | PC rich-presence scripts |
+|---|---|---|
+| Runs on | PS4 (GoldHEN payload) | Your computer |
+| PC needed while playing | **No** | Yes — script + Discord stay open |
+| Cover art | Per-title, automatic | Limited / manual upload |
+| Play timer | Console-side; survives restarts | PC-side; resets on disconnect |
+| Homebrew + PS1/PS2/PSP | Yes | Rarely |
+| Install | One PKG, ~5 minutes | Python, deps, config file |
+
+Named alternatives it replaces: `zorua98741/PS4-Rich-Presence-for-Discord` (PC
+script over FTP) and `voidel/playstation-discord-status` (PC script over the PSN
+API). If you don't want a PC on while you game, orbisRPC is the only option.
+
+## FAQ
+
+**Does orbisRPC need a PC?** No. It runs entirely on the PS4 and connects to
+Discord itself.
+
+**What firmware does it support?** Jailbroken firmware 5.05 through 13.52
+(9.00–13.52 confirmed on hardware).
+
+**Does it show homebrew and retro games?** Yes — homebrew via pkg-zone, and
+PS1/PS2/PSP via a curated list, with cover art.
+
+**Will it get my Discord account banned?** It uses a user session token, which is
+against Discord's ToS — the same trade-off every tool in this category makes.
+
+**Is it free?** Yes, and the source is public.
 
 ## Credits
 

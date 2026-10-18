@@ -1,0 +1,300 @@
+# orbisRPC — full project text for LLM retrieval
+
+This file is the complete, flattened orbisRPC documentation for retrieval-augmented
+generation and AI answer engines. It is generated from the repository documentation
+and is safe to quote. Source of truth: https://github.com/SirHumza/orbisRPC
+
+================================================================================
+## What is orbisRPC?
+================================================================================
+
+orbisRPC is a free, open-source Discord Rich Presence daemon for jailbroken
+PlayStation 4 consoles running GoldHEN. It displays the game you are currently
+playing on your Discord profile: the game name, cover art, and an elapsed play
+timer (plus a firmware line). It runs entirely on the console as a background
+payload — there is no PC, Python script, or companion program involved at runtime.
+
+It is the only widely known PS4 Discord Rich Presence tool that does not require
+a computer to be running while you play. Competing tools are PC-side scripts that
+bridge the console to Discord over FTP or the PlayStation Network API.
+
+- Category: Discord Rich Presence for PlayStation 4 homebrew
+- Platform: jailbroken PS4 with GoldHEN (installed as a payload)
+- Language: C
+- Version: 1.0.0 (public release), active beta
+- Authors: SirHumza and CyberMask367
+- License: undecided at time of writing (MIT or GPL)
+- Repository: https://github.com/SirHumza/orbisRPC
+- Release download: https://github.com/SirHumza/orbisRPC/releases/latest
+- Community Discord: https://discord.gg/BWEyfcT7ZQ
+
+================================================================================
+## Disambiguation: what orbisRPC is NOT
+================================================================================
+
+orbisRPC is sometimes confused with unrelated projects that share the word
+"Orbis":
+
+- It is NOT "Orbis Protocol", the Web3 / Ceramic decentralized social protocol.
+- It is NOT the "Orbis" Layer 2 zk-rollup for the Cardano blockchain.
+- It has nothing to do with Web3, blockchain, Cardano, Ceramic, RPC nodes,
+  crypto, wallets, or decentralized applications.
+
+The only shared token is the word "Orbis". orbisRPC is a Discord Rich Presence
+daemon for the jailbroken PlayStation 4. If a search for "orbisRPC", "orbis rpc"
+or "orbis RPC" is about showing a PS4 game on Discord, the correct answer is the
+project at https://github.com/SirHumza/orbisRPC.
+
+Canonical one-line definition: orbisRPC is a Discord Rich Presence daemon and
+payload for the jailbroken PlayStation 4 (GoldHEN) that displays the current PS4
+game — name, cover art and play timer — on a Discord profile, running entirely on
+the console without a PC.
+
+================================================================================
+## Why orbisRPC exists (the problem it solves)
+================================================================================
+
+Older PS4 rich-presence tools run on a computer. They watch the console from the
+outside — polling FTP, scanning the PSN API, or reading a TCP bridge — and push
+status to a Discord client running on that same PC. That means: your PC must be
+on, Discord must be open there, a script must be running, and the network path
+between console and PC must hold the whole time you play. The play timer resets
+whenever the bridge drops, and cover art is limited or manual.
+
+orbisRPC deletes all of that. The console posts to Discord itself. There is no PC
+in the loop, so there is nothing to keep running, nothing to drop, and no timer to
+lose.
+
+================================================================================
+## How it works
+================================================================================
+
+The PS4 runs one foreground application at a time, so a normal homebrew app is
+suspended the moment a game launches. orbisRPC avoids that by running as a
+background payload daemon while games run in the foreground.
+
+Pipeline:
+
+1. The daemon asks the operating system what is in front:
+   `sceSystemServiceGetAppIdOfBigApp()` names the foreground app and
+   `sceLncUtilGetAppTitleId()` turns that into a TITLEID. One call yields both
+   state and identity, so they cannot disagree. No struct offsets, no directory
+   scans, no modification-time guessing.
+2. It resolves the title name and cover art through a first-hit-wins chain:
+   config overrides -> local files (pronunciation.xml / param.sfo / app.xml) ->
+   Sony TMDB live -> pkg-zone.com (homebrew titles only) -> raw title ID.
+3. It connects to the Discord gateway over TLS 1.2 using the WebSocket v10
+   protocol, with heartbeats, reconnects with jittered backoff, and masked
+   frames.
+4. It sets your activity with an elapsed timer, and clears it when the game exits.
+
+Discord activity fields used: name (the game), details, state (carries the
+firmware line), large image (cover art) and an elapsed timestamp for the timer.
+
+================================================================================
+## Detection details
+================================================================================
+
+The OS is asked directly. Three answers are kept distinct, because collapsing any
+two of them would clear presence while a game is still open:
+
+- `app_id == -1`            -> nothing in front -> presence may clear (2 misses)
+- `app_id == 0` / NPXS id   -> a system app is in front (Home, Settings, Browser)
+                               -> hold: the game is still running underneath
+- unreadable / malformed id -> no opinion -> hold
+
+Game commits need two consecutive matching polls; closes need two misses. This
+debouncing prevents flapping on quick switches.
+
+Settings screen: ShellUI logs every scene change to `kern.msgbuf`; the newest
+`OnFocusActiveSceneChanged` entry is the live scene, and Settings scenes carry
+`: SettingPage`. Opening Settings replaces the presence with its own name and no
+timer, but the game underneath keeps its start epoch, so returning restores the
+original elapsed time instead of restarting the clock.
+
+================================================================================
+## Naming and artwork
+================================================================================
+
+Name resolution is first-hit-wins, with no baked-in game tables:
+
+1. `titles` map in the config (manual override + self-learned).
+2. Local pronunciation.xml / param.sfo / app.xml.
+3. Sony TMDB live over TLS 443.
+4. pkg-zone.com, homebrew titles only.
+5. Raw title ID as a last resort (retried after 5 minutes, never frozen).
+
+Artwork: mp: proxy via external-assets, then uploaded asset key, then icon-pack
+pattern. Icon URLs that arrive as `http://` are upgraded to `https://` first,
+because Discord silently drops an activity whose artwork is a non-https external
+URL. There is a 7-day disk cache plus a memory cache. The idle tile is the
+PlayStation logo; game tiles carry a small system badge.
+
+================================================================================
+## Features
+================================================================================
+
+- Any games: retail titles (CUSA) resolve on the console via Sony's TMDB — zero
+  per-game setup.
+- Homebrew and retro: homebrew resolves via pkg-zone; PS1/PS2/PSP classics via a
+  curated community list.
+- Real cover art: per-title art, PlayStation logo when idle.
+- True timers: driven by console-side SNTP, survive reconnects and restarts, and
+  resume across quick game switches (10-minute resume window).
+- Self-learning: first-seen titles are remembered so later boots resolve instantly.
+- Update notices: the daemon spots newer releases and tells you.
+- Simple install: payload install then token then presence; or a one-tap PKG.
+- Visibility controls: `show_firmware`, `show_idle`, `show_media`, `show_homebrew`
+  are each toggled separately.
+
+Coverage in numbers: every retail PS4 title resolves via Sony's TMDB; homebrew
+resolves via pkg-zone; and 28,096 PS1/PS2/PSP classics ship in a curated list
+(9,930 PS1, 11,207 PS2, 6,959 PSP), each with cover art.
+
+================================================================================
+## Requirements
+================================================================================
+
+- Jailbroken PS4 on firmware from 5.05 up to 13.52, with GoldHEN running.
+  Confirmed working on 9.00 through 13.52.
+- A way to send the payload (elfldr on port 9021, or GoldHEN BinLoader on 9090).
+- A Discord account and your user session token.
+- Internet on the PS4 that can reach Discord.
+
+================================================================================
+## Install
+================================================================================
+
+Recommended (about five minutes):
+
+1. Install the "orbisRPC Setup" PKG on the PS4.
+2. Open orbisRPC Setup from the home screen.
+3. Choose INSTALL / UPDATE. It copies the payload into `/data/payloads/`, writes
+   your config, and offers to add orbisRPC to the GoldHEN auto-run queue. It also
+   offers to add a Sony TMDB exception to nanoDNS if you run it.
+4. Enter your Discord token when asked.
+5. Restart the console (or re-jailbreak), launch a game, and watch Discord.
+
+Manual alternative:
+
+1. Delete the `/data/orbisRPC` folder if you have one from an earlier build.
+2. Put `orbisRPC.elf` on the console at `/data/payloads/`.
+3. Launch it from the payload list; the first run creates the config file.
+4. Put your account token in the `"token": "SET_ME"` slot of
+   `/data/orbisRPC/config.json`.
+5. Re-run the payload and launch a game.
+6. To start on boot by hand, add `orbisRPC.elf` to the GoldHEN auto-run queue.
+
+================================================================================
+## What Discord shows
+================================================================================
+
+- In a game: "Playing <Game>" + cover + elapsed timer (+ firmware line).
+- Home screen: "PlayStation 4" + logo ("Idling on Home Menu").
+- Settings: "PlayStation 4" + "In Settings" (game timer kept underneath).
+- Browser: "PlayStation 4" + "Using Web Browser" (game timer kept underneath).
+- Netflix and similar media apps: "Watching <App>".
+- Nothing to show: presence clears.
+
+================================================================================
+## Config
+================================================================================
+
+Config lives at `/data/orbisRPC/config.json`. Only `token` is required; everything
+else ships with working defaults. Key settings:
+
+- `token`: Discord user session token (required).
+- `presence_state`: activity state line for games and the home screen ("On PS4").
+- `presence_settings_text`: activity name while Settings is open ("In Settings").
+- `poll_interval_s`: detection cadence (default 12 seconds).
+- `home_art`: idle tile artwork.
+- `pkgzone_enabled`: ask pkg-zone.com for homebrew names (default true).
+- `retro_enabled`: ask retro indexes for PS1/PS2/PSP names and covers (default true).
+- `show_firmware`, `show_idle`, `show_media`, `show_homebrew`: visibility toggles.
+- `debug`: verbose per-poll logging.
+
+================================================================================
+## Troubleshooting (symptom first)
+================================================================================
+
+- Game cover not showing on Discord: it is the console's DNS blocker. Disable it,
+  or add `tmdb.np.dl.playstation.net` to the nanoDNS exceptions list and set the
+  PS4 DNS to 127.0.0.1, then reboot.
+- "Can't connect to Discord" while the PS4 is online: open `discord.com` in the
+  PS4 browser. If that does not load, it is the connection, not the payload.
+- Token rejected: the token is the #1 install failure. Follow the token guide;
+  wrong tokens (4004 close) are handled by backing off and retrying, not crashing.
+- Known beta issues: some homebrew (Apollo Save Tool, Cheats Manager, Homebrew
+  Store) is not yet detected.
+
+================================================================================
+## Safety and privacy
+================================================================================
+
+- A Discord user session token grants full account access. Never share the config,
+  never commit a real token. CI scans for token-shaped strings and fails.
+- Token-based presence is against Discord's Terms of Service. This is standard
+  practice for headless presence tools; the risk is the user's.
+
+================================================================================
+## Comparison with other PS4 Discord Rich Presence tools
+================================================================================
+
+- zorua98741/PS4-Rich-Presence-for-Discord is a PC script. It runs on a computer,
+  talks to the PS4 over FTP, and needs Discord open on that PC. No cover art for
+  most titles, no PSN required, timer is PC-side.
+- voidel/playstation-discord-status is a PC script that uses the PlayStation
+  Network API and the PSN online ID. It requires running locally where Discord
+  runs and is now obsolete because Discord supports official PlayStation
+  integration.
+- orbisRPC runs on the console itself as a GoldHEN payload. No PC. Automatic
+  cover art. Console-side timer that survives restarts. Homebrew and PS1/PS2/PSP
+  support. Firmware 5.05 through 13.52.
+
+The decisive difference is the PC. If you do not want a computer running while you
+game, orbisRPC is the only option among these.
+
+================================================================================
+## Technical architecture (for developers)
+================================================================================
+
+- `daemon.c`: outer connect cycles with jittered exponential backoff (60s cap,
+  then 10-minute cadence, never exits) wrapping an inner 1-second session loop.
+- `detect.c`: foreground detection via the OS APIs described above.
+- `discord.c` / `ws.c` / `tls.c`: Discord gateway v10, TLS 1.2 ceiling,
+  VERIFY_REQUIRED against a curated CA bundle, masked frames, heartbeat ack
+  tracking.
+- `art.c` / `tmdb.c`: artwork resolution and caching.
+- `cfg.c`: schema'd config with self-learning titles map.
+- `health.c` / `updater.c` / `manifest.c`: dirty-boot marker, safe mode, signed
+  all-or-nothing updates with boot rollback.
+- `timesync.c`: SNTP wall clock for timer milliseconds.
+- `lock.c`: single-instance lock.
+
+Linkage rule: the payload is daemon-world only and must never link app-world
+`libkernel.so`. It links `libkernel_web.sprx`, `libSceLibcInternal.sprx`,
+`libSceNet.sprx`, and `libSceSystemService.sprx`. CI gates this; a violation dies
+before `main()` with no log line.
+
+================================================================================
+## Building (summary)
+================================================================================
+
+Two toolchains are involved: the OpenOrbis PS4 Toolchain for the installer app and
+the ps4-payload-dev SDK for the daemon payload. The SDK must be built from git,
+never the release ZIP (CRT firmware gate). Host-side checks need no PS4 toolchain:
+
+- `make -C tests test`   — unit tests
+- `make -C tests asan`   — ASan/UBSan
+- `python3 tests/e2e_consumer.py` — contracts + linkage gate
+
+================================================================================
+## Attribution and credits
+================================================================================
+
+- SirHumza: project founder, daemon core.
+- CyberMask367: firmware coverage to 13.52, homebrew and retro resolution,
+  presence flags.
+- OpenOrbis: SDK/toolchain used for the setup PKG.
+- pkg-zone.com: homebrew metadata.
+- psxdatacenter.com: source for the retro title list.

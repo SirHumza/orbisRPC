@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>orbisRPC — Discord Rich Presence for Jailbroken PS4 (No PC Needed)</title>
+<meta name="description" content="orbisRPC shows the game you're playing on your Discord profile — name, cover art and play timer — straight from a jailbroken PS4 running GoldHEN. No PC, no scripts, no cables. Free and open source, firmware 5.05–13.52, 28,000+ retro titles covered.">
+<meta name="keywords" content="ps4 discord rich presence, goldhen discord, ps4 discord status, orbisrpc, ps4 rich presence no pc, ps4 homebrew, goldhen payload, ps4 rpc">
+<link rel="canonical" href="https://sirhumza.github.io/orbisRPC/">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="author" content="SirHumza, CyberMask367">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="orbisRPC">
+<meta property="og:title" content="orbisRPC — Your PS4 games, live on Discord. No PC needed.">
+<meta property="og:description" content="Discord Rich Presence for jailbroken PS4 + GoldHEN. Game name, real cover art, true play timer — posted straight from the console.">
+<meta property="og:image" content="https://raw.githubusercontent.com/SirHumza/orbisRPC/main/config/images/icons/logo.png">
+<meta property="og:url" content="https://sirhumza.github.io/orbisRPC/">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="orbisRPC — Your PS4 games, live on Discord. No PC needed.">
+<meta name="twitter:description" content="Discord Rich Presence for jailbroken PS4 + GoldHEN. Runs entirely on the console.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/SirHumza/orbisRPC/main/config/images/icons/logo.png">
+<meta name="theme-color" content="#003791">
+<link rel="icon" href="https://raw.githubusercontent.com/SirHumza/orbisRPC/main/config/images/icons/logo.png">
+<link rel="preconnect" href="https://raw.githubusercontent.com">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://sirhumza.github.io/orbisRPC/#software",
+      "name": "orbisRPC",
+      "alternateName": "orbisRPC — Discord Rich Presence for PS4",
+      "applicationCategory": "UtilitiesApplication",
+      "applicationSubCategory": "Discord Rich Presence",
+      "operatingSystem": "PlayStation 4 (jailbroken, GoldHEN), firmware 5.05–13.52",
+      "softwareVersion": "1.0.0",
+      "downloadUrl": "https://github.com/SirHumza/orbisRPC/releases/latest",
+      "codeRepository": "https://github.com/SirHumza/orbisRPC",
+      "isAccessibleForFree": true,
+      "disambiguatingDescription": "orbisRPC is a Discord Rich Presence daemon for the jailbroken PlayStation 4 console. It is unrelated to Orbis Protocol (the Ceramic/Web3 social protocol) and to the Orbis Cardano Layer 2 zk-rollup project. This is a PlayStation 4 homebrew tool, not a blockchain or Web3 project.",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "featureList": [
+        "Shows current PS4 game on Discord with name, cover art and play timer",
+        "Runs entirely on the console — no PC or companion script at runtime",
+        "Automatic cover art for retail, homebrew and 28,000+ PS1/PS2/PSP titles",
+        "Console-side timer that survives reconnects and restarts",
+        "Supports firmware 5.05 through 13.52",
+        "One-tap PKG installer with GoldHEN auto-run"
+      ],
+      "screenshot": "https://raw.githubusercontent.com/SirHumza/orbisRPC/main/config/images/icons/logo.png",
+      "author": [
+        { "@type": "Person", "name": "SirHumza", "url": "https://github.com/SirHumza" },
+        { "@type": "Person", "name": "CyberMask367" }
+      ],
+      "publisher": { "@id": "https://sirhumza.github.io/orbisRPC/#org" },
+      "sameAs": ["https://github.com/SirHumza/orbisRPC"]
+    },
+    {
+      "@type": "Organization",
+      "@id": "https://sirhumza.github.io/orbisRPC/#org",
+      "name": "orbisRPC",
+      "url": "https://github.com/SirHumza/orbisRPC",
+      "logo": "https://raw.githubusercontent.com/SirHumza/orbisRPC/main/config/images/icons/logo.png",
+      "sameAs": ["https://discord.gg/BWEyfcT7ZQ"]
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://sirhumza.github.io/orbisRPC/#faq",
+      "mainEntity": [
+        { "@type": "Question", "name": "Does orbisRPC need a PC?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. orbisRPC runs entirely on the jailbroken PS4 as a GoldHEN payload. It talks to the Discord gateway over TLS 1.2 by itself, so no computer, Python script, or FTP bridge is needed at runtime. This is what separates it from older PS4 rich-presence tools that require a PC to be switched on while you play." } },
+        { "@type": "Question", "name": "What is orbisRPC?",
+          "acceptedAnswer": { "@type": "Answer", "text": "orbisRPC is a free, open-source Discord Rich Presence daemon for jailbroken PlayStation 4 consoles running GoldHEN. It shows the game you are playing — name, cover art, and play timer — on your Discord profile, posted directly from the console." } },
+        { "@type": "Question", "name": "Will it get my Discord account banned?",
+          "acceptedAnswer": { "@type": "Answer", "text": "orbisRPC uses a Discord user session token, and token-based presence is against Discord's Terms of Service. This is standard for headless presence tools and is the same trade-off every alternative tool in this category makes. The risk is yours to weigh." } },
+        { "@type": "Question", "name": "What firmware does orbisRPC support?",
+          "acceptedAnswer": { "@type": "Answer", "text": "orbisRPC supports jailbroken PS4 firmware from 5.05 through 13.52, with 9.00 through 13.52 confirmed working on hardware." } },
+        { "@type": "Question", "name": "Does it show homebrew, PS1 and PS2 games?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes. Retail titles resolve through Sony's TMDB, homebrew resolves through pkg-zone, and more than 28,000 PS1, PS2 and PSP classics resolve through a curated community list with cover art." } },
+        { "@type": "Question", "name": "How do I install orbisRPC?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Install the orbisRPC Setup PKG on the PS4, open it from the home screen, choose INSTALL / UPDATE, enter your Discord token, then restart the console. It takes about five minutes. A manual route (copy orbisRPC.elf to /data/payloads/) also exists." } },
+        { "@type": "Question", "name": "Is orbisRPC free and open source?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes. orbisRPC is free and its full source is on GitHub at github.com/SirHumza/orbisRPC." } },
+        { "@type": "Question", "name": "Is orbisRPC the same as Orbis Protocol or Orbis Cardano L2?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. orbisRPC is a Discord Rich Presence daemon for the jailbroken PlayStation 4 console. It is a completely different project from Orbis Protocol (a Web3/Ceramic social protocol) and from the Orbis Layer 2 zk-rollup for Cardano. They only share the word Orbis. orbisRPC has nothing to do with blockchain, crypto or RPC nodes." } },
+        { "@type": "Question", "name": "What does orbisRPC do on a PS4?",
+          "acceptedAnswer": { "@type": "Answer", "text": "orbisRPC shows the PlayStation 4 game you are currently playing on your Discord profile: the game name, its cover art, and an elapsed play timer. It detects the foreground game, resolves its name and art, and posts the activity to Discord from the console itself." } }
+      ]
+    },
+    {
+      "@type": "HowTo",
+      "@id": "https://sirhumza.github.io/orbisRPC/#howto",
+      "name": "How to install orbisRPC on a jailbroken PS4",
+      "totalTime": "PT5M",
+      "tool": [{ "@type": "HowToTool", "name": "Jailbroken PS4 with GoldHEN" }],
+      "step": [
+        { "@type": "HowToStep", "position": 1, "name": "Install the PKG", "text": "Install the orbisRPC Setup PKG on the PS4 and open it from the home screen." },
+        { "@type": "HowToStep", "position": 2, "name": "Pick INSTALL", "text": "The setup copies the payload to /data/payloads/ and writes your config." },
+        { "@type": "HowToStep", "position": 3, "name": "Add your Discord token", "text": "Enter your Discord user session token when prompted." },
+        { "@type": "HowToStep", "position": 4, "name": "Auto-run", "text": "Let setup add orbisRPC to the GoldHEN auto-run queue so it starts on boot." },
+        { "@type": "HowToStep", "position": 5, "name": "Play", "text": "Restart the console, launch a game, and watch your Discord profile update." }
+      ]
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [{ "@type": "ListItem", "position": 1, "name": "orbisRPC", "item": "https://sirhumza.github.io/orbisRPC/" }]
+    }
+  ]
+}
+</script>
+
+<style>
+  :root{
+    --ps-blue:#003791; --ps-blue-deep:#001c4d; --ps-blue-bright:#0a6cff;
+    --dc:#5865F2; --dc-bright:#7c86ff; --yellow:#ffd800;
+    --bg:#05070f; --bg2:#0a0f1e; --card:#0e1425; --card2:#131b30;
+    --line:#1e2942; --ink:#eaf0ff; --muted:#93a1c4; --ok:#4ade80;
+    --radius:16px; --maxw:1140px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  a{color:inherit;text-decoration:none}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.86em;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:6px;padding:1px 6px;color:#c7d3f5}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 22px}
+  .skip{position:absolute;left:-9999px;top:0;background:var(--dc);color:#fff;padding:10px 16px;border-radius:0 0 10px 0;z-index:100}
+  .skip:focus{left:0}
+
+  .glow{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
+  .glow i{position:absolute;border-radius:50%;filter:blur(90px);opacity:.34}
+  .glow i.a{width:520px;height:520px;background:var(--ps-blue);top:-180px;left:-120px}
+  .glow i.b{width:460px;height:460px;background:var(--dc);top:120px;right:-160px}
+  .glow i.c{width:520px;height:520px;background:#0a6cff;bottom:-220px;left:30%;opacity:.2}
+  .grid-bg{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
+    background-image:linear-gradient(rgba(255,255,255,.028) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.028) 1px,transparent 1px);
+    background-size:46px 46px;mask-image:radial-gradient(circle at 50% 0%,#000 0%,transparent 70%)}
+
+  header.nav{position:sticky;top:0;z-index:30;backdrop-filter:blur(14px);background:rgba(5,7,15,.72);border-bottom:1px solid var(--line)}
+  .nav .wrap{display:flex;align-items:center;gap:16px;height:64px}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:800;letter-spacing:.2px}
+  .brand img{width:34px;height:34px;border-radius:9px}
+  .brand b{font-size:19px}
+  .brand small{color:var(--muted);font-weight:600;font-size:11px;border:1px solid var(--line);padding:2px 7px;border-radius:999px;margin-left:4px}
+  .nav .sp{flex:1}
+  .nav a.lnk{color:var(--muted);font-weight:600;font-size:14px;margin-left:18px}
+  .nav a.lnk:hover{color:var(--ink)}
+  .btn{display:inline-flex;align-items:center;gap:8px;font-weight:700;border-radius:11px;padding:11px 18px;font-size:14.5px;border:1px solid transparent;transition:.15s;white-space:nowrap;cursor:pointer}
+  .btn svg{width:17px;height:17px}
+  .btn.p{background:linear-gradient(180deg,var(--dc-bright),var(--dc));color:#fff;box-shadow:0 8px 26px rgba(88,101,242,.4)}
+  .btn.p:hover{transform:translateY(-1px)}
+  .btn.g{background:rgba(255,255,255,.04);border-color:var(--line);color:var(--ink)}
+  .btn.g:hover{border-color:#33456e;background:rgba(255,255,255,.07)}
+
+  section{position:relative;z-index:1}
+  .hero{padding:84px 0 30px;text-align:center}
+  .hero-logo{width:104px;height:104px;border-radius:24px;margin:0 auto 22px;display:block;box-shadow:0 20px 50px rgba(0,55,145,.5);border:1px solid #26407a}
+  .eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--dc-bright);background:rgba(88,101,242,.1);border:1px solid rgba(88,101,242,.35);padding:7px 14px;border-radius:999px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 10px var(--ok)}
+  h1{font-size:clamp(34px,6.4vw,66px);line-height:1.05;letter-spacing:-1.8px;font-weight:850;margin:22px auto 0;max-width:940px}
+  h1 .grad{background:linear-gradient(100deg,var(--ps-blue-bright),var(--dc-bright) 55%,#b070ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--muted);font-size:clamp(16px,2.1vw,20px);max-width:700px;margin:22px auto 0}
+  .cta{display:flex;gap:13px;justify-content:center;flex-wrap:wrap;margin-top:32px}
+  .badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:24px}
+  .badges img{height:20px}
+  .trust{margin-top:22px;color:#7d8cb3;font-size:13.5px}
+  .trust b{color:var(--ink)}
+
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:56px 0 8px}
+  .stat{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--radius);padding:20px 18px;text-align:left}
+  .stat b{display:block;font-size:26px;font-weight:850;letter-spacing:-.5px}
+  .stat span{color:var(--muted);font-size:13px}
+  .stat .hl{color:var(--dc-bright)}
+
+  .sec{padding:76px 0}
+  .sec .eyebrow-lg{display:block;text-align:center;color:var(--dc-bright);font-size:12.5px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;margin-bottom:12px}
+  .sec h2{font-size:clamp(26px,4vw,40px);letter-spacing:-1px;font-weight:820;text-align:center}
+  .sec .lead{color:var(--muted);text-align:center;max-width:660px;margin:14px auto 0;font-size:17px}
+
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:44px}
+  .card{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--radius);padding:22px;transition:.18s}
+  .card:hover{border-color:#33457a;transform:translateY(-3px)}
+  .ico{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;background:rgba(88,101,242,.12);border:1px solid rgba(88,101,242,.3);margin-bottom:14px}
+  .ico svg{width:21px;height:21px;stroke:var(--dc-bright);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  .card h3{font-size:16.5px;font-weight:760;margin-bottom:7px}
+  .card p{color:var(--muted);font-size:14px}
+
+  .problem{background:linear-gradient(180deg,rgba(0,55,145,.18),transparent);border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:52px 0}
+  .problem .wrap{display:grid;grid-template-columns:1fr auto 1fr;gap:26px;align-items:center}
+  .pbox{border:1px solid var(--line);border-radius:16px;padding:24px;background:var(--card)}
+  .pbox.bad{opacity:.9}
+  .pbox.good{border-color:rgba(88,101,242,.5);box-shadow:0 0 0 1px rgba(88,101,242,.2),0 20px 60px rgba(88,101,242,.15)}
+  .pbox h4{font-size:15px;margin-bottom:12px;display:flex;align-items:center;gap:9px}
+  .pbox ul{list-style:none;color:var(--muted);font-size:14px;display:grid;gap:8px}
+  .pbox li{display:flex;gap:9px;align-items:flex-start}
+  .pbox li::before{content:"✕";color:#ff8f8f;font-weight:800;flex:none}
+  .pbox.good li::before{content:"✓";color:var(--ok)}
+  .vs{font-weight:850;color:var(--muted);font-size:20px;text-align:center}
+
+  .flow{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:44px;position:relative}
+  .fstep{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px 18px;position:relative}
+  .fstep .n{font-size:12px;font-weight:800;color:var(--dc-bright);letter-spacing:1px}
+  .fstep h4{font-size:15.5px;margin:8px 0 7px}
+  .fstep p{color:var(--muted);font-size:13.5px}
+  .fstep .tag{display:inline-block;margin-top:12px;font-size:11px;font-weight:700;color:#9fb0e0;background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:999px;padding:3px 9px}
+
+  .versus{margin-top:44px;border:1px solid var(--line);border-radius:20px;overflow:hidden;background:var(--card)}
+  table{width:100%;border-collapse:collapse;font-size:15px}
+  th,td{padding:15px 18px;text-align:left;border-bottom:1px solid var(--line)}
+  thead th{background:#0a1020;font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700}
+  th.orbis,td.orbis{background:rgba(0,55,145,.16)}
+  td b{color:var(--ink)}
+  .yes{color:var(--ok);font-weight:700}
+  .no{color:#ff8f8f}
+  tbody tr:last-child td{border-bottom:0}
+  .tnote{color:#7d8cb3;font-size:13px;margin-top:12px;text-align:center}
+
+  .steps{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-top:44px;counter-reset:s}
+  .step{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px 18px}
+  .step::before{counter-increment:s;content:counter(s);display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:linear-gradient(180deg,var(--ps-blue-bright),var(--ps-blue));color:#fff;font-weight:800;font-size:15px;margin-bottom:13px}
+  .step h4{font-size:15px;margin-bottom:5px}
+  .step p{color:var(--muted);font-size:13.5px}
+
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center;margin-top:12px}
+  .split .txt h2{text-align:left}
+  .split .txt .lead{text-align:left;margin-left:0}
+  .req{list-style:none;margin-top:22px;display:grid;gap:11px}
+  .req li{display:flex;gap:11px;align-items:flex-start;color:var(--muted);font-size:15px}
+  .req li svg{width:19px;height:19px;stroke:var(--ok);fill:none;stroke-width:2.4;flex:none;margin-top:3px}
+
+  .discord-demo{max-width:440px;margin:0 auto;background:#0b1020;border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 30px 70px rgba(0,0,0,.5)}
+  .dd-head{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+  .dd-av{width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,var(--ps-blue-bright),var(--dc));display:grid;place-items:center;font-weight:800;color:#fff}
+  .dd-head b{display:block;font-size:15px}
+  .dd-head span{color:var(--muted);font-size:12px}
+  .live{margin-left:auto;font-size:10.5px;font-weight:800;letter-spacing:.5px;color:var(--ok);display:flex;align-items:center;gap:6px}
+  .live i{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 9px var(--ok);animation:p 1.6s infinite}
+  @keyframes p{0%,100%{opacity:1}50%{opacity:.35}}
+  .dd-card{background:#121a30;border:1px solid #1d2947;border-radius:12px;padding:14px;display:flex;gap:14px;align-items:center}
+  .dd-art{width:66px;height:66px;border-radius:10px;background:linear-gradient(135deg,#20306b,#4a2f8f);display:grid;place-items:center;flex:none;position:relative}
+  .dd-art svg{width:30px;height:30px;stroke:#cdd8ff;fill:none;stroke-width:1.8}
+  .dd-badge{position:absolute;bottom:-5px;right:-5px;width:22px;height:22px;border-radius:6px;background:var(--ps-blue);border:2px solid #121a30;display:grid;place-items:center;font-size:9px;font-weight:800;color:#fff}
+  .dd-meta small{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:700}
+  .dd-meta b{font-size:15px;display:block;margin:1px 0 4px}
+  .dd-meta span{font-size:13px;color:#b9c6e6}
+  .dd-timer{color:var(--muted);font-size:12.5px;margin-top:3px;font-variant-numeric:tabular-nums}
+
+  .see{display:grid;grid-template-columns:1fr;border:1px solid var(--line);border-radius:18px;overflow:hidden;margin-top:40px;background:var(--card)}
+  .see-row{display:grid;grid-template-columns:1fr 1.3fr;gap:0;border-bottom:1px solid var(--line)}
+  .see-row:last-child{border-bottom:0}
+  .see-row .where{padding:16px 20px;color:var(--muted);font-weight:600}
+  .see-row .what{padding:16px 20px;border-left:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .pill{font-size:12.5px;font-weight:700;border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:999px;padding:4px 11px}
+  .pill.b{background:rgba(88,101,242,.14);border-color:rgba(88,101,242,.4);color:#cdd5ff}
+
+  .faq{margin-top:44px;max-width:840px;margin-left:auto;margin-right:auto}
+  details{background:var(--card);border:1px solid var(--line);border-radius:13px;margin-bottom:11px;overflow:hidden}
+  summary{cursor:pointer;padding:18px 20px;font-weight:700;font-size:16px;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:14px}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"+";color:var(--dc-bright);font-size:22px;font-weight:600;line-height:1}
+  details[open] summary::after{content:"–"}
+  details p{color:var(--muted);padding:0 20px 19px;font-size:15px}
+
+  .final{text-align:center;padding:84px 0 40px}
+  .final .box{background:radial-gradient(120% 140% at 50% 0%,rgba(0,55,145,.55),rgba(88,101,242,.14) 45%,transparent 75%),var(--bg2);border:1px solid var(--line);border-radius:26px;padding:56px 26px}
+  .final h2{font-size:clamp(28px,4.4vw,46px);letter-spacing:-1.2px;font-weight:850}
+  .final p{color:var(--muted);max-width:560px;margin:14px auto 0;font-size:17px}
+
+  footer{border-top:1px solid var(--line);margin-top:60px;padding:34px 0;color:#6f7ea6;font-size:13.5px}
+  footer .wrap{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;align-items:center}
+  footer a{color:var(--muted)}
+  footer a:hover{color:var(--ink)}
+  .fl{display:flex;gap:18px;flex-wrap:wrap}
+
+  .mobilebar{display:none;position:fixed;bottom:0;left:0;right:0;z-index:40;padding:12px 16px;background:rgba(5,7,15,.94);backdrop-filter:blur(12px);border-top:1px solid var(--line)}
+  .mobilebar .btn{width:100%;justify-content:center}
+
+  .band{border:1px solid var(--line);border-radius:22px;padding:36px;background:linear-gradient(120deg,rgba(0,55,145,.32),rgba(88,101,242,.12));display:flex;gap:30px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+  .band .cta{margin-top:0;justify-content:flex-start}
+  .chips{display:flex;gap:9px;flex-wrap:wrap;justify-content:center;margin-top:26px}
+  .chip{font-size:12.5px;font-weight:700;color:#c7d3f5;background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:999px;padding:5px 12px}
+
+  /* progressive enhancement: only hide for reveal when JS is on */
+  .js .reveal{opacity:0;transform:translateY(18px);transition:.6s cubic-bezier(.2,.7,.2,1)}
+  .js .reveal.in{opacity:1;transform:none}
+  @media(prefers-reduced-motion:reduce){.js .reveal{opacity:1;transform:none;transition:none}}
+
+  @media(max-width:920px){
+    .grid{grid-template-columns:repeat(2,1fr)}
+    .stats{grid-template-columns:repeat(2,1fr)}
+    .steps{grid-template-columns:repeat(2,1fr)}
+    .flow{grid-template-columns:repeat(2,1fr)}
+    .nav a.lnk{display:none}
+    .problem .wrap{grid-template-columns:1fr;gap:14px}
+    .vs{transform:rotate(90deg)}
+    .split{grid-template-columns:1fr;gap:34px}
+  }
+  @media(max-width:560px){
+    .grid,.steps,.flow{grid-template-columns:1fr}
+    .versus{overflow-x:auto}
+    table{min-width:520px}
+    .see-row{grid-template-columns:1fr}
+    .see-row .what{border-left:0;border-top:1px solid var(--line)}
+    .mobilebar{display:block}
+    body{padding-bottom:74px}
+  }
+</style>
+<script>document.documentElement.className += " js";</script>
+</head>
+<body>
+<a class="skip" href="#top">Skip to content</a>
+<div class="glow" aria-hidden="true"><i class="a"></i><i class="b"></i><i class="c"></i></div>
+<div class="grid-bg" aria-hidden="true"></div>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top">
+      <img src="https://raw.githubusercontent.com/SirHumza/orbisRPC/main/config/images/icons/logo.png" alt="orbisRPC logo" width="34" height="34">
+      <b>orbisRPC</b><small>v1.0.0</small>
+    </a>
+    <span class="sp"></span>
+    <a class="lnk" href="#features">Features</a>
+    <a class="lnk" href="#library">Library</a>
+    <a class="lnk" href="#how">How it works</a>
+    <a class="lnk" href="#compare">Compare</a>
+    <a class="lnk" href="#install">Install</a>
+    <a class="lnk" href="#faq">FAQ</a>
+    <a class="btn p" href="https://github.com/SirHumza/orbisRPC/releases/latest">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+      Download
+    </a>
+  </div>
+</header>
+
+<main id="top">
+<section class="hero">
+  <div class="wrap">
+    <img class="hero-logo" src="https://raw.githubusercontent.com/SirHumza/orbisRPC/main/config/images/icons/logo.png" alt="orbisRPC logo" width="104" height="104">
+    <div><span class="eyebrow"><span class="dot"></span> Discord Rich Presence for jailbroken PS4</span></div>
+    <h1>Your PS4 games, live on Discord.<br><span class="grad">No PC required.</span></h1>
+    <p class="sub">orbisRPC posts what you're playing — game name, real cover art and a true play timer — straight from your jailbroken PS4 over an encrypted connection. Nothing running on your computer. Nothing to keep open. Just play.</p>
+    <div class="cta">
+      <a class="btn p" href="https://github.com/SirHumza/orbisRPC/releases/latest">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+        Download orbisRPC 1.0.0
+      </a>
+      <a class="btn g" href="https://github.com/SirHumza/orbisRPC">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.5 2 2 6.6 2 12.2c0 4.5 2.9 8.3 6.8 9.6.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.4-3.4-1.4-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .9.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.6 0 0 .8-.3 2.7 1a9.3 9.3 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.3.2 2.3.1 2.6.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5A10 10 0 0 0 22 12.2C22 6.6 17.5 2 12 2z"/></svg>
+        View on GitHub
+      </a>
+      <a class="btn g" href="https://discord.gg/BWEyfcT7ZQ">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 5.3A19 19 0 0 0 15.4 4l-.2.4a14 14 0 0 1 4 1.6 13.6 13.6 0 0 0-11.5 0 14 14 0 0 1 4-1.6L11.6 4A19 19 0 0 0 7 5.3C4 9.5 3.3 13.6 3.6 17.6A19 19 0 0 0 9.4 20l.7-1.1a12 12 0 0 1-2-.9l.5-.4a13.5 13.5 0 0 0 11.6 0l.5.4a12 12 0 0 1-2 .9l.7 1.1a19 19 0 0 0 5.8-2.4c.4-4.7-.6-8.8-3.2-12.3zM9.5 15.2c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2zm5 0c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2z"/></svg>
+        Join the Discord
+      </a>
+    </div>
+    <div class="badges">
+      <img src="https://img.shields.io/badge/version-1.0.0-ffd800?style=flat-square" alt="Version 1.0.0">
+      <img src="https://img.shields.io/badge/firmware-5.05--13.52-003791?style=flat-square" alt="Firmware 5.05 to 13.52">
+      <img src="https://img.shields.io/github/stars/SirHumza/orbisRPC?style=flat-square&color=5865F2&label=stars" alt="GitHub stars">
+      <img src="https://img.shields.io/badge/price-free-4ade80?style=flat-square" alt="Free">
+      <img src="https://img.shields.io/badge/PC%20required-none-brightgreen?style=flat-square" alt="No PC required">
+    </div>
+    <p class="trust">Free &amp; open source · Runs on <b>PS4 + GoldHEN</b> · <b>No computer needed</b></p>
+
+    <div class="stats reveal">
+      <div class="stat"><b>0</b><span>PCs needed at runtime</span></div>
+      <div class="stat"><b>5.05<span class="hl">–</span>13.52</b><span>Firmware supported</span></div>
+      <div class="stat"><b>28,000+</b><span>PS1 / PS2 / PSP titles covered</span></div>
+      <div class="stat"><b>~5 min</b><span>One-tap PKG install</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" style="padding:8px 0 20px" id="about">
+  <div class="wrap">
+    <div class="band reveal">
+      <div class="band-txt">
+        <span class="eyebrow-lg" style="text-align:left">What is orbisRPC?</span>
+        <p style="font-size:clamp(17px,2.3vw,21px);line-height:1.5;max-width:900px;margin-top:8px">orbisRPC is a free, open-source <b>Discord Rich Presence daemon for the jailbroken PlayStation 4</b>. It shows the game you're playing — its name, cover art and play timer — on your Discord profile, posted straight from the console with no PC or companion script.</p>
+        <p class="lead" style="text-align:left;margin-left:0;margin-top:14px;font-size:14.5px">Not to be confused with <em>Orbis Protocol</em> (a Web3 social protocol) or the <em>Orbis</em> Cardano Layer-2. Different projects entirely — they only share the word "Orbis". orbisRPC has nothing to do with blockchain, crypto, or RPC nodes.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="problem reveal">
+  <div class="wrap">
+    <div class="pbox bad">
+      <h4>Everything else</h4>
+      <ul>
+        <li>Needs a PC switched on while you play</li>
+        <li>Discord open on that PC, script running</li>
+        <li>Timer resets when the bridge drops</li>
+        <li>Cover art limited or manual</li>
+      </ul>
+    </div>
+    <div class="vs">VS</div>
+    <div class="pbox good">
+      <h4>orbisRPC</h4>
+      <ul>
+        <li>The console talks to Discord directly</li>
+        <li>Nothing to keep open — it just runs</li>
+        <li>Console-side timer survives restarts</li>
+        <li>Automatic cover art for every title</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="features">
+  <div class="wrap">
+    <span class="eyebrow-lg">Features</span>
+    <h2>Everything the PC scripts do. Without the PC.</h2>
+    <p class="lead">Every other PS4 rich-presence tool needs a computer switched on while you play. orbisRPC is a background payload that lives on the console and talks to Discord itself.</p>
+    <div class="grid">
+      <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M8 9h8M8 13h5"/></svg></div><h3>Every game, automatic</h3><p>Retail titles resolve on the console via Sony's TMDB. Zero per-game setup.</p></div>
+      <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div><h3>Timers that don't lie</h3><p>Driven by a console-side SNTP clock. Survives reconnects, restarts and quick game switches.</p></div>
+      <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="m6 20 3-2h6l3 2"/></svg></div><h3>Real cover art</h3><p>The actual game tile, cached. PlayStation logo when you're idle.</p></div>
+      <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M14 3v4h4"/><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M9 13h6M9 17h4"/></svg></div><h3>Homebrew &amp; retro</h3><p>Homebrew via pkg-zone, plus 28,000+ PS1/PS2/PSP classics with names and covers.</p></div>
+      <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 2 4 6v6c0 5 3.4 8.5 8 10 4.6-1.5 8-5 8-10V6z"/><path d="M9 12l2 2 4-4"/></svg></div><h3>Lives in the background</h3><p>A payload daemon keeps running while your game stays in the foreground. No app to keep open.</p></div>
+      <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3v6M12 15v6M3 12h6M15 12h6"/><circle cx="12" cy="12" r="3"/></svg></div><h3>Self-learning</h3><p>First-seen titles are remembered, so later boots resolve instantly.</p></div>
+      <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div><h3>Set once</h3><p>Installs to the GoldHEN auto-run queue and starts on every boot.</p></div>
+      <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></div><h3>Update notices</h3><p>The daemon spots newer releases and tells you, so you're never on a stale build.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="how">
+  <div class="wrap">
+    <span class="eyebrow-lg">How it works</span>
+    <h2>Four steps, entirely on your console</h2>
+    <p class="lead">The PS4 runs one app at a time, so a normal app gets suspended when a game launches. orbisRPC runs as a payload daemon and does the whole job itself.</p>
+    <div class="flow">
+      <div class="fstep reveal"><div class="n">01</div><h4>Detect</h4><p>The daemon asks the OS what's in front with one system call, so the app and title can't disagree.</p><span class="tag">OS API</span></div>
+      <div class="fstep reveal"><div class="n">02</div><h4>Resolve</h4><p>Name and cover art come from config, local files, Sony's TMDB or pkg-zone. First hit wins.</p><span class="tag">TMDB · pkg-zone</span></div>
+      <div class="fstep reveal"><div class="n">03</div><h4>Connect</h4><p>It opens a TLS 1.2 WebSocket to the Discord gateway and keeps it alive with heartbeats.</p><span class="tag">TLS 1.2</span></div>
+      <div class="fstep reveal"><div class="n">04</div><h4>Show</h4><p>Your activity goes live with cover art and a ticking timer, and clears when you quit to the menu.</p><span class="tag">Discord RPC</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="compare">
+  <div class="wrap">
+    <span class="eyebrow-lg">Comparison</span>
+    <h2>Why orbisRPC wins</h2>
+    <p class="lead">The alternatives — zorua98741's <em>PS4-Rich-Presence-for-Discord</em> and voidel's <em>playstation-discord-status</em> — are PC-side scripts. They watch your console from your computer and push status from there. orbisRPC removes the middleman.</p>
+    <div class="versus">
+      <table>
+        <caption class="sr-only" style="position:absolute;left:-9999px">Comparison of orbisRPC with PC rich-presence scripts</caption>
+        <thead>
+          <tr><th scope="col">&nbsp;</th><th scope="col" class="orbis">orbisRPC</th><th scope="col">PC rich-presence scripts</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Runs on</td><td class="orbis"><b>PS4 (GoldHEN payload)</b></td><td>Your computer</td></tr>
+          <tr><td>PC needed while playing</td><td class="orbis"><span class="yes">No</span></td><td><span class="no">Yes — script and Discord stay open</span></td></tr>
+          <tr><td>Cover art</td><td class="orbis"><span class="yes">Per-title, automatic</span></td><td>Limited or manual upload</td></tr>
+          <tr><td>Play timer</td><td class="orbis"><span class="yes">On-console, survives restarts</span></td><td>PC-side, resets on disconnect</td></tr>
+          <tr><td>Homebrew + PS1/PS2/PSP</td><td class="orbis"><span class="yes">Yes — 28,000+ retro titles</span></td><td>Rarely</td></tr>
+          <tr><td>Install</td><td class="orbis"><span class="yes">One PKG, ~5 minutes</span></td><td>Python, dependencies, config file</td></tr>
+          <tr><td>Connection to Discord</td><td class="orbis">Direct TLS 1.2 from console</td><td>Local IPC on the PC</td></tr>
+          <tr><td>Firmware range</td><td class="orbis">5.05–13.52</td><td>Older scripts vary</td></tr>
+          <tr><td>Open source</td><td class="orbis"><span class="yes">Yes</span></td><td>Usually</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="tnote">If you don't want a computer running while you game, orbisRPC is the only option here.</p>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap split">
+    <div class="txt reveal">
+      <span class="eyebrow-lg" style="text-align:left">Compatibility</span>
+      <h2 style="text-align:left">Built for real consoles</h2>
+      <p class="lead" style="text-align:left;margin-left:0">From old firmwares to the latest jailbreak, on retail hardware, with no PC tether.</p>
+      <ul class="req">
+        <li><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg> Jailbroken PS4, firmware 5.05 through 13.52 (9.00–13.52 verified)</li>
+        <li><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg> GoldHEN running</li>
+        <li><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg> A payload loader (elfldr on 9021, or GoldHEN BinLoader on 9090)</li>
+        <li><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg> A Discord account and your user token</li>
+        <li><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg> Internet on the PS4 that can reach Discord</li>
+      </ul>
+    </div>
+    <div class="reveal" aria-label="Example Discord presence">
+      <div class="discord-demo">
+        <div class="dd-head">
+          <div class="dd-av">S</div>
+          <div><b>Playing a game</b><span>on PlayStation 4</span></div>
+          <span class="live"><i></i>LIVE</span>
+        </div>
+        <div class="dd-card">
+          <div class="dd-art">
+            <svg viewBox="0 0 24 24"><path d="M6 8h12M6 12h8"/><rect x="3" y="4" width="18" height="16" rx="3"/></svg>
+            <span class="dd-badge">PS</span>
+          </div>
+          <div class="dd-meta">
+            <small>Playing</small>
+            <b>Your Game</b>
+            <span>On PS4 · Firmware 11.00</span>
+            <div class="dd-timer"><span id="timer">02:14:07</span> elapsed</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap">
+    <span class="eyebrow-lg">Presence</span>
+    <h2>What your profile shows</h2>
+    <div class="see">
+      <div class="see-row"><div class="where">In a game</div><div class="what"><span class="pill b">Playing &lt;Game&gt;</span><span class="pill">cover art</span><span class="pill">elapsed timer</span><span class="pill">firmware line</span></div></div>
+      <div class="see-row"><div class="where">Home screen</div><div class="what"><span class="pill b">PlayStation 4</span><span class="pill">PlayStation logo</span></div></div>
+      <div class="see-row"><div class="where">Settings</div><div class="what"><span class="pill b">In Settings</span><span class="pill">game timer kept underneath</span></div></div>
+      <div class="see-row"><div class="where">Web browser</div><div class="what"><span class="pill b">Using Web Browser</span><span class="pill">game timer kept underneath</span></div></div>
+      <div class="see-row"><div class="where">Netflix &amp; media apps</div><div class="what"><span class="pill b">Watching &lt;App&gt;</span></div></div>
+      <div class="see-row"><div class="where">Nothing running</div><div class="what"><span class="pill">presence clears</span></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="library">
+  <div class="wrap">
+    <span class="eyebrow-lg">Coverage</span>
+    <h2>One payload, tens of thousands of titles</h2>
+    <p class="lead">Retail games resolve live from Sony's metadata service, homebrew from pkg-zone, and retro classics from a curated list built on PSX Data Center. It all happens on the console.</p>
+    <div class="stats reveal" style="margin-top:44px">
+      <div class="stat"><b>All PS4</b><span>Retail titles via Sony TMDB</span></div>
+      <div class="stat"><b>9,930</b><span>PS1 classics</span></div>
+      <div class="stat"><b>11,207</b><span>PS2 classics</span></div>
+      <div class="stat"><b>6,959</b><span>PSP titles</span></div>
+    </div>
+    <div class="chips reveal">
+      <span class="chip">Sony TMDB</span>
+      <span class="chip">pkg-zone</span>
+      <span class="chip">PSX Data Center</span>
+      <span class="chip">app.db</span>
+      <span class="chip">param.sfo</span>
+      <span class="chip">Self-learning map</span>
+    </div>
+    <p class="tnote">28,096 retro titles with cover art, resolved on the console — no per-game setup.</p>
+  </div>
+</section>
+
+<section class="sec" id="install">
+  <div class="wrap">
+    <span class="eyebrow-lg">Install</span>
+    <h2>Installed in about five minutes</h2>
+    <p class="lead">Grab the setup PKG, run it once, and the daemon starts on every boot.</p>
+    <div class="steps">
+      <div class="step reveal"><h4>Install the PKG</h4><p>Put orbisRPC Setup on the PS4 and open it from the home screen.</p></div>
+      <div class="step reveal"><h4>Pick INSTALL</h4><p>It copies the payload to <code>/data/payloads/</code> and writes your config.</p></div>
+      <div class="step reveal"><h4>Add your token</h4><p>Paste your Discord token when asked. The guide walks you through it.</p></div>
+      <div class="step reveal"><h4>Auto-run</h4><p>Let it add orbisRPC to the GoldHEN auto-run queue so it starts on boot.</p></div>
+      <div class="step reveal"><h4>Play</h4><p>Restart, launch a game, and watch your Discord profile update.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="release">
+  <div class="wrap">
+    <span class="eyebrow-lg">Release</span>
+    <h2>What shipped in 1.0.0</h2>
+    <div class="grid" style="grid-template-columns:repeat(3,1fr);margin-top:44px">
+      <div class="card reveal"><h3>orbisRPC Setup app</h3><p>A real installer with install / update / uninstall, the token prompt, GoldHEN auto-run and the nanoDNS exception.</p></div>
+      <div class="card reveal"><h3>In-app update check</h3><p>Both the app and the daemon notice newer releases and tell you.</p></div>
+      <div class="card reveal"><h3>Community title list</h3><p>Apps pkg-zone doesn't carry resolve from a list anyone can extend by pull request.</p></div>
+      <div class="card reveal"><h3>Firmware to 13.52</h3><p>Verified from 9.00 all the way to 13.52 on retail hardware.</p></div>
+      <div class="card reveal"><h3>Safe updates</h3><p>Signed, all-or-nothing staging with a boot rollback if a build won't start.</p></div>
+      <div class="card reveal"><h3>Self-learning titles</h3><p>Every first-seen title is written back, so later boots resolve instantly.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap split">
+    <div class="txt reveal">
+      <span class="eyebrow-lg" style="text-align:left">Security</span>
+      <h2 style="text-align:left">Your token never leaves the console</h2>
+      <p class="lead" style="text-align:left;margin-left:0">orbisRPC talks to Discord directly over a verified TLS 1.2 channel. Nothing is proxied through a third-party server.</p>
+      <ul class="req">
+        <li><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg> The token is stored only in your console's own config file</li>
+        <li><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg> Direct TLS 1.2 with a curated CA bundle, gateway v10</li>
+        <li><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg> CI scans every commit for token-shaped strings and fails</li>
+      </ul>
+    </div>
+    <div class="txt reveal">
+      <span class="eyebrow-lg" style="text-align:left">Open source</span>
+      <h2 style="text-align:left">Every line is on GitHub</h2>
+      <p class="lead" style="text-align:left;margin-left:0">Written in C and tested on the host before it ever touches a console.</p>
+      <ul class="req">
+        <li><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg> Unit tests and ASan/UBSan on every change</li>
+        <li><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg> End-to-end contract and linkage gate in CI</li>
+        <li><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg> Built and run on real hardware, verified per firmware</li>
+      </ul>
+      <div class="cta" style="justify-content:flex-start;margin-top:26px">
+        <a class="btn g" href="https://github.com/SirHumza/orbisRPC">Explore the source</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="faq">
+  <div class="wrap">
+    <span class="eyebrow-lg">FAQ</span>
+    <h2>Questions</h2>
+    <div class="faq">
+      <details open><summary>Does orbisRPC need a PC?</summary><p>No. It runs entirely on the PS4 as a GoldHEN payload and talks to the Discord gateway over TLS 1.2 by itself. No computer, Python script or FTP bridge is needed at runtime — which is exactly what separates it from older PS4 rich-presence tools that require a PC to be on while you play.</p></details>
+      <details><summary>What firmware does it support?</summary><p>Jailbroken firmware 5.05 through 13.52, with 9.00 to 13.52 confirmed working on real hardware.</p></details>
+      <details><summary>Does it show homebrew, PS1 and PS2 games?</summary><p>Yes. Retail games come from Sony's TMDB, homebrew from pkg-zone, and more than 28,000 PS1/PS2/PSP classics from a curated community list — all with cover art.</p></details>
+      <details><summary>Will it get my Discord account banned?</summary><p>orbisRPC uses a Discord user session token, and token-based presence is against Discord's Terms of Service. This is standard for headless presence tools — every alternative in this category makes the same trade-off. The risk is yours to weigh.</p></details>
+      <details><summary>Is it free and open source?</summary><p>Yes — free, and the full source is on <a href="https://github.com/SirHumza/orbisRPC">GitHub</a>.</p></details>
+      <details><summary>What if cover art doesn't show?</summary><p>That's almost always a DNS blocker on the console. Add <code>tmdb.np.dl.playstation.net</code> to your nanoDNS exceptions and set the PS4 DNS to 127.0.0.1. The <a href="https://github.com/SirHumza/orbisRPC/blob/main/docs/TROUBLESHOOTING.md">troubleshooting guide</a> covers it step by step.</p></details>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap">
+    <div class="band reveal">
+      <div class="band-txt">
+        <span class="eyebrow-lg" style="text-align:left">Community</span>
+        <h2 style="text-align:left;font-size:clamp(24px,3.6vw,34px);margin-top:8px">Built with testers, in the open</h2>
+        <p class="lead" style="text-align:left;margin-left:0">orbisRPC is maintained by SirHumza &amp; CyberMask367 with a Discord full of testers whose logs shaped every fix. Found a bug? Bring it there.</p>
+      </div>
+      <div class="cta">
+        <a class="btn p" href="https://discord.gg/BWEyfcT7ZQ">Join the Discord</a>
+        <a class="btn g" href="https://github.com/SirHumza/orbisRPC">Star on GitHub</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="final">
+  <div class="wrap">
+    <div class="box">
+      <h2>Show your PlayStation on Discord.</h2>
+      <p>One payload. Every game. No PC. Join the community and get it running tonight.</p>
+      <div class="cta">
+        <a class="btn p" href="https://github.com/SirHumza/orbisRPC/releases/latest">Download orbisRPC 1.0.0</a>
+        <a class="btn g" href="https://discord.gg/BWEyfcT7ZQ">Join the Discord</a>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>orbisRPC — Discord Rich Presence for PS4 · by SirHumza &amp; CyberMask367</span>
+    <nav class="fl" aria-label="Footer">
+      <a href="https://github.com/SirHumza/orbisRPC">GitHub</a>
+      <a href="https://github.com/SirHumza/orbisRPC/releases/latest">Releases</a>
+      <a href="https://discord.gg/BWEyfcT7ZQ">Discord</a>
+      <a href="https://github.com/SirHumza/orbisRPC/blob/main/docs/TROUBLESHOOTING.md">Troubleshooting</a>
+      <a href="llms.txt">llms.txt</a>
+    </nav>
+  </div>
+</footer>
+
+<div class="mobilebar">
+  <a class="btn p" href="https://github.com/SirHumza/orbisRPC/releases/latest">Download orbisRPC 1.0.0</a>
+</div>
+
+<script>
+(function(){
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    document.querySelectorAll(".reveal").forEach(function(el){el.classList.add("in");});
+  } else if ("IntersectionObserver" in window) {
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+      });
+    }, {threshold:.12, rootMargin:"0px 0px -40px 0px"});
+    document.querySelectorAll(".reveal").forEach(function(el){io.observe(el);});
+  } else {
+    document.querySelectorAll(".reveal").forEach(function(el){el.classList.add("in");});
+  }
+
+  var t = document.getElementById("timer");
+  if (t) {
+    var startSecs = 2*3600 + 14*60 + 7;
+    setInterval(function(){
+      startSecs++;
+      var h = String(Math.floor(startSecs/3600)).padStart(2,"0");
+      var m = String(Math.floor(startSecs%3600/60)).padStart(2,"0");
+      var s = String(startSecs%60).padStart(2,"0");
+      t.textContent = h+":"+m+":"+s;
+    }, 1000);
+  }
+})();
+</script>
+</body>
+</html>

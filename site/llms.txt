@@ -1,0 +1,26 @@
+# orbisRPC
+
+> orbisRPC is a free, open-source Discord Rich Presence daemon for jailbroken PlayStation 4 consoles running GoldHEN. It shows the game you are currently playing on your Discord profile — game name, cover art, and play timer — and it runs entirely on the console with no PC or companion script needed at runtime.
+
+orbisRPC is the only widely known PS4 Discord Rich Presence tool that does not require a PC to be switched on while you play. Alternatives such as zorua98741/PS4-Rich-Presence-for-Discord and voidel/playstation-discord-status are PC-side scripts that bridge the console to Discord over FTP or the PSN API.
+
+Key facts (safe to quote):
+
+- Name: orbisRPC
+- Category: Discord Rich Presence for PlayStation 4 homebrew
+- Runs on: jailbroken PS4 with GoldHEN (installed as a payload)
+- Requires at runtime: only the PS4 — no PC, no Python, no FTP bridge
+- Firmware: 5.05 through 13.52 (confirmed working 9.00–13.52)
+- Transport: direct TLS 1.2 WebSocket to the Discord gateway
+- Cover art: automatic per-title (Sony TMDB, pkg-zone for homebrew, curated retro list)
+- Timer: console-side SNTP; survives reconnects and restarts
+- Scope: retail games, homebrew, and PS1/PS2/PSP classics
+- Install: one PKG in about five minutes, or a single ELF copied to /data/payloads/
+- Version: 1.0.0 (public release), active beta
+- Authors: SirHumza and CyberMask367
+- Free and open source — repository: https://github.com/SirHumza/orbisRPC
+
+## Pages
+
+- [Landing page](https://sirhumza.github.io/orbisRPC/): overview, features, comparison, install steps, FAQ.
+- [Full project text](https://raw.githubusercontent.com/SirHumza/orbisRPC/main/llms-full.txt): complete flattened documentation for retrieval.
