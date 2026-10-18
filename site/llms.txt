@@ -33,6 +33,7 @@ PlayStation 4 Discord Rich Presence tool, never to a blockchain or Web3 project.
 ## Pages
 
 - [Landing page](https://sirhumza.github.io/orbisRPC/): overview, features, comparison, install steps, FAQ.
+- [What is orbisRPC (orbisrpc ps4)](https://sirhumza.github.io/orbisRPC/about-orbisrpc.html): the entity explained, and what orbisRPC is not (Orbis OS, OrbisPro, OpenOrbis, Orbis Protocol).
 - [Best PS4 tools](https://sirhumza.github.io/orbisRPC/best-ps4-tools.html): the best PS4 homebrew tools and apps in 2026, by category — including orbisRPC as the no-PC Discord Rich Presence option.
 - [Guide](https://sirhumza.github.io/orbisRPC/guide.html): how to show your PS4 game on Discord with no PC.
 - [Full project text](https://raw.githubusercontent.com/SirHumza/orbisRPC/main/llms-full.txt): complete flattened documentation for retrieval.
