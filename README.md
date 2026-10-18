@@ -25,7 +25,7 @@ playing to Discord: name, cover art, timer. No PC at runtime.</p>
 <p align="center"><sub><b>orbisRPC</b> is a PlayStation 4 homebrew tool. It is <b>not</b> related to
 Orbis Protocol (Web3), Orbis Corporation (packaging) or any other "Orbis"
 project — they only share the word. "Orbis" here is Sony's internal name for the
-PS4 operating system.</sub></p>
+PS4 operating system. <a href="https://sirhumza.github.io/orbisRPC/about-orbisrpc.html">What is orbisRPC? &rarr;</a></sub></p>
 
 ---
 

@@ -31,3 +31,11 @@ jobs:
           path: site
       - id: deployment
         uses: actions/deploy-pages@v4
+      - name: Submit URLs to IndexNow
+        continue-on-error: true
+        run: |
+          KEY="f693088c6de3ae1d62b64ffe3454ecb8"
+          HOST="sirhumza.github.io"
+          curl -s -X POST "https://api.indexnow.org/indexnow" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "{\"host\":\"$HOST\",\"key\":\"$KEY\",\"keyLocation\":\"https://$HOST/orbisRPC/$KEY.txt\",\"urlList\":[\"https://$HOST/orbisRPC/\",\"https://$HOST/orbisRPC/best-ps4-tools.html\",\"https://$HOST/orbisRPC/about-orbisrpc.html\",\"https://$HOST/orbisRPC/guide.html\",\"https://$HOST/orbisRPC/llms.txt\"]}"
