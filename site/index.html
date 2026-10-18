@@ -131,7 +131,9 @@
         { "@type": "Question", "name": "Does orbisRPC show PS2, PS1 and PSP games?",
           "acceptedAnswer": { "@type": "Answer", "text": "Yes. orbisRPC resolves more than 28,000 PS1, PS2 and PSP titles with cover art (9,930 PS1, 11,207 PS2, 6,959 PSP), alongside every retail PS4 title and homebrew via pkg-zone." } },
         { "@type": "Question", "name": "How long does orbisRPC take to set up?",
-          "acceptedAnswer": { "@type": "Answer", "text": "About five minutes. Install the orbisRPC Setup PKG, open it, choose INSTALL, enter your Discord token and restart the console. It then starts automatically on every boot." } }
+          "acceptedAnswer": { "@type": "Answer", "text": "About five minutes. Install the orbisRPC Setup PKG, open it, choose INSTALL, enter your Discord token and restart the console. It then starts automatically on every boot." } },
+        { "@type": "Question", "name": "What if cover art doesn't show?",
+          "acceptedAnswer": { "@type": "Answer", "text": "That is almost always a DNS blocker on the console. Add tmdb.np.dl.playstation.net to your nanoDNS exceptions and set the PS4 DNS to 127.0.0.1." } }
       ]
     },
     {
@@ -654,6 +656,10 @@
     <h2>Questions</h2>
     <div class="faq">
       <details open><summary>Does orbisRPC need a PC?</summary><p>No. It runs entirely on the PS4 as a GoldHEN payload and talks to the Discord gateway over TLS 1.2 by itself. No computer, Python script or FTP bridge is needed at runtime — which is exactly what separates it from older PS4 rich-presence tools that require a PC to be on while you play.</p></details>
+      <details><summary>What is orbisRPC?</summary><p>orbisRPC is a free, open-source Discord Rich Presence daemon for jailbroken PlayStation 4 consoles running GoldHEN. It shows the game you're playing — name, cover art and play timer — on your Discord profile, posted straight from the console.</p></details>
+      <details><summary>What does orbisRPC do on a PS4?</summary><p>It shows the PS4 game you're playing on your Discord profile: the game name, its cover art and an elapsed timer. It detects the foreground game, resolves its name and art, and posts the activity from the console itself.</p></details>
+      <details><summary>How do I install orbisRPC?</summary><p>Install the orbisRPC Setup PKG on the PS4, open it from the home screen, choose INSTALL / UPDATE, enter your Discord token and restart. It takes about five minutes. A manual route (copy <code>orbisRPC.elf</code> to <code>/data/payloads/</code>) also works.</p></details>
+      <details><summary>Is orbisRPC the same as Orbis Protocol or Orbis Cardano L2?</summary><p>No. orbisRPC is a Discord Rich Presence daemon for the jailbroken PlayStation 4 — a completely different project from Orbis Protocol (a Web3 social protocol) and the Orbis Layer&nbsp;2 zk-rollup for Cardano. They only share the word "Orbis". orbisRPC has nothing to do with blockchain or crypto.</p></details>
       <details><summary>What firmware does it support?</summary><p>Jailbroken firmware 5.05 through 13.52, with 9.00 to 13.52 confirmed working on real hardware.</p></details>
       <details><summary>Does it show homebrew, PS1 and PS2 games?</summary><p>Yes. Retail games come from Sony's TMDB, homebrew from pkg-zone, and more than 28,000 PS1/PS2/PSP classics from a curated community list — all with cover art.</p></details>
       <details><summary>Will it get my Discord account banned?</summary><p>orbisRPC uses a Discord user session token, and token-based presence is against Discord's Terms of Service. This is standard for headless presence tools — every alternative in this category makes the same trade-off. The risk is yours to weigh.</p></details>
