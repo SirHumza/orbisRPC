@@ -205,3 +205,6 @@ First beta of the 1.1 stability line, from `main` (1.0.0) to `beta`.
   session is pending.
 - `zlib-stream`, runtime fingerprint fetch, and custom status are deferred
   to 1.2.
+
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms. -->
