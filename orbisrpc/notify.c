@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* notify.c - see notify.h. */
 #include "notify.h"
 #include "log.h"
@@ -5,6 +8,17 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+/* Once per boot, keyed by a short tag so callers can name what fired. */
+#define ONCE_MAX 8
+static char s_once_keys[ONCE_MAX][24];
+static int s_once_n = 0;
+
+/* Rate limiters, same keying. */
+#define THROTTLE_MAX 8
+static char s_throttle_keys[THROTTLE_MAX][24];
+static int64_t s_throttle_at[THROTTLE_MAX];
+static int s_throttle_n = 0;
 
 #ifdef ORBISRPC_SDK_PAYLOAD
 #include <fcntl.h>
@@ -36,17 +50,6 @@ int sceKernelSendNotificationRequest(int, notify_request_t *, size_t, int);
  * the notification service is expected to resolve. */
 #define NOTIFY_ICON_PATH "/user/data/orbisRPC/icon.png"
 #define NOTIFY_ICON_DIR  "/user/data/orbisRPC"
-
-/* Once per boot, keyed by a short tag so callers can name what fired. */
-#define ONCE_MAX 8
-static char s_once_keys[ONCE_MAX][24];
-static int s_once_n = 0;
-
-/* Rate limiters, same keying. */
-#define THROTTLE_MAX 8
-static char s_throttle_keys[THROTTLE_MAX][24];
-static int64_t s_throttle_at[THROTTLE_MAX];
-static int s_throttle_n = 0;
 
 /* Drop the icon once. A failure is fine: the notification still posts, just
  * with the system icon, which is better than posting nothing. */
@@ -116,6 +119,26 @@ void notify_show(const char *message){
     }
 }
 
+#else /* app build: no notification API wired here */
+
+#ifdef NOTIFY_TESTABLE
+/* Host tests: the payload's screen call is replaced by a counter, and the
+ * dedupe tables need a reset so each case starts from a clean boot. */
+static int s_test_count = 0;
+int notify_test_count(void){ return s_test_count; }
+void notify_test_reset(void){ s_test_count = 0; s_once_n = 0; s_throttle_n = 0; }
+#endif
+
+void notify_show(const char *message){
+#ifdef NOTIFY_TESTABLE
+    if(message && message[0]) s_test_count++;
+#else
+    (void)message;
+#endif
+}
+
+#endif
+
 /* A tiny key->seen map. Keys are compile-time literals at every call site, so
  * linear search over 8 slots is free and avoids allocating. */
 static int once_seen(const char *key){
@@ -152,13 +175,3 @@ void notify_throttled(const char *key, const char *message, int interval_s){
     }
     notify_show(message);
 }
-
-#else /* app build: no notification API wired here */
-
-void notify_show(const char *message){ (void)message; }
-void notify_once_boot(const char *key, const char *message){ (void)key; (void)message; }
-void notify_throttled(const char *key, const char *message, int interval_s){
-    (void)key; (void)message; (void)interval_s;
-}
-
-#endif

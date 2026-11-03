@@ -276,3 +276,6 @@ Last session (2026-09-29) applied patches:
 - Title stays after closing app fixed (closed_latch)
 
 Next steps noted: rebuild in WSL, send to GoldHEN, test on console, capture klog.
+
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms. -->

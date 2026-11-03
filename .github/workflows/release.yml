@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
 name: release
 on:
   push:
@@ -13,6 +15,12 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
+      - name: gate fingerprint freshness
+        run: |
+          python3 scripts/update_fingerprint.py --fetch
+          git diff --exit-code -- scripts/fingerprint.json orbisrpc/fingerprint_gen.h
+      - name: fingerprint pipeline tests
+        run: python3 -m unittest discover -s scripts/tests
       - name: checkout ps4-payload-sdk
         uses: actions/checkout@v5
         with:
@@ -47,20 +55,52 @@ jobs:
           echo "$NEEDED" | grep -q libSceSystemService.sprx || { echo "missing libSceSystemService (foreground detection)"; exit 1; }
           if echo "$NEEDED" | grep -q 'libkernel\.so'; then echo "FORBIDDEN: app-world libkernel.so"; exit 1; fi
           echo "linkage OK"
-      - name: attach ELF to release
+      - name: stage release asset names
+        run: |
+          cp build-sdk/orbisrpc_sdk.elf build-sdk/orbisrpc.bin
+          python3 - <<'PY'
+          import json
+          for name in ("ps1", "ps2", "psp"):
+              path = f"config/{name}.json"
+              with open(path, encoding="utf-8") as f:
+                  rows = json.load(f)
+              assert isinstance(rows, list) and rows, path
+              print(f"{path}: {len(rows)} entries")
+          PY
+          sha256sum build-sdk/orbisrpc_sdk.elf build-sdk/orbisrpc.bin \
+            config/ps1.json config/ps2.json config/psp.json > build-sdk/SHA256SUMS.txt
+      - name: attach ELF and retro index to release
         uses: softprops/action-gh-release@v3
         with:
-          files: build-sdk/orbisrpc_sdk.elf
+          files: |
+            build-sdk/orbisrpc_sdk.elf
+            build-sdk/orbisrpc.bin
+            build-sdk/SHA256SUMS.txt
+            config/ps1.json
+            config/ps2.json
+            config/psp.json
+            LICENSE
+            NOTICE
           generate_release_notes: true
           body: |
             ## Install
 
-            Test build `.elf` — no PKG yet.
+            Daemon payload `.elf` / `.bin`. The Setup PKG is experimental and
+            is not attached.
 
-            1. Delete the `/data/orbisRPC` folder from your PS4 first.
-            2. Put the `.elf` at `/data/payloads/` and launch it from the payload list.
-            3. First run creates the config, then waits (no token yet).
-            3. Open `/data/orbisRPC/config.json`, put your token in the `"token": "SET_ME"` slot.
-            4. Re-run the payload. Launch a game, watch Discord.
+            1. Put the payload at `/data/payloads/` and launch it from the
+               GoldHEN payload list (or elfldr / BinLoader).
+            2. First run creates `/data/orbisRPC/config.json`, then waits
+               (no token yet).
+            3. Over FTP, put your token in the `"token": "SET_ME"` slot.
+            4. Re-run the payload. Launch a game and watch Discord.
 
-            Firmware 9.00 through 13.52. Issues → Discord: https://discord.gg/BWEyfcT7ZQ (`testers-chat`).
+            Optional offline retro index: copy `ps1.json`, `ps2.json` and
+            `psp.json` to `/data/orbisRPC/`. PS1/PS2/PSP names then resolve
+            with no network call; the remote index is only a fallback.
+            Updates do not require deleting `/data/orbisRPC`.
+
+            Firmware 9.00 verified on the 0.4 daemon; 1.1 is host-tested and
+            its console checklist is pending. 13.x is CI-built and
+            community-reported, not verified on the maintainer's desk.
+            Issues → Discord: https://discord.gg/BWEyfcT7ZQ (`testers-chat`).

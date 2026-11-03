@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* retro.h - homebrew/retro title names and covers from retro-games.cybermask.
  *
  * Three JSON indexes, one per platform, checked in order. This exists because
@@ -35,6 +38,14 @@ int retro_wants(const char *title_id);
 int retro_extract(const char *p, size_t len, const char *pat,
                   char *name, size_t name_cap,
                   char *url, size_t url_cap);
+
+/* Scan a local index file for `pat` (the same `"id":"XXXX"` shape). This is
+ * the default path on a fresh console (D-08): the release ships ps1/ps2/psp
+ * JSON, so no DNS/TLS is needed. Returns 1 hit, 0 no match, -1 no file.
+ * Test seam — no sockets. */
+int retro_local_scan(const char *path, const char *pat,
+                     char *name, size_t name_cap,
+                     char *url, size_t url_cap);
 
 /* Which platform indexes this prefix could be in, in check order. Returns the
  * count and fills `out` with indices into the PS1/PS2/PSP list. */

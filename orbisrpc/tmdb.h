@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* tmdb.h - Sony TMDB runtime title/icon resolver (PS4 transport + cache). */
 #ifndef TMDB_H
 #define TMDB_H

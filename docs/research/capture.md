@@ -40,3 +40,6 @@
    (verified: 1,476,032-byte PRX repeatedly lands as a 1,719,072-byte
    ELF, different hash; random bytes and PKGs round-trip perfectly).
    Deliver plugins via PKG install only.
+
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms. -->

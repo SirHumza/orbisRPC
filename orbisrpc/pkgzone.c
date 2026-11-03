@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* pkgzone.c - see pkgzone.h. */
 #include "pkgzone.h"
 #include "log.h"
@@ -8,14 +11,21 @@
 #ifdef ORBISRPC_SDK_PAYLOAD
 #include "tls.h"
 #include "updater_http.h"
+#include "netconnect.h"
+#include "clock.h"
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <netdb.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <fcntl.h>
 #endif
 
 #define PKGZONE_BOILERPLATE "Install HB-Store on your Playstation"
+/* One page, one budget. This runs on the daemon's only thread, so a stalled
+ * third-party page must not be able to stop heartbeats and detection. */
+#define PKGZONE_DEADLINE_S 12
 
 int pkgzone_wants(const char *title_id){
     if(!title_id) return 0;
@@ -149,25 +159,11 @@ int pkgzone_resolve(const char *title_id, char *name, size_t name_cap,
     snprintf(host, sizeof host, "%s", PKGZONE_HOST);
     snprintf(path, sizeof path, "/details/%s", title_id);
 
-    struct addrinfo hints, *res = NULL;
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    if(getaddrinfo(host, "443", &hints, &res) != 0 || !res){
-        log_msg("pkgzone: dns fail for %s", host);
-        if(res) freeaddrinfo(res);
-        return -1;
-    }
-    int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if(fd < 0){ freeaddrinfo(res); log_msg("pkgzone: socket fail errno=%d", errno); return -1; }
-    if(connect(fd, res->ai_addr, (unsigned)res->ai_addrlen) != 0){
-        int e = errno;
-        freeaddrinfo(res);
-        close(fd);
-        log_msg("pkgzone: connect %s:443 fail errno=%d", host, e);
-        return -1;
-    }
-    freeaddrinfo(res);
+    /* Bounded non-blocking connect: a third-party page must never be able
+     * to freeze the daemon's only thread. The fd comes back non-blocking,
+     * matching the TLS handshake and body deadlines below. */
+    int fd = net_tcp_connect(host, 443, PKGZONE_DEADLINE_S);
+    if(fd < 0) return -1;
 
     tls_ctx_t *t = tls_start(fd, host);
     if(!t){
@@ -186,22 +182,34 @@ int pkgzone_resolve(const char *title_id, char *name, size_t name_cap,
         goto done;
     }
 
-    /* Read to EOF. Bounded: a hostile or broken page must not eat the heap. */
+    /* Read to EOF with a deadline. Two bounds: the heap (a hostile or broken
+     * page) and time (a connection that stays open but stops answering).
+     * Treating tls_read()==0 as EOF would truncate a normal non-blocking
+     * read, so only a negative return ends the loop early. */
     static char raw[PKGZONE_MAX_HTML + 4096];
     size_t total = 0;
+    int64_t dl = orbis_mono_s() + PKGZONE_DEADLINE_S + 10;
     for(;;){
         int n = tls_read(t, raw + total, sizeof raw - total - 1);
         if(n < 0) break;
-        if(n == 0) break;
+        if(n == 0){
+            if(orbis_mono_s() > dl){
+                log_msg("pkgzone: %s read timeout after %zu bytes", path, total);
+                break;
+            }
+            usleep(20000);
+            continue;
+        }
         total += (size_t)n;
         if(total >= sizeof raw - 1) break;
     }
     raw[total] = 0;
 
-    int status = 0, blen = 0;
+    int status = 0;
+    size_t blen = 0;
     char loc[256];
     char *body = upd_parse_response(raw, total, PKGZONE_MAX_HTML, &status,
-                                    (size_t *)&blen, loc, sizeof loc);
+                                    &blen, loc, sizeof loc);
     if(!body){ log_msg("pkgzone: unparseable HTTP response (%zu bytes)", total); goto done; }
     if(status != 200){
         log_msg("pkgzone: status %d", status);

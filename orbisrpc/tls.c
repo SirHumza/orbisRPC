@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* tls.c - mbedTLS-backed TLS client for orbisRPC.
  *
  * Why mbedTLS and not BearSSL: Cloudflare (fronting gateway.discord.gg)

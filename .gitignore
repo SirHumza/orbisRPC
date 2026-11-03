@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
 build/
 __pycache__/
 *.o
@@ -11,6 +13,13 @@ __pycache__/
 config/config.ps4.json
 plugin/build/
 tests/test_utils
+tests/test_ws
+tests/test_ws_asan
+tests/test_net
+tests/test_net_asan
+tests/.objs/
+tests/.objs-asan/
+tests/*.d
 config/icons/*
 !config/icons/logo.png
 

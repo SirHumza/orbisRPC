@@ -68,3 +68,6 @@ edits, LICENSE choice.
   tag-gated (no run on `main` pushes).
 - Push to `main` → CI green; no new warnings besides the Ubuntu-26
   future notice.
+
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms. -->

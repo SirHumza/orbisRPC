@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* ui.c - native PS4 dialogs: MsgDialog (ok / yes-no / progress) + ImeDialog.
  * Everything here needs the console (dialog system calls); pure logic
  * (validation, config merge) lives in icfg.c and is host-tested. */

@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* gamecache.h - persistent title id -> {name, cover URL} store.
  *
  * Replaces the two caches this used to have:
@@ -19,10 +22,15 @@
 #include <stdint.h>
 
 #define GAMECACHE_PATH "/data/orbisRPC/games_cache.json"
-#define GAMECACHE_MAX_ENTRIES 512
+#define GAMECACHE_MAX_ENTRIES 256
 #define GAMECACHE_ID_LEN   16
 #define GAMECACHE_NAME_LEN 128
 #define GAMECACHE_ART_LEN  512
+#define GAMECACHE_MP_LEN   512
+/* Hard ceiling for the on-disk file. 256 entries at their field caps stay
+ * below this, and save refuses anything larger rather than growing without
+ * bound on a console with a small /data partition. */
+#define GAMECACHE_MAX_BYTES (512u * 1024u)
 /* Entries older than this are re-resolved rather than trusted forever: a
  * homebrew title can be renamed upstream and a stale name would stick. */
 #define GAMECACHE_TTL_SECS (30LL*24*3600)
@@ -32,6 +40,10 @@ typedef struct {
     char id[GAMECACHE_ID_LEN];
     char name[GAMECACHE_NAME_LEN];
     char art[GAMECACHE_ART_LEN];
+    /* Resolved Discord external-asset path for `art` ("mp:..."). Persisted
+     * so a boot with no network can still show the cover and a fresh cache
+     * hit costs no external-assets call. */
+    char mp[GAMECACHE_MP_LEN];
     int64_t at;
 } gamecache_entry_t;
 
@@ -40,7 +52,8 @@ typedef struct {
 /* Parse a games_cache.json document. Returns the number of entries loaded, or
  * -1 when the document is unusable. Entries that are malformed are skipped
  * rather than failing the whole load. `max` caps how many are stored.
- * `now` is compared against each entry's "at" to drop stale rows. */
+ * Stale entries are kept: `gamecache_get` ignores them, but
+ * `gamecache_get_any` can still show the last known name/art offline. */
 int gamecache_parse(const char *json, size_t len, gamecache_entry_t *out,
                     int max, int64_t now);
 
@@ -58,9 +71,18 @@ int gamecache_id_valid(const char *id);
 void gamecache_load(void);
 
 /* 1 + filled name (and art when the entry has one) for a fresh entry.
- * 0 when absent or stale, so the caller falls through to the network. */
+ * 0 when absent or stale, so the caller falls through to the network.
+ * `art` is the resolved "mp:" path when one is cached, else the raw URL. */
 int gamecache_get(const char *id, char *name, size_t name_cap,
                   char *art, size_t art_cap);
+
+/* Same lookup ignoring the TTL. Used only as the last fallback after every
+ * resolver failed, so an offline boot still shows the last known card. */
+int gamecache_get_any(const char *id, char *name, size_t name_cap,
+                      char *art, size_t art_cap);
+
+/* Persist the resolved external-asset path for a stored title. 1 changed. */
+int gamecache_set_mp(const char *id, const char *mp);
 
 /* Insert or update. `src` is informational and stored for diagnostics only.
  * Returns 1 if the store changed (caller may log), 0 if unchanged/full. */

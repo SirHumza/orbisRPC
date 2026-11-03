@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* updater.h - self-updater: version compare, staged install. */
 #ifndef UPDATER_H
 #define UPDATER_H

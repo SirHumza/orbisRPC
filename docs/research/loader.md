@@ -21,3 +21,6 @@
 
 - Whether a newer GoldHEN (v2.4b18+) fixes the 9090 segfault.
 - The exact GoldHEN build on the test console (About screen).
+
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms. -->

@@ -1,13 +1,19 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* retro.c - see retro.h. */
 #include "retro.h"
 #include "log.h"
+#include "clock.h"
 #include <errno.h>
 #ifdef ORBISRPC_SDK_PAYLOAD
 #include "tls.h"
+#include "netconnect.h"
 #include <sys/socket.h>
 #include <netdb.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <fcntl.h>
 #endif
 #include <string.h>
 #include <stdio.h>
@@ -155,6 +161,17 @@ static int grab_value(const char *key, const char *end, char *dst, size_t cap){
     return grab_string(c + 1, end, dst, cap);
 }
 
+/* Bounded substring search. The streaming window is a fixed byte buffer and
+ * is not guaranteed to be NUL-terminated at `len`; strstr() would read past
+ * the valid region (and could match a key in adjacent memory). */
+static const char *find_bytes(const char *hay, size_t hlen, const char *needle){
+    size_t n = strlen(needle);
+    if(!hay || hlen < n) return NULL;
+    for(size_t i = 0; i + n <= hlen; i++)
+        if(!memcmp(hay + i, needle, n)) return hay + i;
+    return NULL;
+}
+
 /* Pull the entry for `pat` ("id":"XXXX") out of a body region. */
 int retro_extract(const char *p, size_t len, const char *pat,
                   char *name, size_t name_cap,
@@ -169,10 +186,10 @@ int retro_extract(const char *p, size_t len, const char *pat,
         if(!memcmp(q, pat, strlen(pat))){ hit = q; break; }
     if(!hit) return 0;
     const char *end = p + len;
-    const char *nm = strstr(hit, "\"name\"");
-    const char *cv = strstr(hit, "\"cover\"");
-    if(nm && nm < end) grab_value(nm, end, name, name_cap);
-    if(cv && cv < end) grab_value(cv, end, url, url_cap);
+    const char *nm = find_bytes(hit, (size_t)(end - hit), "\"name\"");
+    const char *cv = find_bytes(hit, (size_t)(end - hit), "\"cover\"");
+    if(nm) grab_value(nm, end, name, name_cap);
+    if(cv) grab_value(cv, end, url, url_cap);
     return name[0] ? 1 : 0;
 }
 
@@ -182,29 +199,48 @@ int retro_extract(const char *p, size_t len, const char *pat,
  * a tail of RETRO_TAIL bytes is kept so a match spanning a chunk boundary is
  * still found. */
 
+/* Local index first (D-08): the release ships ps1/ps2/psp JSON next to the
+ * payload, so a fresh console names retro titles with no DNS, no TLS and no
+ * nanoDNS exception. Remote fetch stays as the fallback. Returns 1 match,
+ * 0 scanned-end, -1 no local file. */
+int retro_local_scan(const char *path, const char *pat,
+                     char *name, size_t name_cap,
+                     char *url, size_t url_cap){
+    FILE *f = fopen(path, "rb");
+    if(!f) return -1;
+    static char win[64 * 1024 + RETRO_TAIL];
+    size_t have = 0;
+    int rc = 0;
+    for(;;){
+        if(retro_extract(win, have, pat, name, name_cap, url, url_cap)){
+            rc = 1;
+            break;
+        }
+        if(have > RETRO_TAIL){
+            memmove(win, win + have - RETRO_TAIL, RETRO_TAIL);
+            have = RETRO_TAIL;
+        }
+        size_t r = fread(win + have, 1, sizeof win - have - 1, f);
+        if(r == 0) break;
+        have += r;
+    }
+    fclose(f);
+    return rc;
+}
+
 #ifdef ORBISRPC_SDK_PAYLOAD
 static int retro_fetch_scan(const char *path, const char *pat,
                             char *name, size_t name_cap,
                             char *url, size_t url_cap){
-    struct addrinfo hints, *res = NULL;
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    if(getaddrinfo(RETRO_HOST, "443", &hints, &res) != 0 || !res){
-        if(res) freeaddrinfo(res);
-        return -1;
-    }
-    int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if(fd < 0){ freeaddrinfo(res); return -1; }
-    struct timeval tv = { .tv_sec = RETRO_DEADLINE_S, .tv_usec = 0 };
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
-    if(connect(fd, res->ai_addr, res->ai_addrlen) != 0){
-        freeaddrinfo(res); close(fd); return -1;
-    }
-    freeaddrinfo(res);
+    /* Bounded non-blocking connect; the fd comes back non-blocking, which
+     * the TLS pump and the deadline read loops below require. */
+    int fd = net_tcp_connect(RETRO_HOST, 443, RETRO_DEADLINE_S);
+    if(fd < 0) return -1;
 
     tls_ctx_t *t = tls_start(fd, RETRO_HOST);
     if(!t){ close(fd); return -1; }
+
+    int64_t dl = orbis_mono_s() + RETRO_DEADLINE_S;
 
     char req[512];
     int rl = snprintf(req, sizeof req,
@@ -222,16 +258,27 @@ static int retro_fetch_scan(const char *path, const char *pat,
 
     /* --- headers --- */
     while(have < RETRO_HDR_MAX){
-        int r = tls_read(t, win + have, sizeof win - have);
-        if(r <= 0) break;
+        /* Reserve one byte so strstr() below always sees a terminator, even
+         * when the response has no NUL in the header region. */
+        int r = tls_read(t, win + have, sizeof win - have - 1);
+        if(r == 0){
+            if(orbis_mono_s() > dl){
+                log_msg("retro: %s header timeout", path);
+                rc = -1; goto done;
+            }
+            usleep(20000);
+            continue;
+        }
+        if(r < 0) break;
         have += (size_t)r;
+        win[have] = 0;
         char *e = strstr(win, "\r\n\r\n");
         if(e){
             size_t body = (size_t)(e - win) + 4;
             if(strncmp(win, "HTTP/1.1 200", 12) != 0 &&
                strncmp(win, "HTTP/2 200", 11) != 0){
-                log_msg("retro: %s -> HTTP %d", path,
-                        atoi(win + 9) ? atoi(win + 9) : 0);
+                int st = (int)strtol(win + 9, NULL, 10);
+                log_msg("retro: %s -> HTTP %d", path, st);
                 rc = -1;
                 goto done;
             }
@@ -253,7 +300,15 @@ static int retro_fetch_scan(const char *path, const char *pat,
         /* drop everything except a tail that can still contain a whole entry */
         if(have > RETRO_TAIL) memmove(win, win + have - RETRO_TAIL, RETRO_TAIL), have = RETRO_TAIL;
         int r = tls_read(t, win + have, sizeof win - have - 1);
-        if(r <= 0) break;                 /* EOF or deadline: a miss, not an error */
+        if(r == 0){
+            if(orbis_mono_s() > dl){
+                log_msg("retro: %s body timeout", path);
+                break;
+            }
+            usleep(20000);
+            continue;
+        }
+        if(r < 0) break;                  /* EOF or error: a miss, not a crash */
         have += (size_t)r;
     }
     rc = 0;                               /* scanned to the end, no match */
@@ -290,11 +345,29 @@ int retro_resolve(const char *title_id, char *name, size_t name_cap,
     int n = retro_candidates(title_id, cands);
     if(!n) return -1;
 
+    /* One network budget for the whole lookup, not per platform: a dead link
+     * would otherwise spend 25 s on each of three indexes and starve the
+     * gateway heartbeat. A miss retries on the normal 5-minute resolve
+     * window, so giving up early costs nothing. */
+    int64_t budget_end = orbis_mono_s() + RETRO_DEADLINE_S;
+
     for(int k = 0; k < n; k++){
         char path[64];
         snprintf(path, sizeof path, "/%s", s_plat_file[cands[k]]);
         name[0] = 0;
         if(url && url_cap) url[0] = 0;
+        char local[128];
+        snprintf(local, sizeof local, "/data/orbisRPC/%s", s_plat_file[cands[k]]);
+        if(retro_local_scan(local, pat, name, name_cap, url, url_cap) == 1){
+            log_msg("retro: %s -> %s (%s, local)", title_id, name, local);
+            return 0;
+        }
+        name[0] = 0;
+        if(url && url_cap) url[0] = 0;
+        if(orbis_mono_s() > budget_end){
+            log_msg("retro: %s network budget spent; will retry later", title_id);
+            break;
+        }
         int rc = retro_fetch_scan(path, pat, name, name_cap, url, url_cap);
         if(rc == 1){
             log_msg("retro: %s -> %s (%s)", title_id, name, path);

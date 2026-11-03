@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* tmdb_crypto.c - self-contained SHA1 + HMAC-SHA1 + Sony TMDB URL builder
  * and response parser. No platform headers: host-unit-testable.
  *
@@ -138,8 +141,10 @@ int tmdb_parse(const char *body, size_t len,
                         src = up;
                     }
                 }
-                /* only http(s) URLs are usable as external assets */
-                if(!strncmp(src, "http://", 7) || !strncmp(src, "https://", 8)){
+                /* Only https is usable as an external asset. A too-long
+                 * http URL cannot be upgraded, so it is dropped rather
+                 * than sent in a form Discord silently ignores. */
+                if(!strncmp(src, "https://", 8)){
                     strncpy(icon, src, icon_cap-1); icon[icon_cap-1] = 0;
                 }
             }

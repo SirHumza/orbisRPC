@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* ws.c - WebSocket client over SceNet + mbedTLS TLS.
  * Non-blocking friendly: tls_read() returns 0 when no data is pending, and
  * the receive buffer grows for large server frames (user-account READY
@@ -11,6 +14,7 @@
 #ifdef ORBISRPC_SDK_PAYLOAD
 /* Payload-SDK build: plain BSD sockets, no Sony modules. getaddrinfo
  * replaces the kernel resolver; nothing needs initializing. */
+#include "netconnect.h"
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -40,7 +44,9 @@
 #endif
 
 static int s_net_ready = 0;
+#ifndef ORBISRPC_SDK_PAYLOAD
 static int s_net_mem = 0;
+#endif
 
 static int net_ensure(void){
     if(s_net_ready) return 0;
@@ -61,6 +67,10 @@ static int net_ensure(void){
     return 0;
 #endif
 }
+
+/* Public wrapper: the daemon's startup DNS probe needs the stack ready
+ * before any ws_connect(). */
+int ws_net_init(void){ return net_ensure(); }
 
 /* Write exactly n bytes of plaintext through the TLS engine. */
 static int ws_send_all(ws_t *w, const unsigned char *data, size_t n){
@@ -91,44 +101,34 @@ static void next_mask(unsigned char mk[4]){
     mk[2]=(unsigned char)((mk_seed>>16)&0xff); mk[3]=(unsigned char)((mk_seed>>24)&0xff);
 }
 
-int ws_connect(ws_t *w, const char *host, int port, const char *resource, const char *key){
+size_t ws_make_handshake(char *out, size_t cap, const char *host,
+                         const char *resource, const char *key,
+                         const char *user_agent){
+    if(!out || cap == 0 || !host || !key) return 0;
+    if(!user_agent || !user_agent[0]) user_agent = "orbisRPC";
+    int n = snprintf(out, cap,
+        "GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        "User-Agent: %s\r\n"
+        "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n",
+        resource ? resource : "/", host, user_agent, key);
+    if(n <= 0 || (size_t)n >= cap) return 0;
+    return (size_t)n;
+}
+
+int ws_connect(ws_t *w, const char *host, int port, const char *resource,
+               const char *key, const char *user_agent){
     memset(w,0,sizeof(*w));
     w->rcap = WS_RBUF_MIN;
     w->rbuf = (unsigned char*)malloc(w->rcap);
     if(!w->rbuf){ log_msg("ws: rbuf alloc fail"); return -1; }
     if(net_ensure()<0) goto fail;
 #ifdef ORBISRPC_SDK_PAYLOAD
-    /* Resolve via libc (works wherever BSD sockets do). */
-    struct addrinfo hints, *res = NULL;
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    {
-        char portbuf[16];
-        snprintf(portbuf, sizeof portbuf, "%d", port);
-        if(getaddrinfo(host, portbuf, &hints, &res) != 0 || !res){
-            log_msg("resolve fail: %s", host);
-            goto fail;
-        }
-    }
-    {
-        struct sockaddr_in *a = (struct sockaddr_in *)res->ai_addr;
-        unsigned char *q = (unsigned char *)&a->sin_addr.s_addr;
-        log_msg("dial %s -> %u.%u.%u.%u:%d", host, q[0], q[1], q[2], q[3], port);
-    }
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if(fd < 0){ log_msg("socket fail"); freeaddrinfo(res); goto fail; }
+    /* Bounded non-blocking connect: SO_SNDTIMEO does not bound connect(),
+     * and a blackholed route used to freeze the only thread for the
+     * kernel's SYN budget. The helper leaves the fd non-blocking. */
+    int fd = net_tcp_connect(host, port, 10);
+    if(fd < 0){ log_msg("connect fail to %s:%d", host, port); goto fail; }
     w->fd = fd; w->sock = fd;
-    {
-        struct timeval tv = { .tv_sec = 10, .tv_usec = 0 };
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
-    }
-    if(connect(fd, res->ai_addr, res->ai_addrlen) < 0){
-        log_msg("connect fail (syscall) to %s:%d", host, port);
-        freeaddrinfo(res);
-        goto fail;
-    }
-    freeaddrinfo(res);
     {
         /* Both timeouts stay armed for the socket's whole life (plus
          * NBIO below): a stuck peer can never wedge the daemon silently —
@@ -137,10 +137,6 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
         struct timeval tv0 = { .tv_sec = 15, .tv_usec = 0 };
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv0, sizeof tv0);
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv0, sizeof tv0);
-    }
-    {
-        int fl = fcntl(fd, F_GETFL, 0);
-        if(fl >= 0) fcntl(fd, F_SETFL, fl | O_NONBLOCK);
     }
     w->nb = 1;
     log_msg("tcp established");
@@ -211,19 +207,17 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
      * module needed). Socket is NBIO; tls_start pumps it with a deadline. */
     w->tls = tls_start(fd, host);
     if(!w->tls){ goto fail; }
-    /* HTTP Upgrade handshake. Desktop-client UA, NO Origin header (native
-     * clients don't send Origin to the gateway). Host has no :port —
-     * browsers never send the default-port suffix and the front side
-     * ignores requests it can't route. */
-    char req[640]; int n=snprintf(req,sizeof req,
-        "GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-        "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) discord/1.0.9175 Chrome/122.0.6261.112 Electron/30.0.8 "
-        "Safari/537.36\r\n"
-        "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n",
-        resource?resource:"/", host, key);
-    if(ws_send_all(w, (const unsigned char*)req, (size_t)n) < 0){ log_msg("hs write fail"); goto fail; }
-    log_msg("hs request sent (%dB)", n);
+    /* HTTP Upgrade handshake. The UA comes from the same identity tuple as
+     * IDENTIFY and REST; NO Origin header (native clients don't send Origin
+     * to the gateway). Host has no :port — browsers never send the
+     * default-port suffix and the front side ignores requests it can't
+     * route. */
+    char req[1024];
+    size_t n = ws_make_handshake(req, sizeof req, host,
+                                 resource ? resource : "/", key, user_agent);
+    if(n == 0){ log_msg("hs request too long"); goto fail; }
+    if(ws_send_all(w, (const unsigned char*)req, n) < 0){ log_msg("hs write fail"); goto fail; }
+    log_msg("hs request sent (%zuB)", n);
     /* Read response headers; bytes past "\r\n\r\n" are the first websocket
      * frame (usually HELLO arriving early) and MUST be kept, not dropped. */
     char hdr[2048]; int hlen=0, rd; int64_t t0=orbis_mono_s();
@@ -333,14 +327,81 @@ static int valid_frame_header(const unsigned char *b, uint64_t plen){
     int op = b[0] & 0x0f;
     int masked = (b[1] & 0x80) != 0;
     if (rsv || masked) return 0;
-    if (op >= 3 && op <= 7) return 0; /* reserved opcodes */
+    if (op >= 3 && op <= 7) return 0; /* reserved data opcodes */
+    if (op >= 0xB) return 0;          /* reserved control opcodes */
     if (op >= 8 && (!fin || plen > 125)) return 0; /* control: final, <=125 */
     if ((b[1] & 0x7f) == 127 && (b[2] & 0x80)) return 0; /* absurd 64-bit length */
     return 1;
 }
 
-int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out){
-    if(!w || !w->connected || !buf || cap==0) return -1;
+/* A message split across frames is bounded by the same 8 MB the single-frame
+ * path already allows; anything larger is dropped and the caller told so. */
+#define WS_MSG_MAX WS_RBUF_MAX
+
+static void frag_reset(ws_t *w){
+    free(w->frag);
+    w->frag = NULL;
+    w->frag_len = 0;
+    w->frag_cap = 0;
+    w->frag_op = 0;
+    w->in_frag = 0;
+    w->frag_drop = 0;
+}
+
+/* Append one fragment to the reassembly buffer. -1 when the message would
+ * exceed WS_MSG_MAX or the allocation fails; the caller then discards the
+ * remaining fragments so the stream stays in sync. */
+static int frag_append(ws_t *w, const unsigned char *p, size_t n){
+    if(n == 0) return 0;
+    if(w->frag_len > WS_MSG_MAX || n > WS_MSG_MAX - w->frag_len) return -1;
+    size_t need = w->frag_len + n;
+    if(need > w->frag_cap){
+        size_t ncap = w->frag_cap ? w->frag_cap : 4096;
+        while(ncap < need) ncap *= 2;
+        if(ncap > WS_MSG_MAX) ncap = WS_MSG_MAX;
+        unsigned char *nb = (unsigned char*)realloc(w->frag, ncap);
+        if(!nb) return -1;
+        w->frag = nb;
+        w->frag_cap = ncap;
+    }
+    memcpy(w->frag + w->frag_len, p, n);
+    w->frag_len = need;
+    return 0;
+}
+
+/* Deliver one complete message. Buffer mode copies at most cap-1 bytes and
+ * returns that count (the old behaviour); heap mode returns the whole
+ * payload, which the READY handler needs because session_id and
+ * resume_gateway_url can sit past the first couple of KB. */
+static int frame_deliver(char *buf, size_t cap, char **heap_out,
+                         size_t *heap_len, const unsigned char *src,
+                         size_t n, int op, int fin,
+                         int *opcode_out, int *fin_out){
+    if(heap_out){
+        char *p = (char*)malloc(n + 1);
+        if(!p) return -1;
+        if(n) memcpy(p, src, n);
+        p[n] = 0;
+        *heap_out = p;
+        if(heap_len) *heap_len = n;
+        if(opcode_out) *opcode_out = op;
+        if(fin_out) *fin_out = fin;
+        return (int)n;
+    }
+    size_t copy = n;
+    if(copy > cap - 1) copy = cap - 1;
+    if(copy) memcpy(buf, src, copy);
+    buf[copy] = 0;
+    if(heap_len) *heap_len = copy;
+    if(opcode_out) *opcode_out = op;
+    if(fin_out) *fin_out = fin;
+    return (int)copy;
+}
+
+static int recv_frame_core(ws_t *w, char *buf, size_t cap, char **heap_out,
+                           size_t *heap_len, int *opcode_out, int *fin_out){
+    if(!w || !w->connected) return -1;
+    if(!heap_out && (!buf || cap == 0)) return -1;
     for(;;){
         /* compact consumed bytes to the front */
         if(w->rpos>0){
@@ -354,6 +415,7 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
             w->skip_left -= take; w->rpos += take;
             if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
             if(w->skip_left==0){
+                if(w->in_frag) frag_reset(w);  /* message can't be reassembled */
                 if(opcode_out)*opcode_out=w->skip_op;
                 return -3; /* whole oversized frame skipped */
             }
@@ -390,15 +452,83 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
                     else { log_msg("ws: rbuf grow fail"); }
                 }
                 if((uint64_t)(w->rlen-w->rpos) >= total){
-                    size_t copy = (size_t)plen;
-                    if(copy > cap-1) copy = cap-1;
-                    memcpy(buf, b+hdr, copy);
-                    buf[copy]=0;
-                    w->rpos += (size_t)total;
-                    if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
-                    if(opcode_out)*opcode_out=wire_op;
-                    if(fin_out)*fin_out=fin;
-                    return (int)copy;
+                    const unsigned char *payload = b + hdr;
+                    size_t plen_sz = (size_t)plen;
+
+                    /* Control frames may be injected inside a fragmented
+                     * message (RFC 6455 5.4). Deliver them immediately and
+                     * keep the reassembly buffer untouched. */
+                    if(wire_op >= 8){
+                        int r = frame_deliver(buf, cap, heap_out, heap_len,
+                                              payload, plen_sz, wire_op, fin,
+                                              opcode_out, fin_out);
+                        w->rpos += (size_t)total;
+                        if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
+                        return r;
+                    }
+
+                    if(wire_op == 0){
+                        /* Continuation: only valid after a FIN=0 start. */
+                        if(!w->in_frag){
+                            log_msg("ws: continuation frame with no start");
+                            w->rpos += (size_t)total;
+                            if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
+                            return -2;
+                        }
+                        if(!w->frag_drop && frag_append(w, payload, plen_sz) < 0){
+                            log_msg("ws: fragmented message over %uB; dropping",
+                                    (unsigned)WS_MSG_MAX);
+                            w->frag_drop = 1;
+                        }
+                        w->rpos += (size_t)total;
+                        if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
+                        if(!fin) continue;
+                        if(w->frag_drop){ frag_reset(w); return -3; }
+                        {
+                            int msg_op = w->frag_op;
+                            int r = frame_deliver(buf, cap, heap_out, heap_len,
+                                                  w->frag, w->frag_len,
+                                                  msg_op, 1, opcode_out, fin_out);
+                            frag_reset(w);
+                            return r;
+                        }
+                    }
+
+                    /* A new data message while another is still open is a
+                     * protocol violation, not something to splice together. */
+                    if(w->in_frag){
+                        log_msg("ws: new data frame inside fragmented message");
+                        w->rpos += (size_t)total;
+                        if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
+                        frag_reset(w);
+                        return -2;
+                    }
+
+                    if(!fin){
+                        /* First fragment: buffer it and wait for the rest. */
+                        w->in_frag = 1;
+                        w->frag_op = wire_op;
+                        if(frag_append(w, payload, plen_sz) < 0){
+                            log_msg("ws: fragmented message over %uB; dropping",
+                                    (unsigned)WS_MSG_MAX);
+                            w->frag_drop = 1;
+                        }
+                        w->rpos += (size_t)total;
+                        if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
+                        continue;
+                    }
+
+                    /* Complete single-frame message. Buffer callers get the
+                     * JSON prefix they need (op/t/s) and the rest is
+                     * drained; heap callers get every byte. */
+                    {
+                        int r = frame_deliver(buf, cap, heap_out, heap_len,
+                                              payload, plen_sz, wire_op, fin,
+                                              opcode_out, fin_out);
+                        w->rpos += (size_t)total;
+                        if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
+                        return r;
+                    }
                 }
             }
             if(w->rlen == w->rcap){ /* full with no parseable frame: give up cleanly */
@@ -413,20 +543,32 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
     }
 }
 
+int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out){
+    return recv_frame_core(w, buf, cap, NULL, NULL, opcode_out, fin_out);
+}
+
+int ws_recv_alloc(ws_t *w, char **out, size_t *out_len, int *opcode_out, int *fin_out){
+    if(!out) return -1;
+    *out = NULL;
+    if(out_len) *out_len = 0;
+    return recv_frame_core(w, NULL, 0, out, out_len, opcode_out, fin_out);
+}
+
 int ws_close(ws_t *w){
     if(!w) return -1;
-    if(!w->connected){
-        free(w->rbuf); w->rbuf=NULL; w->rcap=0; w->rlen=0; w->rpos=0;
-        return 0;
-    }
-    ws_send_control(w, 0x8); /* best-effort masked CLOSE */
-    tls_free((tls_ctx_t*)w->tls);
+    /* Tear down transport resources even when a peer drop already cleared
+     * `connected`. The old early return leaked the TLS context and socket on
+     * every heartbeat timeout / send failure, because the daemon only calls
+     * ws_close() after discord_tick() has set connected=0. */
+    if(w->connected) ws_send_control(w, 0x8); /* best-effort masked CLOSE */
+    if(w->tls) tls_free((tls_ctx_t*)w->tls);
 #ifdef ORBISRPC_SDK_PAYLOAD
-    close(w->fd);
+    if(w->fd > 0) close(w->fd);
 #else
-    sceNetSocketClose(w->fd);
+    if(w->fd > 0) sceNetSocketClose(w->fd);
 #endif
     free(w->rbuf); w->rbuf=NULL; w->rcap=0;
+    frag_reset(w);
     w->connected=0; w->sock=0; w->tls=NULL; w->fd=0; w->rlen=0; w->rpos=0;
     w->skip_left=0;
     return 0;

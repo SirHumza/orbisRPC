@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* icfg.h - installer config read/write for /data/orbisRPC/config.json.
  * Read-modify-write: preserves learned titles and every other field.
  * Pure logic (token_valid) is host-tested. */
@@ -7,8 +10,9 @@
 
 #define ICFG_PATH "/data/orbisRPC/config.json"
 
-/* 1 valid user token, 0 not. Tokens are dot-separated base64-ish,
- * 40..150 chars. Rejects placeholders and whitespace. */
+/* 1 valid user token, 0 not. Delegates to the daemon's shared token.h:
+ * 40..200 chars, at least three dot-separated base64url segments.
+ * Rejects placeholders, whitespace and empty segments. */
 int token_valid(const char *t);
 
 /* Load current token ("" when missing). 0 ok, -1 unreadable. */

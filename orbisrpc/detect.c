@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* detect.c
  * Foreground-game detection on PS4.
  *
@@ -27,6 +30,11 @@
 #include "bigapp.h"
 #include "pkgzone.h"
 #include "gamecache.h"
+#include "builtin_titles.h"
+#include "goldhen.h"
+#include "art.h"
+#include "discord.h"
+#include "sched.h"
 #ifdef ORBISRPC_SDK_PAYLOAD
 /* Payload-SDK build: dlopen/dlsym come from the SDK libc (dlfcn);
  * there is no UserService here — user_init() below degrades. */
@@ -205,6 +213,23 @@ static int last_focused_scene(char *out, size_t cap){
 }
 #endif
 
+/* Defined outside the payload block so the app build links too. */
+int detect_goldhen_version(char *out, size_t cap){
+#ifdef ORBISRPC_SDK_PAYLOAD
+    if(!out || cap == 0) return -1;
+    out[0] = 0;
+    if(settings_msgbuf_acquire() != 0) return -1;
+    size_t len = g_msgbuf_sz;
+    if(sysctlbyname("kern.msgbuf", g_msgbuf, &len, NULL, 0) != 0) return -1;
+    if(len >= g_msgbuf_sz) len = g_msgbuf_sz - 1;
+    g_msgbuf[len] = 0;
+    return goldhen_version_from_log(g_msgbuf, out, cap);
+#else
+    (void)out; (void)cap;
+    return -1;   /* app build: no kern.msgbuf story */
+#endif
+}
+
 /* Defined outside the payload block so the app build links too; it has no
  * kern.msgbuf story there and reports unknown rather than guessing.
  *
@@ -317,13 +342,27 @@ static int is_title_prefix(const char *n){
 /* last resolved titleId (for Discord asset key); valid after a successful
  * detect_current_game / detect_name_for_title. */
 static char s_last_titleid[16] = "";
-static char s_last_art[256] = "";
+static char s_last_art[512] = "";
+
+/* A URL Discord has no mp: mapping for will not resolve on the next poll.
+ * Retry at most every 15 minutes per URL so a dead network cannot stall the
+ * detection loop (and the gateway heartbeat that shares it) on every tick. */
+static int art_retry_due(const char *url){
+    static char tried[512];
+    static int64_t last;
+    if(strcmp(url, tried) != 0){
+        snprintf(tried, sizeof tried, "%s", url);
+        last = orbis_mono_s();
+        return 1;
+    }
+    return sched_retry_due(orbis_mono_s(), &last, 900);
+}
 /* Last resolved title: same title in a row reuses its name/art with zero
  * I/O. Any title change resolves fresh — no cross-title cache exists, so
  * stale identities are impossible by construction. */
 static char s_rs_tid[16] = "";
 static char s_rs_name[128] = "";
-static char s_rs_art[256] = "";
+static char s_rs_art[512] = "";
 /* Raw-ID (unresolved) entries are retried, not frozen: a transient miss
  * (slow I/O at launch) must not lock the raw ID in forever. Successful
  * resolves reuse indefinitely; raw fallbacks re-resolve after 5 min. */
@@ -473,7 +512,7 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
          * earlier boot arrives with its art attached; without this, art is
          * RAM-only and the presence falls through to a pack URL that may
          * not exist, which is exactly the missing-icon symptom. */
-        char cc_art[256] = "";
+        char cc_art[512] = "";
         if(!named && gamecache_get(titleId, out_name, cap, cc_art, sizeof cc_art)){
             named = 1;
             if(cc_art[0]){
@@ -487,6 +526,16 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
          * names learned before games_cache existed keep resolving. The daemon
          * no longer writes here -- that is games_cache.json now. */
         if(!named && cfg_title(&g_cfg, titleId, out_name, cap)==0){ named=1; log_msg("name: %s via config", out_name); }
+        /* D-09: homebrew ids no index carries. A name here beats a raw id
+         * without spending a network round trip. */
+        if(!named){
+            const char *bt = builtin_title_name(titleId);
+            if(bt){
+                snprintf(out_name, cap, "%s", bt);
+                named = 1;
+                log_msg("name: %s via builtin", out_name);
+            }
+        }
         /* Three mutually exclusive sources, one per class of title id:
          *   CUSA*  -> Sony TMDB
          *   retro  -> retro-games (ps1.json, then ps2.json, then psp.json)
@@ -528,11 +577,73 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
                 }
             }
         }
-        /* Only a genuine resolve is worth keeping. detect_last_ok() is 0 for
-         * a raw-id fallback, so a network miss never poisons the cache. */
-        if(named && detect_last_ok())
+        /* title_rules.art is an explicit operator override and must win over
+         * whatever TMDB/pkg-zone/retro returned. Put it through the same
+         * resolve/cache path as metadata art; the presence builder is
+         * cache-only by design, so an unresolvable override simply sends no
+         * art instead of blocking op 3 on a TLS round trip. */
+        {
+            const cfg_title_rule_t *art_rule = cfg_title_rule(&g_cfg, titleId);
+            if(art_rule && art_rule->art[0]){
+                strncpy(s_last_art, art_rule->art, sizeof s_last_art - 1);
+                s_last_art[sizeof s_last_art - 1] = 0;
+            }
+        }
+        /* `named` already means a real source produced this name; a raw-id
+         * fallback leaves it 0. Do not consult detect_last_ok() here: it
+         * still describes the previous title until resolve_remember() runs
+         * below, so a first-run miss would suppress caching the next title
+         * even after a successful TMDB/retro/pkg-zone/config resolve. */
+        if(named)
             gamecache_put(titleId, out_name, s_last_art,
                           want_retro ? "retro" : try_pkgzone ? "pkgzone" : "tmdb");
+        /* Resolve the external-asset mapping here, not inside the presence
+         * POST: once persisted, a cache hit and an offline boot can send the
+         * cover with no network call at all. A failure just posts without
+         * art; it never fails the presence. Retried on a 15-minute window:
+         * a mapping Discord does not have will not appear on the next poll,
+         * and a stalled resolve would delay the gateway heartbeat. */
+        if(s_last_art[0] && strncmp(s_last_art, "mp:", 3) != 0 &&
+           art_retry_due(s_last_art)){
+            char mpv[512];
+            if(art_resolve_mp(g_cfg.application_id, g_cfg.token, s_last_art,
+                              mpv, sizeof mpv)){
+                snprintf(s_last_art, sizeof s_last_art, "%s", mpv);
+                gamecache_set_mp(titleId, mpv);
+            }
+        }
+        /* No cover from metadata: try the configured icon pack. This is the
+         * same <art_base_url><key>.png fallback the presence builder used to
+         * resolve inline; doing it here keeps the op 3 path cache-only and
+         * persists the mapping like any other cover. */
+        if(named && !s_last_art[0] && g_cfg.art_base_url[0]){
+            char key[16], u[384], mpv[512];
+            if(discord_asset_key(titleId, key, sizeof key) >= 4){
+                int n = snprintf(u, sizeof u, "%s%s.png",
+                                 g_cfg.art_base_url, key);
+                if(n > 0 && (size_t)n < sizeof u && art_retry_due(u) &&
+                   art_resolve_mp(g_cfg.application_id, g_cfg.token, u,
+                                  mpv, sizeof mpv)){
+                    snprintf(s_last_art, sizeof s_last_art, "%s", mpv);
+                    gamecache_set_mp(titleId, mpv);
+                }
+            }
+        }
+        /* Every resolver failed. Fall back to the last known card even when
+         * it is past the TTL: an offline console showing yesterday's name
+         * and cover beats a bare title id. The next online poll still
+         * refreshes it. */
+        if(!named){
+            char old_art[512] = "";
+            if(gamecache_get_any(titleId, out_name, cap, old_art, sizeof old_art)){
+                named = 1;
+                if(old_art[0]){
+                    strncpy(s_last_art, old_art, sizeof s_last_art - 1);
+                    s_last_art[sizeof s_last_art - 1] = 0;
+                }
+                log_msg("name: %s via games_cache (offline fallback)", out_name);
+            }
+        }
         if(!named){
             strncpy(out_name, titleId, cap-1); out_name[cap-1]=0;
             /* Every source missed. Without this line the presence just shows
@@ -564,6 +675,15 @@ int detect_name_for_title(const char *titleId, char *out_name, size_t cap){
         return 0;
     }
     if(cfg_title(&g_cfg, titleId, out_name, cap)==0){ log_msg("name: %s via config", out_name); resolve_remember(titleId, out_name, "", 1); return 0; }
+    {
+        const char *bt = builtin_title_name(titleId);
+        if(bt){
+            snprintf(out_name, cap, "%s", bt);
+            log_msg("name: %s via builtin", out_name);
+            resolve_remember(titleId, out_name, "", 1);
+            return 0;
+        }
+    }
     {
         char art[256] = "";
         if(tmdb_resolve(titleId, out_name, cap, art, sizeof art)==0){

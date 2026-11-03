@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
 """gen_nametable.py - build orbisrpc/nametable.h from config/titles.json.
 
 RETIRED: baked nametables were replaced by the self-learning titles map.

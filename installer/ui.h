@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* ui.h - native dialog helpers for the installer wizard. */
 #ifndef INSTALLER_UI_H
 #define INSTALLER_UI_H

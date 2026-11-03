@@ -1,28 +1,24 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* icfg.c - atomic read-modify-write over the daemon config. */
 #include "icfg.h"
 #include "jsonlite.h"
+#include "token.h"
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define ICFG_MAX (64u*1024u)
 
+/* One validator for both sides: the installer must not accept a token the
+ * daemon will refuse, nor refuse one the daemon would accept. token.h is
+ * header-only and is compiled into both binaries. */
 int token_valid(const char *t){
-    size_t n, i;
-    int dots = 0;
-    if(!t) return 0;
-    n = strlen(t);
-    if(n < 40 || n > 150) return 0;
-    if(!strcmp(t, "SET_ME") || !strcmp(t, "PUT_TOKEN_HERE")) return 0;
-    for(i = 0; i < n; i++){
-        char c = t[i];
-        if(c == '.'){ dots++; continue; }
-        if(!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-             (c >= '0' && c <= '9') || c == '_' || c == '-'))
-            return 0;
-    }
-    return dots >= 2;
+    return token_reason(t, NULL, 0) == 0;
 }
 
 static jl_val_t *icfg_read(const char *path){
@@ -58,14 +54,16 @@ static int icfg_write(const char *path, jl_val_t *r){
         return -1;
     s = jl_stringify(r);
     if(!s) return -1;
-    f = fopen(tmp, "wb");
-    if(!f){ free(s); return -1; }
+    /* The payload contains the token. Create it 0600 so there is no window
+     * where a permissive umask exposes it; fchmod is a guard after fdopen. */
+    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if(fd < 0){ free(s); return -1; }
+    f = fdopen(fd, "wb");
+    if(!f){ close(fd); remove(tmp); free(s); return -1; }
+    (void)fchmod(fileno(f), 0600);
     if(fputs(s, f) < 0) ok = 0;
-    if(ok){
-        int fd = fileno(f);
-        if(fd >= 0 && fsync(fd) != 0) ok = 0;
-    }
-    if(ok && fclose(f) != 0) ok = 0;
+    if(ok && fsync(fileno(f)) != 0) ok = 0;
+    if(fclose(f) != 0) ok = 0;   /* always close, even after a write error */
     free(s);
     if(!ok){ remove(tmp); return -1; }
     if(rename(tmp, path) != 0){ remove(tmp); return -1; }

@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* timesync.c - minimal SNTP client (RFC 5905, client mode only).
  * One UDP exchange per call; 3s I/O budget; any failure keeps the old
  * offset. Host-testable (POSIX only). */
@@ -24,7 +27,6 @@
 #define NTP_PORT 123
 
 static int64_t s_offset = 0;
-static int s_synced = 0;
 
 static int sntp_once(const char *host){
     unsigned char pkt[48];
@@ -67,7 +69,6 @@ static int sntp_once(const char *host){
                tx < NTP_EPOCH_OFFSET + 2050000000u){
                 int64_t ntp_unix = (int64_t)(tx - NTP_EPOCH_OFFSET);
                 s_offset = ntp_unix - (int64_t)time(NULL);
-                s_synced = 1;
                 ok = 0;
             }
         }

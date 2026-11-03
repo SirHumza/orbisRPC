@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
 """One-off downscale of a notification icon to 512x512.
 
 Notification icons are capped around 512x512; anything larger is rejected and

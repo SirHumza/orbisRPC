@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* send.h - loopback payload injection (clean-room, standard sockets).
  * Tries native GoldHEN BinLoader 9090, then elfldr 9021, then 9020.
  * 9020 is one-shot: accepted bytes count as sent. */

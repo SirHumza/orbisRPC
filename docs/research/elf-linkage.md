@@ -37,3 +37,6 @@ working; remaining suspects: stdio-heavy and SceNet-derived imports).
 
 - PIE vs EXEC (both crash), SELF vs ELF (page wants ELF), size (90KB dies),
   hash style, relocation families, segment permissions.
+
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms. -->

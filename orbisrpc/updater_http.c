@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* updater_http.c - pure HTTP response parsing (host-testable + PS4). */
 #include "updater_http.h"
 #include <stdlib.h>
@@ -19,7 +22,9 @@ char *upd_parse_response(const char *raw, size_t rawlen, size_t cap,
     const char *body = e + 4;
     size_t bodylen = (hlen + 4 <= rawlen) ? rawlen - hlen - 4 : 0;
     int status = 0;
-    if(hlen >= 12 && !memcmp(raw, "HTTP/1.", 7)) status = atoi(raw + 9);
+    /* strtol, not atoi: the status line is network input and atoi has
+     * undefined behaviour on a value it cannot represent. */
+    if(hlen >= 12 && !memcmp(raw, "HTTP/1.", 7)) status = (int)strtol(raw + 9, NULL, 10);
     if(out_status) *out_status = status;
     /* Header scan (case-insensitive names, single pass). */
     long content_len = -1;
@@ -40,7 +45,9 @@ char *upd_parse_response(const char *raw, size_t rawlen, size_t cap,
                     char nb[32];
                     size_t cn = vlen < sizeof nb - 1 ? vlen : sizeof nb - 1;
                     memcpy(nb, val, cn); nb[cn] = 0;
-                    content_len = atol(nb);
+                    /* strtol: atol is UB on overflow. A value beyond LONG_MAX
+                     * clamps, which then fails the short-body check below. */
+                    content_len = strtol(nb, NULL, 10);
                 } else if(nl2 == 17 && !strncasecmp(line, "transfer-encoding", 17)){
                     if(vlen >= 7 && !strncasecmp(val + vlen - 7, "chunked", 7))
                         chunked = 1;
@@ -80,6 +87,11 @@ char *upd_parse_response(const char *raw, size_t rawlen, size_t cap,
             pos += (size_t)cn + 2; /* data + trailing CRLF */
         }
     } else {
+        /* A declared Content-Length longer than the bytes received means the
+         * connection died mid-body. Treating the short body as complete made
+         * a truncated download look successful; the hash check caught the
+         * binary case, but release JSON and small assets could slip through. */
+        if(content_len >= 0 && (size_t)content_len > bodylen) return NULL;
         if(content_len >= 0 && (size_t)content_len < bodylen)
             bodylen = (size_t)content_len;
         if(bodylen > cap - 1) return NULL;

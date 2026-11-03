@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* log.c - file logger: rotating (512 KB cap), timestamped, falls back to
  * stderr. Tries several paths because mount visibility differs between app
  * and payload processes. Every line is mirrored to /dev/klog when
@@ -13,11 +16,16 @@
 #define LOG_CAP (512 * 1024)
 
 static FILE *g_log = NULL;
+static char g_log_path[256];      /* file backing g_log; "" for stderr */
+static size_t g_cap = LOG_CAP;
 static int g_klog = -1;
 static volatile int g_log_lock = 0;
 static volatile int g_debug = 0;
 void log_set_debug(int on){ g_debug = on ? 1 : 0; }
 int log_is_debug(void){ return g_debug; }
+/* Runtime rotation cap (config log_max_kb); host tests shrink it to
+ * exercise rotation without writing 512 KB. */
+void log_set_cap(size_t cap){ g_cap = cap ? cap : LOG_CAP; }
 static void log_lock(void){ while(__sync_lock_test_and_set(&g_log_lock, 1)) usleep(1000); }
 static void log_unlock(void){ __sync_lock_release(&g_log_lock); }
 
@@ -73,16 +81,48 @@ static FILE *open_log(const char *want){
         if(!f) continue;
         /* cap check AFTER open to avoid stat->remove TOCTOU */
         struct stat st;
-        if(fstat(fileno(f), &st) == 0 && st.st_size > LOG_CAP){
+        if(fstat(fileno(f), &st) == 0 && (size_t)st.st_size > g_cap){
             fclose(f);
             remove(cand[i]);
             f = fopen(cand[i], "ab");
             if(!f) continue;
         }
         setvbuf(f, NULL, _IONBF, 0);
+        snprintf(g_log_path, sizeof g_log_path, "%s", cand[i]);
         return f;
     }
     return NULL;
+}
+
+/* Runtime cap. open_log() only checks at startup, so a daemon that runs for
+ * weeks grew log.txt without bound. Roll the current file to <path>.1 (one
+ * previous generation kept) and continue in a fresh file. Called with the
+ * log lock held. If the roll fails, keep writing: a full disk must not turn
+ * logging into a crash loop. */
+static void log_rotate_if_needed(void){
+    if(!g_log || !g_log_path[0]) return;
+    struct stat st;
+    if(fstat(fileno(g_log), &st) != 0) return;
+    if(st.st_size >= 0 && (size_t)st.st_size <= g_cap) return;
+    char old[300];
+    snprintf(old, sizeof old, "%s.1", g_log_path);
+    (void)remove(old);
+    if(rename(g_log_path, old) != 0) return;   /* nothing moved: keep stream */
+    FILE *nf = fopen(g_log_path, "ab");
+    if(!nf){
+        /* The stream now backs the renamed .1 inode, but the live path is
+         * gone. Without putting it back, every later rotation hits ENOENT on
+         * rename() and returns above, so the file grows without bound again —
+         * exactly what this function exists to prevent. Restore the name; if
+         * even that fails there is nothing safe left to do from here (the log
+         * lock is held, so no log_msg). */
+        (void)rename(old, g_log_path);
+        return;
+    }
+    setvbuf(nf, NULL, _IONBF, 0);
+    FILE *of = g_log;
+    g_log = nf;
+    fclose(of);
 }
 
 /* Lazy re-open cadence: mounts can appear after startup and the data directory
@@ -108,6 +148,7 @@ static FILE *log_out(void){
 void log_msg(const char *fmt, ...) {
     if (!fmt) return;
     log_lock();
+    log_rotate_if_needed();
     FILE *out = log_out();
     va_list ap, ap2;
     va_start(ap, fmt);
@@ -139,12 +180,18 @@ void log_msg(const char *fmt, ...) {
 void log_close(void) {
     if (g_log && g_log != stderr) fclose(g_log);
     g_log = NULL;
+    g_log_path[0] = 0;
     if (g_klog >= 0) { close(g_klog); g_klog = -1; }
+}
+
+const char *log_path(void){
+    return g_log_path[0] ? g_log_path : "stderr";
 }
 
 void log_dbg(const char *fmt, ...) {
     if (!g_debug || !fmt) return;
     log_lock();
+    log_rotate_if_needed();
     FILE *out = log_out();
     va_list ap;
     va_start(ap, fmt);

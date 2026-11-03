@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
 # build.sh - orbisRPC: compile payload ELF + fself for PS4.
 # Usage: ./scripts/build.sh [elf|fself|all]   default: all
 # Zero-guess: validates toolchain up front with actionable errors.
@@ -37,9 +39,16 @@ fail() { echo "BUILD FAIL: $1" >&2; exit 1; }
 command -v "$SDK/bin/macos/create-fself-macos" >/dev/null 2>&1 || [ -x "$SDK/bin/macos/create-fself-macos" ] || fail "create-fself-macos missing in SDK/bin/macos"
 
 TARGET="x86_64-pc-freebsd12-elf"
+BUILD_HASH="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
+# A build from a dirty tree is not the commit above; say so in the log line
+# instead of letting a test build masquerade as a clean release artifact.
+if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+  BUILD_HASH="${BUILD_HASH}-dirty"
+fi
 CFLAGS="--target=$TARGET -fPIC -std=gnu11 -Wall -Wno-unused \
         -Wno-int-conversion -Wno-incompatible-pointer-types \
         -DMBEDTLS_NO_PLATFORM_ENTROPY \
+        -DORBISRPC_BUILD_HASH=\"$BUILD_HASH\" \
         -isystem $SDK/include -Ithird_party/mbedtls/include"
 LIBS="-lc -lkernel -lSceNet -lSceNetCtl -lSceSysmodule \
       -lSceUserService -lSceAppInstUtil -lSceAppContent"
@@ -47,7 +56,7 @@ LDFLAGS="-m elf_x86_64 -pie --eh-frame-hdr -L$SDK/lib $LIBS $SDK/lib/crt1.o --sc
 export OO_PS4_TOOLCHAIN="$SDK"
 OUT="$ROOT/build"; mkdir -p "$OUT"
 echo "=== compiling (CC=$CC LD=$LD SDK=$SDK) ==="
-for f in log cfg jsonlite b64 sfo procwalk bigapp fw pkgzone gamecache notify retro tmdb_crypto tmdb updater updater_http updater_util tls ws detect discord daemon compat lock timesync art health manifest main; do
+for f in log cfg jsonlite b64 sfo procwalk bigapp fw pkgzone gamecache notify retro tmdb_crypto tmdb updater updater_http updater_util tls ws netconnect detect discord daemon compat lock timesync art health manifest diag main; do
   "$CC" $CFLAGS -c -o "$OUT/$f.o" "orbisrpc/$f.c" || fail "compile $f"
 done
 echo "=== mbedtls (skip net_sockets/timing: POSIX-only) ==="

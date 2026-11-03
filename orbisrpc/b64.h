@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* b64.h - standard RFC 4648 Base64 encoder. */
 #ifndef B64_H
 #define B64_H

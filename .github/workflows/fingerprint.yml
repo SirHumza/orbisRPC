@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+name: fingerprint
+
+# The daemon imitates a specific Discord desktop build. The tuple lives in
+# scripts/fingerprint.json and is generated into a committed header. This job
+# reads two official Discord endpoints (the stable Windows x64 installer
+# redirect for the version, discord.com/app for the web BUILD_NUMBER the
+# desktop client reports as client_build_number), and opens a PR only when the
+# tuple changes. It never guesses and it never rewrites the live client.
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: fetch the current tuple
+        id: fetch
+        continue-on-error: true
+        run: python3 scripts/update_fingerprint.py --fetch
+      - name: report a fetch failure
+        if: steps.fetch.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'Fingerprint fetch failed';
+            const body = [
+              '`python3 scripts/update_fingerprint.py --fetch` failed.',
+              '',
+              'The committed tuple was not changed. Check the workflow log,',
+              'then refresh manually if the endpoints moved:',
+              '',
+              '```',
+              'python3 scripts/update_fingerprint.py --fetch',
+              'python3 scripts/update_fingerprint.py --check',
+              '```',
+            ].join('\n');
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'fingerprint',
+            });
+            const hit = open.data.find(i => i.title === title);
+            if (hit) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: hit.number, body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ['fingerprint'],
+              });
+            }
+      - name: stop when the fetch failed
+        if: steps.fetch.outcome == 'failure'
+        run: exit 1
+      - name: detect a changed tuple
+        id: diff
+        run: |
+          if git diff --quiet -- scripts/fingerprint.json orbisrpc/fingerprint_gen.h; then
+            echo "changed=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=1" >> "$GITHUB_OUTPUT"
+          fi
+      - name: open or update the refresh PR
+        if: steps.diff.outputs.changed == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B fingerprint/auto
+          git add scripts/fingerprint.json orbisrpc/fingerprint_gen.h
+          git commit -m "fingerprint: refresh to the current stable client"
+          git push -f origin fingerprint/auto
+          if gh pr view fingerprint/auto --json number >/dev/null 2>&1; then
+            echo "updated the existing PR branch"
+          else
+            gh pr create \
+              --title "Refresh the Discord client fingerprint" \
+              --body "Automated refresh from the stable installer redirect and discord.com/app BUILD_NUMBER. Review the generated header before merging." \
+              --base main --head fingerprint/auto
+          fi

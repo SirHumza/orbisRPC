@@ -50,3 +50,6 @@ SQLite note: tests link the vendored amalgamation
 (`third_party/sqlite/sqlite-amalgamation-3510100`), not system sqlite,
 and install a test-only VFS shim — the stock `xFullPathname` path fails
 silent-CANTOPEN on some CI runners.
+
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms. -->

@@ -1,1 +1,41 @@
-{"schema_version":1,"token":"SET_ME","presence_state":"On PS4"}
+{
+  "schema_version": 1,
+  "token": "SET_ME",
+  "presence_state": "On PS4",
+  "presence_hold_s": 300,
+  "presence_details_media": "Watching on PlayStation 4",
+  "lock_heartbeat_s": 60,
+  "lock_stale_s": 600,
+  "reconnect_max_s": 600,
+  "timesync_interval_s": 3600,
+  "log_max_kb": 512,
+  "show_logo": true,
+  "status": "online",
+  "timestamp_mode": "elapsed",
+  "titles": {
+    "GNMS00001": "GnmScale",
+    "CUSA94448": "Um Jammer Lammy",
+    "SCUS00000": "Friday Night Funkin'",
+    "SMSR00001": "Sonic SMS Remake",
+    "OJDK00003": "Cyrene Launcher",
+    "SRBP00001": "Sonic Robo Blast 2",
+    "ORBF00001": "OrbisFox",
+    "SMWR00001": "Super Mario Bros. Wonder",
+    "SKAT00001": "Skate 3 | XeMoisties",
+    "SSBU00001": "Smash Ultimate (SSBU)",
+    "CUSA01760": "Dark Souls 2: Scholar of the First Sin"
+  },
+  "title_rules": {
+    "GNMS00001": {"art": "https://cdn.discordapp.com/attachments/1559097474055016518/1559204659560714362/image.png?ex=6ace39ff&is=6acce87f&hm=d3b062c569836952e3cdbc1ec1764d7245d552d994701d06e192fb37a815cc13&"},
+    "CUSA94448": {"art": "https://coverproject.sfo2.cdn.digitaloceanspaces.com/playstation_1/playstation_1.umjammerlammy_GB.1681164541469936141_thumb.jpg"},
+    "SCUS00000": {"art": "https://romsfun.com/wp-content/uploads/2024/12/Friday-Night-Funkin039.jpg"},
+    "SMSR00001": {"art": "https://www.gamebrew.org/thumb.php?f=Sonic1smsremakevita2.jpg&width=300"},
+    "OJDK00003": {"art": "https://files.catbox.moe/l59e0e.png"},
+    "SRBP00001": {"art": "https://files.catbox.moe/oyr9l1.png"},
+    "ORBF00001": {"art": "https://files.catbox.moe/1crlxi.png"},
+    "SMWR00001": {"art": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRGZO3YmYst1pNCq1ibggRuX1-9BXJWuaYgM1Cge4u-LMt9LeUL"},
+    "SKAT00001": {"art": "https://assets-prd.ignimgs.com/2022/01/07/skate-3-button-1641599749809.jpg?crop=1%3A1%2Csmart&format=jpg&auto=webp&quality=80"},
+    "SSBU00001": {"art": "https://images.launchbox-app.com/e8f7baaa-a045-49e4-93fb-e9107e679379.jpg"},
+    "CUSA01760": {"art": "https://ps.konsoloyun.gen.tr/resimler/ikon/CUSA/01760/Icon0.png"}
+  }
+}

@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* health.c - unclean-boot marker + consecutive-crash counter + rollback.
  *
  * Correct semantics: a normal reboot must NEVER count as a crash.
@@ -139,9 +142,10 @@ int health_check_binary(const char *path){
 int health_rollback(const char *path){
     char bak[320];
     snprintf(bak, sizeof bak, "%s.bak", path);
-    FILE *f = fopen(bak, "rb");
-    if(!f) return -1;
-    fclose(f);
+    /* Verify the backup BEFORE touching the live file. Renaming first and
+     * checking second (the old order) let a corrupt .bak destroy the only
+     * remaining copy: both paths ended up broken. */
+    if(!health_check_binary(bak)) return -1;
     /* Atomic replace: never remove(path) first (a failed second step
      * would leave no bootable binary at all). */
     if(rename(bak, path) != 0) return -1;

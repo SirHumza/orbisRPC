@@ -12,3 +12,6 @@
   IME dialog init failures (open), exact error codes seen.
 - [capture.md](capture.md) — how to observe: klog, FTP paths, ports,
   screenshot locations, what each log proves.
+
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms. -->

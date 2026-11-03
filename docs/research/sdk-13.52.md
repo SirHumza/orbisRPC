@@ -99,3 +99,6 @@ outside.
 For reference, Scene-Collective's flat-bin SDK took the same shape of update
 (`2847f1f` Add 13.50 support, `46efae9` Add 13.52 support, `b732641` Add 14.00
 support), and a flat libPS4 payload already passes DNS + TCP on 13.52.
+
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms. -->

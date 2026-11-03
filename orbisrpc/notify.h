@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* notify.h - on-screen notifications from the payload.
  *
  * sceKernelSendNotificationRequest takes a PATH for the icon, not a memory
@@ -19,5 +22,12 @@ void notify_once_boot(const char *key, const char *message);
 /* Rate-limited variant for a condition that persists (Discord unreachable).
  * Fires on the first call, then at most once per `interval_s`. */
 void notify_throttled(const char *key, const char *message, int interval_s);
+
+#ifdef NOTIFY_TESTABLE
+/* Host-test hooks: count of notifications that reached the screen, and a
+ * reset that also clears the once/throttle tables as if freshly booted. */
+int notify_test_count(void);
+void notify_test_reset(void);
+#endif
 
 #endif /* ORBISRPC_NOTIFY_H */

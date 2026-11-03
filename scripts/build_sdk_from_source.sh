@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
 # build_sdk_from_source.sh - build the ps4-payload-dev SDK from git and install
 # it to a DESTDIR, instead of downloading the release ZIP.
 #

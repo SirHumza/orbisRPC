@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* fw.h - console firmware version string, for display only.
  *
  * Not the same thing as the SDK's firmware gating: the CRT refuses to start

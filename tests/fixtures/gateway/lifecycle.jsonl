@@ -1,0 +1,6 @@
+{"name":"hello-ready","connect":[{"json":"{\"op\":10,\"d\":{\"heartbeat_interval\":45000}}"},{"json":"{\"op\":0,\"t\":\"READY\",\"s\":1,\"d\":{}}"}],"connect_rc":0,"out":[2]}
+{"name":"close-4004-during-auth","connect":[{"json":"{\"op\":10,\"d\":{\"heartbeat_interval\":45000}}"},{"code":4004}],"connect_rc":-2,"out":[2]}
+{"name":"close-4009-during-auth","connect":[{"json":"{\"op\":10,\"d\":{\"heartbeat_interval\":45000}}"},{"code":4009}],"connect_rc":-1,"out":[2]}
+{"name":"fragmented-close-refused","connect":[{"json":"{\"op\":10,\"d\":{\"heartbeat_interval\":45000}}"},{"op":8,"fin":0,"code":4004}],"connect_rc":-1,"out":[2]}
+{"name":"close-before-hello","connect":[{"code":1006}],"connect_rc":-1,"out":[]}
+{"name":"hello-huge-heartbeat-clamped","connect":[{"json":"{\"op\":10,\"d\":{\"heartbeat_interval\":1e400}}"},{"json":"{\"op\":0,\"t\":\"READY\",\"s\":1,\"d\":{}}"}],"connect_rc":0,"out":[2],"hb_ms":300000}

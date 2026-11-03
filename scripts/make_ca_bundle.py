@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
 """make_ca_bundle.py - curate a minimal CA bundle for the PS4 TLS client.
 
 Extracts the roots needed for GitHub (Sectigo/DigiCert), Discord
@@ -81,7 +83,10 @@ def main():
     if len(picked) < 8:
         print("too few roots matched (%d); refusing" % len(picked), file=sys.stderr)
         return 1
-    c = "/* ca_bundle_pem.h - curated trust anchors (generated, do not edit).\n"
+    c = "/* SPDX-License-Identifier: GPL-3.0-or-later\n"
+    c += " * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.\n"
+    c += " */\n"
+    c += "/* ca_bundle_pem.h - curated trust anchors (generated, do not edit).\n"
     c += " * %d roots for GitHub/Discord/Sony. Regenerate with scripts/make_ca_bundle.py.\n" % len(picked)
     c += " */\n#ifndef ORBISRPC_CA_BUNDLE_PEM_H\n#define ORBISRPC_CA_BUNDLE_PEM_H\n"
     c += "static const char ORBISRPC_CA_BUNDLE_PEM[] =\n"

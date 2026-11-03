@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
 # sync_icons.sh - pull /user/appmeta/<TITLEID>/icon0.png off the PS4 into
 # config/icons/<lower titleid>.png, ready to host as the art pack.
 # Usage: ./scripts/sync_icons.sh [PS4_IP]   default: 192.168.1.136

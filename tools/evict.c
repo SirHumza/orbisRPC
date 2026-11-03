@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* evict.c - stop a running orbisRPC daemon so a fresh payload can take over.
  * Reads /data/orbisRPC/daemon.lock, verifies the holder is a live "Payload"
  * process via the same offset-free sysctl walk as lock.c/procwalk.c, then

@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* appdb.c - display names from /system_data/priv/mms/app.db (read-only).
  * Method follows the proven on-console pattern (SonicLoader et al.): SQLite
  * query, never raw byte-scanning (an earlier revision byte-scanned app.db

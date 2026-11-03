@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* gamecache.c - see gamecache.h. */
 #include "gamecache.h"
 #include "jsonlite.h"
@@ -11,7 +14,6 @@
 
 static gamecache_entry_t s_ent[GAMECACHE_MAX_ENTRIES];
 static int s_n = -1;          /* -1 = not loaded yet */
-static int s_loaded_from_file = 0;
 
 int gamecache_id_valid(const char *id){
     if(!id) return 0;
@@ -39,6 +41,7 @@ static int copy_field(char *dst, size_t cap, const char *src){
 
 int gamecache_parse(const char *json, size_t len, gamecache_entry_t *out,
                     int max, int64_t now){
+    (void)now;   /* age is enforced by gamecache_get(), not at parse time */
     if(!json || !out || max <= 0) return -1;
     if(max > GAMECACHE_MAX_ENTRIES) max = GAMECACHE_MAX_ENTRIES;
     memset(out, 0, sizeof(gamecache_entry_t) * (size_t)max);
@@ -66,14 +69,18 @@ int gamecache_parse(const char *json, size_t len, gamecache_entry_t *out,
         if(!gamecache_id_valid(id->str)) continue;
         if(!nm  || nm->type != JL_STRING || !nm->str || !nm->str[0]) continue;
         /* at is optional: a missing timestamp is treated as stale so a
-         * hand-written row is re-resolved rather than trusted blindly. */
+         * hand-written row is re-resolved rather than trusted blindly.
+         * The row is still kept: gamecache_get() ignores stale entries,
+         * while gamecache_get_any() can show the last known card offline. */
         int64_t when = (at && at->type == JL_NUMBER) ? (int64_t)at->num : 0;
-        if(now - when > GAMECACHE_TTL_SECS) continue;
 
         memcpy(out[n].id, id->str, strlen(id->str) + 1);
         copy_field(out[n].name, sizeof out[n].name, nm->str);
         copy_field(out[n].art, sizeof out[n].art,
                    (art && art->type == JL_STRING) ? art->str : NULL);
+        const jl_val_t *mp = jl_obj_get(e, "mp");
+        copy_field(out[n].mp, sizeof out[n].mp,
+                   (mp && mp->type == JL_STRING) ? mp->str : NULL);
         out[n].at = when;
         n++;
     }
@@ -83,8 +90,8 @@ int gamecache_parse(const char *json, size_t len, gamecache_entry_t *out,
 
 char *gamecache_serialize(const gamecache_entry_t *e, int n){
     if(!e || n <= 0) return NULL;
-    size_t cap = (size_t)n * (GAMECACHE_ID_LEN + GAMECACHE_NAME_LEN +
-                              GAMECACHE_ART_LEN + 64) + 64;
+    size_t cap = ((size_t)n * (2 * (GAMECACHE_ID_LEN + GAMECACHE_NAME_LEN +
+                              GAMECACHE_ART_LEN + GAMECACHE_MP_LEN) + 80)) + 64;
     char *out = (char *)malloc(cap);
     if(!out) return NULL;
     size_t o = 0;
@@ -94,29 +101,39 @@ char *gamecache_serialize(const gamecache_entry_t *e, int n){
     for(int i = 0; i < n; i++){
         if(i > 0 && o + 2 < cap){ out[o++] = ','; }
         char id[GAMECACHE_ID_LEN*2], nm[GAMECACHE_NAME_LEN*2],
-             ar[GAMECACHE_ART_LEN*2];
+             ar[GAMECACHE_ART_LEN*2], mp[GAMECACHE_MP_LEN*2];
         /* Escape defensively: names and URLs are network-derived. */
         size_t a = 0;
         for(const char *p = e[i].id; *p && a + 2 < sizeof id; p++){
             if(*p == '"' || *p == '\\') id[a++] = '\\';
+            else if((unsigned char)*p < 0x20){ id[a++] = ' '; continue; }
             id[a++] = *p;
         }
         id[a] = 0;
         a = 0;
         for(const char *p = e[i].name; *p && a + 2 < sizeof nm; p++){
             if(*p == '"' || *p == '\\') nm[a++] = '\\';
+            else if((unsigned char)*p < 0x20){ nm[a++] = ' '; continue; }
             nm[a++] = *p;
         }
         nm[a] = 0;
         a = 0;
         for(const char *p = e[i].art; *p && a + 2 < sizeof ar; p++){
             if(*p == '"' || *p == '\\') ar[a++] = '\\';
+            else if((unsigned char)*p < 0x20){ ar[a++] = ' '; continue; }
             ar[a++] = *p;
         }
         ar[a] = 0;
+        a = 0;
+        for(const char *p = e[i].mp; *p && a + 2 < sizeof mp; p++){
+            if(*p == '"' || *p == '\\') mp[a++] = '\\';
+            else if((unsigned char)*p < 0x20){ mp[a++] = ' '; continue; }
+            mp[a++] = *p;
+        }
+        mp[a] = 0;
         int w = snprintf(out + o, cap - o,
-            "{\"id\":\"%s\",\"name\":\"%s\",\"art\":\"%s\",\"at\":%lld}",
-            id, nm, ar, (long long)e[i].at);
+            "{\"id\":\"%s\",\"name\":\"%s\",\"art\":\"%s\",\"mp\":\"%s\",\"at\":%lld}",
+            id, nm, ar, mp, (long long)e[i].at);
         if(w < 0 || (size_t)w >= cap - o){ free(out); return NULL; }
         o += (size_t)w;
     }
@@ -124,6 +141,7 @@ char *gamecache_serialize(const gamecache_entry_t *e, int n){
     out[o++] = ']';
     out[o++] = '}';
     out[o] = 0;
+    if(o > GAMECACHE_MAX_BYTES){ free(out); return NULL; }
     return out;
 }
 
@@ -143,7 +161,7 @@ void gamecache_load(void){
             buf[sz] = 0;
             int n = gamecache_parse(buf, (size_t)sz, s_ent, GAMECACHE_MAX_ENTRIES,
                                     (int64_t)time(NULL));
-            if(n >= 0){ s_n = n; s_loaded_from_file = 1; }
+            if(n >= 0) s_n = n;
             else log_msg("games_cache: unreadable, starting empty");
         }
         free(buf);
@@ -154,17 +172,43 @@ void gamecache_load(void){
     log_msg("games_cache: %d entr%s from disk", s_n, s_n == 1 ? "y" : "ies");
 }
 
-int gamecache_get(const char *id, char *name, size_t name_cap,
-                  char *art, size_t art_cap){
+static int gamecache_get_impl(const char *id, char *name, size_t name_cap,
+                              char *art, size_t art_cap, int allow_stale){
     if(name && name_cap) name[0] = 0;
     if(art && art_cap) art[0] = 0;
     gamecache_load();
     if(!gamecache_id_valid(id)) return 0;
+    int64_t now = (int64_t)time(NULL);
     for(int i = 0; i < s_n; i++){
         if(strcmp(s_ent[i].id, id) != 0) continue;
+        if(!allow_stale && now - s_ent[i].at > GAMECACHE_TTL_SECS) return 0;
         copy_field(name, name_cap, s_ent[i].name);
-        copy_field(art, art_cap, s_ent[i].art);
+        copy_field(art, art_cap, s_ent[i].mp[0] ? s_ent[i].mp : s_ent[i].art);
         return name && name[0] ? 1 : 0;
+    }
+    return 0;
+}
+
+int gamecache_get(const char *id, char *name, size_t name_cap,
+                  char *art, size_t art_cap){
+    return gamecache_get_impl(id, name, name_cap, art, art_cap, 0);
+}
+
+int gamecache_get_any(const char *id, char *name, size_t name_cap,
+                      char *art, size_t art_cap){
+    return gamecache_get_impl(id, name, name_cap, art, art_cap, 1);
+}
+
+int gamecache_set_mp(const char *id, const char *mp){
+    if(!gamecache_id_valid(id) || !mp || strncmp(mp, "mp:", 3) != 0) return 0;
+    gamecache_load();
+    for(int i = 0; i < s_n; i++){
+        if(strcmp(s_ent[i].id, id) != 0) continue;
+        if(!strcmp(s_ent[i].mp, mp)) return 0;
+        copy_field(s_ent[i].mp, sizeof s_ent[i].mp, mp);
+        gamecache_save();
+        log_msg("games_cache: %s mp resolved", id);
+        return 1;
     }
     return 0;
 }
@@ -201,23 +245,40 @@ int gamecache_put(const char *id, const char *name, const char *art,
         if(strcmp(s_ent[i].id, id) != 0) continue;
         int same = !strcmp(s_ent[i].name, name) &&
                    !strcmp(s_ent[i].art, art ? art : "");
-        if(same) return 0;
+        /* Identical content is not a no-op. `at` is the freshness stamp
+         * checked when the file is loaded, so returning early here let a
+         * title played every day expire after 30 days and re-resolve over
+         * the network (or lose its name offline). Refresh at most once a
+         * day: a write per boot is fine, a write per poll is not. */
+        if(same && s_ent[i].at > 0 && now - s_ent[i].at < 86400) return 0;
         copy_field(s_ent[i].name, sizeof s_ent[i].name, name);
-        copy_field(s_ent[i].art, sizeof s_ent[i].art, art);
+        if(strcmp(s_ent[i].art, art ? art : "") != 0){
+            /* A new cover URL invalidates the old mp: mapping. */
+            copy_field(s_ent[i].art, sizeof s_ent[i].art, art);
+            s_ent[i].mp[0] = 0;
+        }
         s_ent[i].at = now;
         gamecache_save();
-        log_msg("games_cache: updated %s (%s)", id, src ? src : "?");
+        log_msg("games_cache: %s %s (%s)", same ? "refreshed" : "updated",
+                id, src ? src : "?");
         return 1;
     }
+    int slot = s_n;
     if(s_n >= GAMECACHE_MAX_ENTRIES){
-        log_msg("games_cache: full (%d); not storing %s", s_n, id);
-        return 0;
+        /* Bounded store: evict the least recently refreshed row instead of
+         * refusing every new title once the table fills. */
+        slot = 0;
+        for(int i = 1; i < s_n; i++)
+            if(s_ent[i].at < s_ent[slot].at) slot = i;
+        log_msg("games_cache: full (%d); evicting %s", s_n, s_ent[slot].id);
+        memset(&s_ent[slot], 0, sizeof s_ent[slot]);
+    } else {
+        s_n++;
     }
-    memcpy(s_ent[s_n].id, id, strlen(id) + 1);
-    copy_field(s_ent[s_n].name, sizeof s_ent[s_n].name, name);
-    copy_field(s_ent[s_n].art, sizeof s_ent[s_n].art, art);
-    s_ent[s_n].at = now;
-    s_n++;
+    memcpy(s_ent[slot].id, id, strlen(id) + 1);
+    copy_field(s_ent[slot].name, sizeof s_ent[slot].name, name);
+    copy_field(s_ent[slot].art, sizeof s_ent[slot].art, art);
+    s_ent[slot].at = now;
     gamecache_save();
     log_msg("games_cache: stored %s (%s)", id, src ? src : "?");
     return 1;
@@ -226,5 +287,4 @@ int gamecache_put(const char *id, const char *name, const char *art,
 void gamecache_reset(void){
     memset(s_ent, 0, sizeof s_ent);
     s_n = 0;
-    s_loaded_from_file = 0;
 }

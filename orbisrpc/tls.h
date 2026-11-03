@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* tls.h - self-contained TLS client (mbedTLS, statically linked).
  * No PS4 TLS-module dependency: works in payload processes.
  * Certificate verification is REQUIRED against the curated bundle;

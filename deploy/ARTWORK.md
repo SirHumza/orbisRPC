@@ -31,3 +31,6 @@ silently — name, timer, everything. So every URL above is resolved
 through Discord's `mp:` external-assets proxy at post time, and
 dangling keys are dropped, never sent. Missing art never crashes
 anything; worst case is a tile with no image.
+
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms. -->

@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* updater_http.h - pure HTTP response parsing for the updater.
  *
  * Host-testable (no PS4 includes): status line, bounded headers,

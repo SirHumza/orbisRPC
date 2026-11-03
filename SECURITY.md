@@ -23,3 +23,6 @@ it, and regenerate it in Discord if it ever leaks.
 
 Found a vulnerability? Report it in the Discord server, not in a public
 issue. See the README for the invite.
+
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms. -->

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
 """build_art_table.py - resolve Sony CDN artwork for a title list via TMDB.
 
 RETIRED: per-title tables were replaced by live TMDB + self-learning map.

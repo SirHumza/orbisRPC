@@ -182,3 +182,6 @@ Expected: `E2E host simulation: ALL PASS`.
 
 Run: `git push origin main && sleep 150 && gh run list --repo SirHumza/orbisRPC --limit 1`
 Expected: push succeeds; newest run for the pushed SHA is `completed success` (allow one rerun cycle: if red, read `--log-failed` and fix forward, never force-push over it without reading).
+
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms. -->

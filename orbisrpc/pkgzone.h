@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* pkgzone.h - name + cover lookup for homebrew titles on pkg-zone.com.
  *
  * Why this exists: Sony's TMDB endpoint only serves retail CUSA titles, so

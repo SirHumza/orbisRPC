@@ -1,0 +1,56 @@
+orbisRPC
+Copyright (C) 2026 SirHumza and CyberMask367
+https://github.com/SirHumza/orbisRPC
+
+License
+-------
+This software is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option)
+any later version. The full license text is in LICENSE.
+
+It is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for details.
+
+Attribution and Acknowledgment
+------------------------------
+Projects incorporating, redistributing, or building upon orbisRPC are
+expected to visibly acknowledge the original project and its authors.
+
+At minimum:
+- Credit SirHumza and CyberMask367.
+- Include a link to https://github.com/SirHumza/orbisRPC.
+- Include the acknowledgment in the project's primary README.md.
+- Do not present modified versions as official orbisRPC releases.
+
+We encourage projects to showcase their integration through a short
+description, feature demonstration, or relevant code snippet.
+
+This attribution requirement is an additional term under GPLv3 section
+7(b). It is binding whenever you distribute orbisRPC, a modified version,
+or a work containing a substantial portion of it, including a single
+source file or a substantial code snippet. Publishing a binary release,
+publishing a fork, or shipping the code inside another product all count:
+the credit must appear in the primary README, and the complete
+corresponding source must be available under GPL-3.0-or-later.
+
+Private, internal forks are permitted and carry no license conditions,
+because the GPL does not regulate use that is never distributed. We do
+ask private forks to keep the credit and the repository link as a
+courtesy, but that request is not a license condition and the GPL does
+not let us enforce it.
+
+Third-party components
+----------------------
+These keep their own licenses and are not relicensed by the terms above:
+
+- third_party/mbedtls - Mbed TLS, dual licensed Apache-2.0 OR
+  GPL-2.0-or-later. Both options are compatible with GPLv3; this project
+  relies on the GPL-2.0-or-later option and on Apache-2.0's one-way
+  compatibility with GPLv3.
+- third_party/sqlite - SQLite amalgamation, public domain.
+- third_party/bearssl - BearSSL, MIT. Used only by the legacy harness under
+  build/; it is not linked into the shipped payload.
+- orbisrpc/ca_bundle_pem.h - X.509 root certificates extracted from the
+  public Mozilla/OpenSSL CA bundle. Certificate data, not code.

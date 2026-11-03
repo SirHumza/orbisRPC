@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* updater.c - self-updater. Pure logic (host-tested) plus PS4 HTTPS.
  *
  * Flow, once per daemon boot when enabled:
@@ -23,6 +26,7 @@
 
 /* ---- PS4 HTTPS transport (mirrors ws.c/tmdb.c bring-up) ---- */
 #include "tls.h"
+#include "netconnect.h"
 #include <mbedtls/sha256.h>
 #ifdef ORBISRPC_SDK_PAYLOAD
 #include <sys/socket.h>
@@ -67,7 +71,9 @@ static int upd_host_allowed(const char *host){
 #define SO_NBIO 0x2000   /* same local define as ws.c; absent from SDK headers */
 #endif
 
+#ifndef ORBISRPC_SDK_PAYLOAD
 static int32_t s_upool = -1;
+#endif
 static int upd_net(void){
     static int ready = 0;
     if(ready) return 0;
@@ -88,31 +94,9 @@ static int upd_net(void){
 static int upd_connect(const char *host, int port){
     if(upd_net() < 0) return -1;
 #ifdef ORBISRPC_SDK_PAYLOAD
-    struct addrinfo hints, *res = NULL;
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    {
-        char portbuf[16];
-        snprintf(portbuf, sizeof portbuf, "%d", port);
-        if(getaddrinfo(host, portbuf, &hints, &res) != 0 || !res){
-            log_msg("updater: dns fail");
-            return -1;
-        }
-    }
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if(fd < 0){ freeaddrinfo(res); return -1; }
-    struct timeval tv = { .tv_sec = UPD_DEADLINE_S, .tv_usec = 0 };
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
-    if(connect(fd, res->ai_addr, res->ai_addrlen) < 0){
-        close(fd); freeaddrinfo(res); return -1;
-    }
-    freeaddrinfo(res);
-    {
-        int fl = fcntl(fd, F_GETFL, 0);
-        if(fl >= 0) fcntl(fd, F_SETFL, fl | O_NONBLOCK);
-    }
-    return fd;
+    /* Bounded non-blocking connect; fd comes back non-blocking, which the
+     * redirect/TLS pumps below already expect. */
+    return net_tcp_connect(host, port, UPD_DEADLINE_S);
 #else
     OrbisNetInAddr in;
     memset(&in, 0, sizeof in);
@@ -139,6 +123,14 @@ static int upd_connect(const char *host, int port){
 #endif
 }
 
+static void upd_close(int fd){
+#ifdef ORBISRPC_SDK_PAYLOAD
+    close(fd);
+#else
+    sceNetSocketClose(fd);
+#endif
+}
+
 /* HTTPS GET with real HTTP semantics (bounded):
  *   status line + headers (cap UPD_HDR_MAX) + Content-Length or
  *   Transfer-Encoding: chunked decoding + redirect capture.
@@ -156,23 +148,19 @@ static char *https_get_once(const char *host, const char *path,
     if(fd < 0) return NULL;
     tls_ctx_t *t = tls_start(fd, host);
     if(!t){
-#ifdef ORBISRPC_SDK_PAYLOAD
-        close(fd);
-#else
-        sceNetSocketClose(fd);
-#endif
+        upd_close(fd);
         return NULL;
     }
     char req[512];
     int rl = snprintf(req, sizeof req,
         "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: orbisRPC/%s\r\nConnection: close\r\n\r\n",
         path, host, ORBISRPC_VERSION);
-    if(rl <= 0 || rl >= (int)sizeof req){ tls_free(t); return NULL; }
-    if(tls_write(t, req, (size_t)rl) < 0){ tls_free(t); return NULL; }
+    if(rl <= 0 || rl >= (int)sizeof req){ tls_free(t); upd_close(fd); return NULL; }
+    if(tls_write(t, req, (size_t)rl) < 0){ tls_free(t); upd_close(fd); return NULL; }
     /* Read raw response (headers + body) up to header cap + body cap. */
     size_t rawcap = UPD_HDR_MAX + cap;
     char *raw = (char*)malloc(rawcap + 1); /* +1: NUL pad when a read fills cap exactly */
-    if(!raw){ tls_free(t); return NULL; }
+    if(!raw){ tls_free(t); upd_close(fd); return NULL; }
     size_t rl2 = 0;
     int64_t dl = orbis_mono_s() + UPD_DEADLINE_S + 20;
     for(;;){
@@ -191,6 +179,7 @@ static char *https_get_once(const char *host, const char *path,
         if(rl2 >= rawcap - 1 || orbis_mono_s() > dl) break;
     }
     tls_free(t);
+    upd_close(fd);
     if(rl2 == 0){ free(raw); return NULL; }
     raw[rl2] = 0;
     char *out = upd_parse_response(raw, rl2, cap, out_status, out_len,
@@ -359,7 +348,9 @@ int updater_check_and_stage(void){
                 size_t sl = 0;
                 char *sbody = fetch_asset(assets, "manifest.sig", 4096, &status, &sl);
                 if(sbody && manifest_parse(mbody, ml, &mf) == 0 &&
-                   manifest_gate(&mf) && manifest_is_newer(&mf, ORBISRPC_VERSION)){
+                   manifest_gate(&mf) &&
+                   manifest_min_ok(&mf, ORBISRPC_VERSION) &&
+                   manifest_is_newer(&mf, ORBISRPC_VERSION)){
                     unsigned char sig[64];
                     if(decode_sig(sbody, sl, sig) == 0 &&
                        manifest_verify_sig((unsigned char*)mbody, ml, sig,
@@ -386,19 +377,34 @@ int updater_check_and_stage(void){
                 return 0;
             }
             /* Two-phase commit: download + verify the asset first, then
-             * activate it. A failure stages nothing — rollback restores the runtime. */
-            struct { const char *target; char *bin; size_t len; } pend[1];
-            memset(pend, 0, sizeof pend);
-            int pend_n = 0, pend_fail = 0;
+             * activate it. A failure stages nothing — rollback restores the runtime.
+             * Every accepted name maps to the same target, and a release
+             * publishes both orbisrpc_sdk.elf and orbisrpc.bin. Stage only
+             * the first; the old pend[1] array accepted a second match and
+             * wrote past its end (stack corruption on every dual-asset
+             * release). */
+            const char *pend_target = NULL;
+            char *pend_bin = NULL;
+            size_t pend_len = 0;
+            int pend_fail = 0;
             for(size_t i = 0; ; i++){
                 const jl_val_t *a = jl_arr_at(assets, i);
                 if(!a) break;
                 const jl_val_t *nm = jl_obj_get(a, "name");
                 const jl_val_t *dl = jl_obj_get(a, "browser_download_url");
                 if(!nm || nm->type != JL_STRING || !dl || dl->type != JL_STRING) continue;
+                /* Release assets are published as orbisrpc_sdk.elf (the SDK
+                 * build output), while the console runs /data/payloads/
+                 * orbisrpc.bin. Accept both names and normalise the target,
+                 * otherwise auto-update silently never matched a real
+                 * release. */
                 const char *target = NULL;
-                if(!strcmp(nm->str, "orbisrpc.bin")) target = "/data/payloads/orbisrpc.bin";
+                if(!strcmp(nm->str, "orbisrpc.bin") ||
+                   !strcmp(nm->str, "orbisrpc_sdk.elf") ||
+                   !strcmp(nm->str, "orbisrpc.elf"))
+                    target = "/data/payloads/orbisrpc.bin";
                 else continue;
+                if(pend_bin) continue; /* same target already staged */
                 /* download URLs must be https (fail closed on http/other). */
                 const char *url = dl->str;
                 if(strncmp(url, "https://", 8) != 0){ pend_fail = 1; break; }
@@ -415,34 +421,29 @@ int updater_check_and_stage(void){
                     pend_fail = 1;
                     break;
                 }
-                if(manifest_check(&mf, nm->str, (unsigned char*)bin, al) != 0){
+                /* Releases publish the identical payload as orbisrpc_sdk.elf
+                 * and orbisrpc.bin; the manifest lists orbisrpc.bin. Verify
+                 * the exact name when listed, otherwise the canonical one. */
+                if(manifest_check_alias(&mf, nm->str, "orbisrpc.bin",
+                                        (unsigned char*)bin, al) != 0){
                     log_msg("updater: asset %s not in manifest or hash mismatch; refusing (ORX-UPDATE-002)", nm->str);
                     free(bin);
                     pend_fail = 1;
                     break;
                 }
-                if(pend_n < 2){
-                    pend[pend_n].target = target;
-                    pend[pend_n].bin = bin;
-                    pend[pend_n].len = al;
-                    pend_n++;
-                } else {
-                    free(bin); /* more binaries than we stage; ignore extras */
-                }
+                pend_target = target;
+                pend_bin = bin;
+                pend_len = al;
             }
-            if(!pend_fail && pend_n > 0){
-                for(int pi = 0; pi < pend_n; pi++){
-                    if(stage_file(pend[pi].target,
-                                 (unsigned char*)pend[pi].bin, pend[pi].len) == 0){
-                        log_msg("updater: staged %s (%zu bytes)",
-                                pend[pi].target, pend[pi].len);
-                        updated = 1;
-                    }
+            if(!pend_fail && pend_bin){
+                if(stage_file(pend_target, (unsigned char*)pend_bin, pend_len) == 0){
+                    log_msg("updater: staged %s (%zu bytes)", pend_target, pend_len);
+                    updated = 1;
                 }
             } else if(pend_fail){
                 log_msg("updater: incomplete set; staged nothing (versions stay matched)");
             }
-            for(int pi = 0; pi < pend_n; pi++) free(pend[pi].bin);
+            free(pend_bin);
             free(mbody);
         }
     }

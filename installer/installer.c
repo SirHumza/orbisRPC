@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* installer.c - clean installer, one flow forward.
  * Payload placement is the whole job: copy to /data/payloads.
  * Payload Guest reads this directory. */
@@ -22,7 +25,9 @@
 #define DAEMON_ELF "/app0/assets/daemon.elf"
 #define EVICT_ELF "/app0/assets/evict.elf"
 #define INST_DIR "/data/orbisRPC"
-#define INST_LOG "/data/orbisRPC/install.log"
+/* D-06: the PKG route must leave a log at the same path testers already
+ * fetch for the daemon. install.log existed but nobody was told about it. */
+#define INST_LOG "/data/orbisRPC/log.txt"
 #define PAYLOAD_BIN "/data/payloads/orbisrpc.bin"
 #define EVICT_BIN "/data/payloads/evict.elf"
 
@@ -33,8 +38,9 @@ static const char *g_stage = "-";
 static void ilog(const char *tag, int err, long expect, long got){
     FILE *f;
     g_stage = tag;
+    (void)mkdir(INST_DIR, 0777);
     f = fopen(INST_LOG, "a");
-    if(!f) f = fopen("/data/install.log", "a");   /* fallback if sandbox blocks */
+    if(!f) f = fopen("/data/log.txt", "a");   /* fallback if sandbox blocks */
     if(!f) return;
     fprintf(f, "%ld %s errno=%d(%s) expect=%ld got=%ld\n",
             (long)time(NULL), tag, err, err ? strerror(err) : "ok", expect, got);
@@ -45,8 +51,9 @@ static void ilog(const char *tag, int err, long expect, long got){
 static void ilogv(const char *tag, long a, long b){
     FILE *f;
     g_stage = tag;
+    (void)mkdir(INST_DIR, 0777);
     f = fopen(INST_LOG, "a");
-    if(!f) f = fopen("/data/install.log", "a");
+    if(!f) f = fopen("/data/log.txt", "a");
     if(!f) return;
     fprintf(f, "%ld %s a=%ld b=%ld\n", (long)time(NULL), tag, a, b);
     fclose(f);
@@ -98,7 +105,7 @@ static void crash_handler(int sig, siginfo_t *si, void *uc){
     p = h_s(b, sizeof b, p, g_stage ? g_stage : "-");
     if(p + 1 < sizeof b) b[p++] = '\n';
     fd = open(INST_LOG, O_WRONLY | O_APPEND | O_CREAT, 0666);
-    if(fd < 0) fd = open("/data/install.log", O_WRONLY | O_APPEND | O_CREAT, 0666);
+    if(fd < 0) fd = open("/data/log.txt", O_WRONLY | O_APPEND | O_CREAT, 0666);
     if(fd >= 0){ w = write(fd, b, p); (void)w; close(fd); }
     _exit(99);
 }
@@ -159,14 +166,20 @@ static int copy_file(const char *src, const char *dst){
     while((n = fread(buf, 1, sizeof buf, in)) > 0){
         if(fwrite(buf, 1, n, out) != n){
             ilog("dst-write", errno, written, -1);
-            fclose(in); fclose(out); return -1;
+            fclose(in); fclose(out); remove(dst); return -1;
         }
         hw = fnv1a(buf, n, hw);
         written += (long)n;
     }
+    if(ferror(in)){
+        /* A read error mid-file used to copy a truncated prefix that then
+         * hashed cleanly against itself. Remove the partial destination. */
+        ilog("src-read", errno, written, -1);
+        fclose(in); fclose(out); remove(dst); return -1;
+    }
     fclose(in);
-    if(fclose(out) != 0){ ilog("dst-close", errno, written, -1); return -1; }
-    if(written <= 0){ ilog("src-empty", 0, written, -1); return -1; }
+    if(fclose(out) != 0){ ilog("dst-close", errno, written, -1); remove(dst); return -1; }
+    if(written <= 0){ ilog("src-empty", 0, written, -1); remove(dst); return -1; }
 
     /* Read-back proof: reopen and re-count/re-hash the destination. */
     in = fopen(dst, "rb");
@@ -175,9 +188,10 @@ static int copy_file(const char *src, const char *dst){
         hr = fnv1a(buf, n, hr);
         reread += (long)n;
     }
+    int read_err = ferror(in);
     fclose(in);
     snprintf(detail, sizeof detail, "h=%016llx/%016llx", hw, hr);
-    if(written == reread && hw == hr){
+    if(!read_err && written == reread && hw == hr){
         ilog("copy-ok", 0, written, reread);
         return 0;
     }
@@ -216,6 +230,7 @@ static int mkdirs(const char *path){
 
 static int step_files(void){
     char report[512];
+    char evict_stage[32] = "-";
     int ok = -1;
     int evict_ok = -1;
     mkdir(INST_DIR, 0777);
@@ -227,6 +242,7 @@ static int step_files(void){
     {
         evict_ok = copy_file(EVICT_ELF, EVICT_BIN);
         ilog("evict-copy", evict_ok, 0, 0);
+        snprintf(evict_stage, sizeof evict_stage, "%s", g_stage);
         if(evict_ok == 0){
             uint32_t rv = sceKernelLoadStartModule(EVICT_BIN, 0, NULL, 0, NULL, NULL);
             ilog("evict-launch", rv, 0, 0);
@@ -237,13 +253,18 @@ static int step_files(void){
     ok = copy_file(DAEMON_ELF, PAYLOAD_BIN);
     ilog("daemon-copy", ok, 0, 0);
     /* Pre-save config from PKG asset so step_token() skips on fresh install.
-     * Copy config.json from /app0/assets/config.json to /data/orbisRPC/config.json. */
+     * Never overwrite an existing file: a reinstall used to replace the
+     * user's token and learned titles with the packaged defaults. */
     {
         FILE *src = fopen("/app0/assets/config.json", "rb");
         if(src){
             fclose(src);
-            int rc = copy_file("/app0/assets/config.json", ICFG_PATH);
-            ilog("cfg-copy", rc == 0 ? 0 : (errno ? errno : -1), 0, 0);
+            if(exists(ICFG_PATH)){
+                ilog("cfg-keep", 0, 0, 0);
+            } else {
+                int rc = copy_file("/app0/assets/config.json", ICFG_PATH);
+                ilog("cfg-copy", rc == 0 ? 0 : (errno ? errno : -1), 0, 0);
+            }
         } else {
             ilog("cfg-noasset", errno, 0, 0);
             /* Fallback: write template with pre-set token. */
@@ -260,7 +281,7 @@ static int step_files(void){
              PAYLOAD_BIN, ok == 0 ? "OK" : "denied",
              ok == 0 ? "" : " [stage ", ok == 0 ? "" : g_stage, ok == 0 ? "" : "]",
              EVICT_BIN, evict_ok == 0 ? "OK" : "denied",
-             evict_ok == 0 ? "" : " [stage ", evict_ok == 0 ? "" : g_stage, evict_ok == 0 ? "" : "]");
+             evict_ok == 0 ? "" : " [stage ", evict_ok == 0 ? "" : evict_stage, evict_ok == 0 ? "" : "]");
     ui_ok(report);
     if(ok != 0){
         ui_ok("Install failed: could not write the payload.\n\nStopping here.");
@@ -303,14 +324,33 @@ static void step_token(void){
     }
     for(tries = 0; tries < 3; tries++){
         r = ui_input("Discord token", "paste token, Done to save", tok, sizeof tok);
-        if(r < 0){ ui_ok("Text input failed. Skipping."); return; }
-        if(r == 0) return;
-        if(token_valid(tok)){
-            r = icfg_token_save(ICFG_PATH, tok);
-            ui_ok("Config saved.");
+        if(r < 0){
+            /* D-13: if the OSK does not come up, do not leave the user with
+             * a dead end. The FTP path always works. */
+            ui_ok("Text input is unavailable on this console.\n\n"
+                  "FTP to /data/orbisRPC/config.json and set \"token\".");
             return;
         }
-        ui_ok("That doesn't look like a token.\nCheck it and try again, or cancel to skip.");
+        if(r == 0){
+            ui_ok("Skipped.\n\nTo add the token later, FTP to\n"
+                  "/data/orbisRPC/config.json and set \"token\".");
+            return;
+        }
+        if(token_valid(tok)){
+            r = icfg_token_save(ICFG_PATH, tok);
+            ilogv("token-save", r, 0);
+            if(r == 0){
+                ui_ok("Config saved.");
+            } else {
+                /* Do not claim success on faith: the read-back proof in
+                 * icfg_token_save failed (I/O or OOM). */
+                ui_ok("Could not save the token.\n\n"
+                      "FTP to /data/orbisRPC/config.json and set \"token\".");
+            }
+            return;
+        }
+        ui_ok("That doesn't look like a token.\nCheck it and try again "
+              "(or edit /data/orbisRPC/config.json over FTP).");
     }
 }
 

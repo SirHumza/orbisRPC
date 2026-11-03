@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* ca_bundle_pem.h - curated trust anchors (generated, do not edit).
  * 24 roots for GitHub/Discord/Sony/pkg-zone. Regenerate with
  * scripts/make_ca_bundle.py.

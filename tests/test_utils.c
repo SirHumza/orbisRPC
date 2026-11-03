@@ -1,12 +1,19 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
+#include <string.h>
+#include <stdlib.h>
 #include "../orbisrpc/jsonlite.h"
 #include "../orbisrpc/b64.h"
 #include "../orbisrpc/sfo.h"
 #include "../orbisrpc/tmdb_crypto.h"
 #include "../orbisrpc/updater.h"
+#include "../orbisrpc/updater_http.h"
 #include "../orbisrpc/art.h"
 #include "../orbisrpc/health.h"
 #include "../orbisrpc/manifest.h"
 #include "../orbisrpc/cfg.h"
+#include "../orbisrpc/fingerprint_gen.h"
 #include "../orbisrpc/appdb.h"
 #include "../orbisrpc/discord.h"
 #include "../orbisrpc/detect.h"
@@ -16,28 +23,94 @@
 #include "../orbisrpc/pkgzone.h"
 #include "../orbisrpc/gamecache.h"
 #include "../orbisrpc/fw.h"
+#include "../orbisrpc/log.h"
+#include "../orbisrpc/sched.h"
+#include "../orbisrpc/clock.h"
+#include "../orbisrpc/diag.h"
+#include "../orbisrpc/token.h"
+#include "../orbisrpc/builtin_titles.h"
+#include "../orbisrpc/goldhen.h"
+#include "../orbisrpc/lock.h"
+#include "../orbisrpc/notify.h"
 #include "../orbisrpc/gamecache.h"
 #include "../orbisrpc/pkgzone.h"
 #include "../installer/icfg.h"
 #include "sqlite3.h"
 #include <string.h>
+#include <dirent.h>
+#include <time.h>
 
-/* discord.c host stubs: builder tests never touch the wire. */
+/* discord.c host stubs: builder tests never touch the wire. The replay
+ * driver below switches them into a scripted-frame mode. */
+typedef struct { int wsop; int fin; char payload[2048]; int len; } replay_frame_t;
+static replay_frame_t s_rf[64];
+static int s_rf_n = 0, s_rf_i = 0;
+static int s_replay_on = 0;
+static int s_pong_n = 0;
+static int s_sent_op[32];
+static char s_sent_json[32][4096];
+static int s_sent_n = 0;
+static int s_fail_send = 0;
+
+static void replay_begin(replay_frame_t *f, int n){
+    memcpy(s_rf, f, sizeof(replay_frame_t) * (size_t)n);
+    s_rf_n = n; s_rf_i = 0; s_sent_n = 0; s_pong_n = 0; s_replay_on = 1;
+}
+
+static void replay_end(void){ s_replay_on = 0; }
 int detect_media_type(const char *t){
     if(t && !strcmp(t, "CUSA00127")) return 3;
     return 0;
 }
-int ws_connect(ws_t *w, const char *h, int p, const char *r, const char *k){
-    (void)w; (void)h; (void)p; (void)r; (void)k; return -1;
+static char s_last_host[128];
+int ws_connect(ws_t *w, const char *h, int p, const char *r, const char *k,
+               const char *ua){
+    (void)w; (void)p; (void)r; (void)k; (void)ua;
+    snprintf(s_last_host, sizeof s_last_host, "%s", h ? h : "");
+    return s_replay_on ? 0 : -1;
 }
 int ws_send_text(ws_t *w, const char *m, size_t n){
-    (void)w; (void)m; (void)n; return -1;
+    (void)w;
+    if(!s_replay_on || s_fail_send) return -1;
+    jl_val_t *r = jl_parse(m, n);
+    int op = -1;
+    if(r){ const jl_val_t *v = jl_obj_get(r, "op"); if(v && v->type == JL_NUMBER) op = (int)v->num; jl_free(r); }
+    if(s_sent_n < 32){
+        size_t copy = n < sizeof s_sent_json[0] - 1 ? n : sizeof s_sent_json[0] - 1;
+        memcpy(s_sent_json[s_sent_n], m, copy);
+        s_sent_json[s_sent_n][copy] = 0;
+        s_sent_op[s_sent_n++] = op;
+    }
+    return 0;
 }
 int ws_recv_frame(ws_t *w, char *b, size_t c, int *o, int *f){
-    (void)w; (void)b; (void)c; (void)o; (void)f; return -1;
+    (void)w;
+    if(!s_replay_on || s_rf_i >= s_rf_n) return 0;
+    replay_frame_t *fr = &s_rf[s_rf_i++];
+    size_t n = (size_t)fr->len;
+    if(n >= c) n = c - 1;
+    memcpy(b, fr->payload, n);
+    b[n] = 0;
+    if(o) *o = fr->wsop;
+    if(f) *f = fr->fin;
+    return (int)n;
 }
-int ws_pong(ws_t *w){ (void)w; return -1; }
-int ws_close(ws_t *w){ (void)w; return -1; }
+int ws_recv_alloc(ws_t *w, char **out, size_t *out_len, int *o, int *f){
+    (void)w;
+    if(!s_replay_on || s_rf_i >= s_rf_n) return 0;
+    replay_frame_t *fr = &s_rf[s_rf_i++];
+    char *p = (char*)malloc((size_t)fr->len + 1);
+    if(!p) return -1;
+    memcpy(p, fr->payload, (size_t)fr->len);
+    p[fr->len] = 0;
+    *out = p;
+    if(out_len) *out_len = (size_t)fr->len;
+    if(o) *o = fr->wsop;
+    if(f) *f = fr->fin;
+    return fr->len;
+}
+int ws_pong(ws_t *w){ (void)w; s_pong_n++; return s_replay_on ? 0 : -1; }
+int ws_close(ws_t *w){ (void)w; return s_replay_on ? 0 : -1; }
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/ecp.h>
 #include <mbedtls/ctr_drbg.h>
@@ -61,6 +134,17 @@ static int make_tmpdir(char *out, size_t cap){
     return 0;
 }
 
+/* Read a whole file into a NUL-terminated buffer; 0 when unreadable. */
+static size_t read_text_file(const char *path, char *out, size_t cap){
+    if(!path || !out || cap < 2) return 0;
+    FILE *f = fopen(path, "rb");
+    if(!f) return 0;
+    size_t n = fread(out, 1, cap - 1, f);
+    fclose(f);
+    out[n] = 0;
+    return n;
+}
+
 static void test_json(void) {
     const char input[] = "{\"name\":\"A\\u00e9\",\"items\":[true,2,null]}";
     jl_val_t *root = jl_parse(input, sizeof(input) - 1);
@@ -70,6 +154,26 @@ static void test_json(void) {
     assert(jl_arr_at(jl_obj_get(root, "items"), 1)->num == 2);
     assert(jl_arr_at(jl_obj_get(root, "items"), 2)->type == JL_NULL);
     jl_free(root);
+
+    /* Surrogate pairs are one 4-byte UTF-8 code point, not two invalid
+     * 3-byte sequences. A lone surrogate becomes U+FFFD. */
+    {
+        const char pair[] = "{\"n\":\"\\ud83c\\udfae\"}";
+        jl_val_t *p = jl_parse(pair, sizeof(pair) - 1);
+        assert(p != NULL);
+        const jl_val_t *pn = jl_obj_get(p, "n");
+        assert(pn && pn->type == JL_STRING);
+        assert(!strcmp(pn->str, "\xF0\x9F\x8E\xAE"));
+        jl_free(p);
+
+        const char lone[] = "{\"n\":\"\\ud83c\"}";
+        jl_val_t *l = jl_parse(lone, sizeof(lone) - 1);
+        assert(l != NULL);
+        const jl_val_t *ln = jl_obj_get(l, "n");
+        assert(ln && ln->type == JL_STRING);
+        assert(!strcmp(ln->str, "\xEF\xBF\xBD"));
+        jl_free(l);
+    }
 
     assert(jl_parse("{} trailing", 11) == NULL);
     assert(jl_parse("[1,]", 4) == NULL);
@@ -91,6 +195,219 @@ static void test_gateway_op_spoof(void) {
     jl_val_t *r2 = jl_parse(no_op, sizeof(no_op)-1);
     assert(r2 && jl_obj_get(r2, "op") == NULL);
     jl_free(r2);
+}
+
+/* The handshake, IDENTIFY and REST must all report one identity tuple.
+ * A stale or contradictory field is exactly what marks a hand-rolled
+ * client, so this test reads the real IDENTIFY payload. */
+static void test_identity_consistency(void) {
+    static const char *const frames[] = {
+        "{\"op\":10,\"d\":{\"heartbeat_interval\":45000}}",
+        "{\"op\":0,\"t\":\"READY\",\"s\":1,\"d\":{}}"
+    };
+    replay_frame_t f[2];
+    memset(f, 0, sizeof f);
+    for(int i = 0; i < 2; i++){
+        f[i].wsop = 1; f[i].fin = 1;
+        f[i].len = (int)strlen(frames[i]);
+        memcpy(f[i].payload, frames[i], (size_t)f[i].len);
+    }
+    cfg_t saved = g_cfg;
+    cfg_defaults(&g_cfg);
+    snprintf(g_cfg.status, sizeof g_cfg.status, "dnd");
+    replay_begin(f, 2);
+    discord_t d;
+    memset(&d, 0, sizeof d);
+    assert(discord_connect(&d, "REPLAY-TOKEN") == 0);
+    replay_end();
+    assert(s_sent_n >= 1 && s_sent_op[0] == 2);
+    jl_val_t *id = jl_parse(s_sent_json[0], strlen(s_sent_json[0]));
+    assert(id && id->type == JL_OBJECT);
+    const jl_val_t *dd = jl_obj_get(id, "d");
+    const jl_val_t *identify_presence = dd ? jl_obj_get(dd, "presence") : NULL;
+    const jl_val_t *identify_status = identify_presence
+        ? jl_obj_get(identify_presence, "status") : NULL;
+    assert(identify_status && identify_status->type == JL_STRING
+           && !strcmp(identify_status->str, "dnd"));
+    const jl_val_t *p = dd ? jl_obj_get(dd, "properties") : NULL;
+    assert(p && p->type == JL_OBJECT);
+    const jl_val_t *cv = jl_obj_get(p, "client_version");
+    const jl_val_t *cb = jl_obj_get(p, "client_build_number");
+    const jl_val_t *ua = jl_obj_get(p, "browser_user_agent");
+    const jl_val_t *bv = jl_obj_get(p, "browser_version");
+    const jl_val_t *lid = jl_obj_get(p, "client_launch_id");
+    assert(cv && cv->type == JL_STRING && !strcmp(cv->str, ORBISRPC_FP_VERSION));
+    assert(cb && cb->type == JL_NUMBER && (long)cb->num == ORBISRPC_FP_BUILD);
+    assert(ua && ua->type == JL_STRING);
+    /* The UA is the reviewed tuple, not a second hardcoded string. */
+    assert(!strcmp(ua->str, ORBISRPC_FP_USER_AGENT));
+    assert(strstr(ua->str, "discord/" ORBISRPC_FP_VERSION) != NULL);
+    assert(strstr(ua->str, "Chrome/" ORBISRPC_FP_CHROME) != NULL);
+    assert(strstr(ua->str, "Electron/" ORBISRPC_FP_ELECTRON) != NULL);
+    /* browser_version is the Chromium version, same as the UA's Chrome/. */
+    assert(bv && bv->type == JL_STRING && !strcmp(bv->str, ORBISRPC_FP_CHROME));
+    /* Per-launch UUID, not a constant. */
+    assert(lid && lid->type == JL_STRING && strlen(lid->str) == 36);
+    assert(lid->str[8] == '-' && lid->str[13] == '-' && lid->str[18] == '-'
+           && lid->str[23] == '-');
+    jl_free(id);
+    g_cfg = saved;
+}
+
+static void test_identify_capabilities(void) {
+    static const char *const frames[] = {
+        "{\"op\":10,\"d\":{\"heartbeat_interval\":45000}}",
+        "{\"op\":0,\"t\":\"READY\",\"s\":1,\"d\":{}}"
+    };
+    replay_frame_t f[2];
+    memset(f, 0, sizeof f);
+    for(int i = 0; i < 2; i++){
+        f[i].wsop = 1;
+        f[i].fin = 1;
+        f[i].len = (int)strlen(frames[i]);
+        assert((size_t)f[i].len < sizeof f[i].payload);
+        memcpy(f[i].payload, frames[i], (size_t)f[i].len);
+    }
+    replay_begin(f, 2);
+    discord_t d;
+    memset(&d, 0, sizeof d);
+    int rc = discord_connect(&d, "REPLAY-TOKEN");
+    replay_end();
+    assert(rc == 0);
+    assert(s_sent_n >= 1 && s_sent_op[0] == 2);
+    jl_val_t *id = jl_parse(s_sent_json[0], strlen(s_sent_json[0]));
+    assert(id && id->type == JL_OBJECT);
+    const jl_val_t *dd = jl_obj_get(id, "d");
+    const jl_val_t *caps = dd ? jl_obj_get(dd, "capabilities") : NULL;
+    assert(caps && caps->type == JL_NUMBER);
+    /* AUTH_TOKEN_REFRESH would let Discord replace the token and invalidate
+     * the copy the desktop client holds; orbisRPC cannot write it back. */
+    assert(((unsigned)caps->num & DISCORD_GW_CAP_AUTH_TOKEN_REFRESH) == 0);
+    jl_free(id);
+}
+
+/* READY -> RESUME round trip through the real gateway code. The replay
+ * transport never truncates, so this checks payload construction and state
+ * transitions; test_ws.c checks that a >2 KB READY survives the parser. */
+static void test_resume_flow(void){
+    static const char *const hello = "{\"op\":10,\"d\":{\"heartbeat_interval\":45000}}";
+    static const char *const ready =
+        "{\"op\":0,\"t\":\"READY\",\"s\":7,\"d\":{"
+        "\"session_id\":\"0123456789abcdef0123456789abcdef\","
+        "\"resume_gateway_url\":\"wss://gateway-us-east1-b.discord.gg\","
+        "\"user\":{\"id\":\"1\"}}}";
+    replay_frame_t f[2];
+    memset(f, 0, sizeof f);
+    f[0].wsop = 1; f[0].fin = 1; f[0].len = (int)strlen(hello);
+    memcpy(f[0].payload, hello, (size_t)f[0].len);
+    f[1].wsop = 1; f[1].fin = 1; f[1].len = (int)strlen(ready);
+    memcpy(f[1].payload, ready, (size_t)f[1].len);
+    replay_begin(f, 2);
+    discord_t d;
+    memset(&d, 0, sizeof d);
+    assert(discord_connect(&d, "REPLAY-TOKEN") == 0);
+    replay_end();
+    assert(discord_can_resume(&d));
+    assert(!strcmp(d.session_id, "0123456789abcdef0123456789abcdef"));
+    assert(!strcmp(d.resume_url, "wss://gateway-us-east1-b.discord.gg"));
+    assert(d.seq == 7);
+
+    /* Successful resume: op 6 carries token, session and last sequence. */
+    replay_frame_t r[2];
+    memset(r, 0, sizeof r);
+    r[0].wsop = 1; r[0].fin = 1; r[0].len = (int)strlen(hello);
+    memcpy(r[0].payload, hello, (size_t)r[0].len);
+    const char *resumed = "{\"op\":0,\"t\":\"RESUMED\",\"s\":8,\"d\":{}}";
+    r[1].wsop = 1; r[1].fin = 1; r[1].len = (int)strlen(resumed);
+    memcpy(r[1].payload, resumed, (size_t)r[1].len);
+    replay_begin(r, 2);
+    assert(discord_resume(&d, "REPLAY-TOKEN") == 0);
+    replay_end();
+    assert(s_sent_n == 1 && s_sent_op[0] == 6);
+    assert(!strcmp(s_last_host, "gateway-us-east1-b.discord.gg"));
+    jl_val_t *rq = jl_parse(s_sent_json[0], strlen(s_sent_json[0]));
+    assert(rq && rq->type == JL_OBJECT);
+    const jl_val_t *rd = jl_obj_get(rq, "d");
+    const jl_val_t *tk = rd ? jl_obj_get(rd, "token") : NULL;
+    const jl_val_t *si = rd ? jl_obj_get(rd, "session_id") : NULL;
+    const jl_val_t *sq = rd ? jl_obj_get(rd, "seq") : NULL;
+    assert(tk && tk->type == JL_STRING && !strcmp(tk->str, "REPLAY-TOKEN"));
+    assert(si && si->type == JL_STRING &&
+           !strcmp(si->str, "0123456789abcdef0123456789abcdef"));
+    assert(sq && sq->type == JL_NUMBER && (int)sq->num == 7);
+    jl_free(rq);
+
+    /* Invalid session: gateway says the session is dead; the next connect
+     * must be a fresh IDENTIFY, not another doomed RESUME. */
+    replay_frame_t bad[2];
+    memset(bad, 0, sizeof bad);
+    bad[0].wsop = 1; bad[0].fin = 1; bad[0].len = (int)strlen(hello);
+    memcpy(bad[0].payload, hello, (size_t)bad[0].len);
+    const char *inv = "{\"op\":9,\"d\":false}";
+    bad[1].wsop = 1; bad[1].fin = 1; bad[1].len = (int)strlen(inv);
+    memcpy(bad[1].payload, inv, (size_t)bad[1].len);
+    replay_begin(bad, 2);
+    assert(discord_resume(&d, "REPLAY-TOKEN") == -3);
+    replay_end();
+    assert(!discord_can_resume(&d));
+}
+
+/* Presence updates are all-or-nothing. The frame must be op 3 with a named
+ * activity (an anonymous activity renders as nothing), and a failed write
+ * must invalidate the WebSocket: tls_write may already have put part of the
+ * frame on the wire, so reusing that stream would corrupt every later
+ * frame and the presence would silently stay missing. */
+static void test_presence_send(void){
+    static const char *const frames[] = {
+        "{\"op\":10,\"d\":{\"heartbeat_interval\":45000}}",
+        "{\"op\":0,\"t\":\"READY\",\"s\":1,\"d\":{}}"
+    };
+    replay_frame_t f[2];
+    memset(f, 0, sizeof f);
+    for(int i = 0; i < 2; i++){
+        f[i].wsop = 1; f[i].fin = 1;
+        f[i].len = (int)strlen(frames[i]);
+        memcpy(f[i].payload, frames[i], (size_t)f[i].len);
+    }
+    cfg_t saved = g_cfg;
+    cfg_defaults(&g_cfg);
+    replay_begin(f, 2);
+    discord_t d;
+    memset(&d, 0, sizeof d);
+    assert(discord_connect(&d, "REPLAY-TOKEN") == 0);
+
+    assert(discord_set_presence(&d, "firmware 9.00", "Terraria", NULL, 0) == 0);
+    assert(d.connected == 1);
+    assert(s_sent_n >= 2 && s_sent_op[s_sent_n-1] == 3);
+    jl_val_t *p = jl_parse(s_sent_json[s_sent_n-1],
+                           strlen(s_sent_json[s_sent_n-1]));
+    assert(p && p->type == JL_OBJECT);
+    const jl_val_t *pd = jl_obj_get(p, "d");
+    const jl_val_t *acts = pd ? jl_obj_get(pd, "activities") : NULL;
+    const jl_val_t *a0 = (acts && acts->type == JL_ARRAY)
+                         ? jl_arr_at(acts, 0) : NULL;
+    const jl_val_t *nm = a0 ? jl_obj_get(a0, "name") : NULL;
+    assert(acts && acts->type == JL_ARRAY && acts->count == 1);
+    assert(nm && nm->type == JL_STRING && !strcmp(nm->str, "Terraria"));
+    jl_free(p);
+
+    /* Clear is the same envelope with an empty activities array. */
+    assert(discord_clear_presence(&d) == 0);
+    assert(s_sent_n >= 3 && s_sent_op[s_sent_n-1] == 3);
+    p = jl_parse(s_sent_json[s_sent_n-1], strlen(s_sent_json[s_sent_n-1]));
+    assert(p && p->type == JL_OBJECT);
+    pd = jl_obj_get(p, "d");
+    acts = pd ? jl_obj_get(pd, "activities") : NULL;
+    assert(acts && acts->type == JL_ARRAY && acts->count == 0);
+    jl_free(p);
+
+    s_fail_send = 1;
+    assert(discord_set_presence(&d, "firmware 9.00", "Terraria", NULL, 0) == -1);
+    assert(d.connected == 0);
+    s_fail_send = 0;
+    assert(discord_clear_presence(&d) == -1); /* no live session left */
+    replay_end();
+    g_cfg = saved;
 }
 
 static void test_json_oom_safe(void) {
@@ -214,6 +531,19 @@ static void test_tmdb(void) {
         const char body2[] = "{\"names\":[{\"name\":\"X\"}],\"icons\":[{\"icon\":\"not a url\"}]}";
         assert(tmdb_parse(body2, sizeof(body2)-1, name, sizeof name, icon, sizeof icon) == 0);
         assert(icon[0] == 0);
+        /* an http URL too long to upgrade is dropped, not sent in a form
+         * Discord ignores */
+        {
+            char body5[640], path[300];
+            memset(path, 'a', sizeof path - 1); path[sizeof path - 1] = 0;
+            snprintf(body5, sizeof body5,
+                     "{\"names\":[{\"name\":\"Long\"}],\"icons\":[{\"icon\":\"http://x/%s.png\"}]}",
+                     path);
+            assert(tmdb_parse(body5, strlen(body5), name, sizeof name,
+                              icon, sizeof icon) == 0);
+            assert(!strcmp(name, "Long"));
+            assert(icon[0] == 0);
+        }
         /* no names -> fail */
         assert(tmdb_parse("{\"icons\":[]}", 12, name, sizeof name, icon, sizeof icon) != 0);
     }
@@ -236,7 +566,283 @@ static void test_updater(void) {
     elf[18]=99;
     assert(updater_elf_ok(elf, sizeof elf) == 0);
 }
+/* --- gateway regression replay (T0.12) -------------------------------
+ * Recorded gateway exchanges as JSONL, one scenario per line:
+ *   {"name":"...","connect":[{"json":"..."}],"connect_rc":0,
+ *    "tick":[{"json":"..."}],"tick_rc":-1,"pre":{"sent_hb":1},
+ *    "out":[2]}
+ * Frames are sanitized: no token, no account data, fixed timings. The
+ * driver feeds them to the real discord_connect/discord_tick through the
+ * ws stubs, so a protocol regression fails `make test`. */
+static int replay_load_frames(const jl_val_t *arr, replay_frame_t *out, int cap){
+    int n = 0;
+    if(!arr) return 0;
+    for(size_t i = 0; ; i++){
+        const jl_val_t *e = jl_arr_at(arr, i);
+        if(!e) break;
+        if(e->type != JL_OBJECT || n >= cap) return -1;
+        replay_frame_t *f = &out[n];
+        memset(f, 0, sizeof *f);
+        f->wsop = 1; f->fin = 1;
+        const jl_val_t *op = jl_obj_get(e, "op");
+        const jl_val_t *fin = jl_obj_get(e, "fin");
+        const jl_val_t *js = jl_obj_get(e, "json");
+        const jl_val_t *code = jl_obj_get(e, "code");
+        if(op && op->type == JL_NUMBER) f->wsop = (int)op->num;
+        if(fin && fin->type == JL_NUMBER) f->fin = (int)fin->num;
+        if(js && js->type == JL_STRING && js->str){
+            size_t l = strlen(js->str);
+            if(l >= sizeof f->payload) return -1;
+            memcpy(f->payload, js->str, l);
+            f->len = (int)l;
+        } else if(code && code->type == JL_NUMBER){
+            f->wsop = 8;
+            f->payload[0] = (char)((int)code->num >> 8);
+            f->payload[1] = (char)((int)code->num & 0xff);
+            f->len = 2;
+        } else return -1;
+        n++;
+    }
+    return n;
+}
+
+static int replay_check_out(const jl_val_t *exp, const char *name, const char *phase){
+    int n = 0;
+    if(!exp) return 0;
+    for(size_t i = 0; ; i++){
+        const jl_val_t *v = jl_arr_at(exp, i);
+        if(!v) break;
+        if(v->type != JL_NUMBER || n >= s_sent_n || s_sent_op[n] != (int)v->num){
+            printf("replay: %s %s out[%d] expected %d got %d\n", name, phase, n,
+                   v->type == JL_NUMBER ? (int)v->num : -1,
+                   n < s_sent_n ? s_sent_op[n] : -1);
+            return -1;
+        }
+        n++;
+    }
+    if(n != s_sent_n){
+        printf("replay: %s %s sent %d frames, expected %d\n", name, phase, s_sent_n, n);
+        return -1;
+    }
+    return 0;
+}
+
+static void replay_apply_pre(discord_t *d, const jl_val_t *pre){
+    if(!pre) return;
+    int64_t now = orbis_mono_s();
+    const jl_val_t *v;
+    if((v = jl_obj_get(pre, "sent_hb")) && v->type == JL_NUMBER)
+        d->sent_hb = (int)v->num;
+    if((v = jl_obj_get(pre, "ack_age_s")) && v->type == JL_NUMBER)
+        d->last_ack = now - (int64_t)v->num;
+    if((v = jl_obj_get(pre, "hb_age_s")) && v->type == JL_NUMBER)
+        d->last_heartbeat = now - (int64_t)v->num;
+}
+
+static int replay_one(const jl_val_t *sc, const char *file){
+    const jl_val_t *nm = jl_obj_get(sc, "name");
+    const char *name = (nm && nm->type == JL_STRING) ? nm->str : file;
+    replay_frame_t frames[64];
+    int n = replay_load_frames(jl_obj_get(sc, "connect"), frames, 64);
+    if(n < 0){ printf("replay: %s bad connect frames\n", name); return -1; }
+
+    /* Silence expected log noise from the negative scenarios; the driver is
+     * asserting return codes and frame counts, not log text. */
+    replay_begin(frames, n);
+    discord_t d;
+    memset(&d, 0, sizeof d);
+    int rc = discord_connect(&d, "REPLAY-TOKEN");
+    int want = 0;
+    const jl_val_t *rcv = jl_obj_get(sc, "connect_rc");
+    if(rcv && rcv->type == JL_NUMBER) want = (int)rcv->num;
+    int fail = 0;
+    if(rc != want){ printf("replay: %s connect rc %d want %d\n", name, rc, want); fail = 1; }
+    {
+        const jl_val_t *hbm = jl_obj_get(sc, "hb_ms");
+        if(hbm && hbm->type == JL_NUMBER &&
+           d.hb_interval_ms != (int64_t)hbm->num){
+            printf("replay: %s hb_ms %lld want %lld\n", name,
+                   (long long)d.hb_interval_ms, (long long)hbm->num);
+            fail = 1;
+        }
+    }
+    if(replay_check_out(jl_obj_get(sc, "out"), name, "connect") != 0) fail = 1;
+
+    const jl_val_t *tick = jl_obj_get(sc, "tick");
+    if(tick && tick->type == JL_ARRAY){
+        int tn = replay_load_frames(tick, frames, 64);
+        if(tn < 0){ printf("replay: %s bad tick frames\n", name); return -1; }
+        replay_apply_pre(&d, jl_obj_get(sc, "pre"));
+        replay_begin(frames, tn);
+        rc = discord_tick(&d);
+        want = 0;
+        rcv = jl_obj_get(sc, "tick_rc");
+        if(rcv && rcv->type == JL_NUMBER) want = (int)rcv->num;
+        if(rc != want){ printf("replay: %s tick rc %d want %d\n", name, rc, want); fail = 1; }
+        {
+            const jl_val_t *sq = jl_obj_get(sc, "seq");
+            if(sq && sq->type == JL_NUMBER && d.seq != (int)sq->num){
+                printf("replay: %s seq %d want %d\n", name, d.seq, (int)sq->num);
+                fail = 1;
+            }
+        }
+        if(replay_check_out(jl_obj_get(sc, "tick_out"), name, "tick") != 0) fail = 1;
+        const jl_val_t *pong = jl_obj_get(sc, "pong");
+        if(pong && pong->type == JL_NUMBER && s_pong_n != (int)pong->num){
+            printf("replay: %s pong %d want %d\n", name, s_pong_n, (int)pong->num);
+            fail = 1;
+        }
+    }
+    replay_end();
+    return fail ? -1 : 0;
+}
+
+static int test_replay(void){
+    DIR *dp = opendir("fixtures/gateway");
+    if(!dp){ printf("replay: fixtures/gateway missing\n"); return -1; }
+    int files = 0, scenarios = 0, bad = 0;
+    struct dirent *de;
+    while((de = readdir(dp)) != NULL){
+        size_t l = strlen(de->d_name);
+        if(l < 6 || strcmp(de->d_name + l - 6, ".jsonl") != 0) continue;
+        char path[512];
+        snprintf(path, sizeof path, "fixtures/gateway/%s", de->d_name);
+        FILE *f = fopen(path, "rb");
+        if(!f){ printf("replay: cannot open %s\n", path); bad++; continue; }
+        files++;
+        char *line = NULL;
+        size_t cap = 0;
+        ssize_t got;
+        while((got = getline(&line, &cap, f)) >= 0){
+            while(got > 0 && (line[got-1] == '\n' || line[got-1] == '\r')) line[--got] = 0;
+            if(got == 0 || line[0] == '#') continue;
+            jl_val_t *sc = jl_parse(line, (size_t)got);
+            if(!sc || sc->type != JL_OBJECT){
+                printf("replay: %s malformed line\n", de->d_name);
+                if(sc) jl_free(sc);
+                bad++;
+                continue;
+            }
+            scenarios++;
+            if(replay_one(sc, de->d_name) != 0) bad++;
+            jl_free(sc);
+        }
+        free(line);
+        fclose(f);
+    }
+    closedir(dp);
+    printf("replay: %d fixtures, %d scenarios, %d failed\n", files, scenarios, bad);
+    return bad ? -1 : 0;
+}
+
+static void test_diag(void){
+    char dir[64];
+    assert(make_tmpdir(dir, sizeof dir) == 0);
+    char logp[256], out[256];
+    snprintf(logp, sizeof logp, "%s/log.txt", dir);
+    snprintf(out, sizeof out, "%s/diagnostic.txt", dir);
+    const char *secret = "SECRET.TOKEN.VALUE";
+    FILE *f = fopen(logp, "wb");
+    assert(f);
+    fprintf(f, "boot ok\ntoken %s\n", secret);
+    fclose(f);
+
+    cfg_t c;
+    cfg_defaults(&c);
+    snprintf(c.token, sizeof c.token, "%s", secret);
+    snprintf(c.application_id, sizeof c.application_id, "123456789");
+    diag_info_t info = { "1.1.0", "9.00", 3600, 12, "4004,1006" };
+    char *b = diag_build(&info, &c, "boot ok token SECRET.TOKEN.VALUE", 30);
+    assert(b);
+    assert(strstr(b, secret) == NULL);
+    assert(strstr(b, "[redacted]") != NULL);
+    assert(strstr(b, "1.1.0") != NULL);
+    assert(strstr(b, "4004,1006") != NULL);
+    assert(strstr(b, "123456789") != NULL);
+    assert(strstr(b, "token: [redacted] len=") != NULL);
+    free(b);
+
+    assert(diag_write_file(out, &info, &c, logp) == 0);
+    f = fopen(out, "rb");
+    assert(f);
+    char buf[4096];
+    size_t n = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    buf[n] = 0;
+    assert(strstr(buf, secret) == NULL);
+    assert(strstr(buf, "log tail:") != NULL);
+    struct stat st;
+    assert(stat(out, &st) == 0);
+    assert((st.st_mode & 0777) == 0600);
+}
+
+static void test_updater_http(void) {
+    int status = 0;
+    size_t len = 0;
+    char loc[64];
+    const char ok[] = "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello";
+    char *b = upd_parse_response(ok, sizeof ok - 1, 64, &status, &len, loc, sizeof loc);
+    assert(b && status == 200 && len == 5 && !memcmp(b, "hello", 5) && loc[0] == 0);
+    free(b);
+
+    /* A short read against a declared Content-Length is a failed download,
+     * not a valid body. This is the truncation check. */
+    const char cut[] = "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nhello";
+    b = upd_parse_response(cut, sizeof cut - 1, 64, &status, &len, loc, sizeof loc);
+    assert(b == NULL && status == 200 && len == 0);
+
+    /* Chunked decoding still works after the truncation gate. */
+    const char chunked[] = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+                           "5\r\nhello\r\n0\r\n\r\n";
+    b = upd_parse_response(chunked, sizeof chunked - 1, 64, &status, &len, loc, sizeof loc);
+    assert(b && status == 200 && len == 5 && !memcmp(b, "hello", 5));
+    free(b);
+
+    /* Redirect target is captured for the updater's allowlist check. */
+    const char redir[] = "HTTP/1.1 302 Found\r\nLocation: https://github.com/x\r\nContent-Length: 0\r\n\r\n";
+    b = upd_parse_response(redir, sizeof redir - 1, 64, &status, &len, loc, sizeof loc);
+    assert(b && status == 302 && len == 0 && !strcmp(loc, "https://github.com/x"));
+    free(b);
+
+    /* No header terminator: unusable, never a guessed body. */
+    const char junk[] = "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n";
+    assert(upd_parse_response(junk, sizeof junk - 1, 64, &status, &len, loc, sizeof loc) == NULL);
+    /* Body larger than the caller's cap is refused, not silently truncated. */
+    const char big[] = "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello";
+    assert(upd_parse_response(big, sizeof big - 1, 4, &status, &len, loc, sizeof loc) == NULL);
+    /* Numeric header/status fields are parsed with strtol, so an
+     * unrepresentable value neither overflows nor reads as success. */
+    const char hugecl[] = "HTTP/1.1 200 OK\r\nContent-Length: 99999999999999999999999999999999\r\n\r\nhello";
+    assert(upd_parse_response(hugecl, sizeof hugecl - 1, 64, &status, &len,
+                              loc, sizeof loc) == NULL);
+    const char hugest[] = "HTTP/1.1 99999999999999999999999999999999 OK\r\nContent-Length: 0\r\n\r\n";
+    b = upd_parse_response(hugest, sizeof hugest - 1, 64, &status, &len,
+                           loc, sizeof loc);
+    assert(b && status != 200 && len == 0);
+    free(b);
+}
+
 static void test_art_parse(void) {
+    /* URLs are interpolated into a JSON POST body and a request line. Quote,
+     * backslash, control, and non-http values must be refused before they can
+     * break the request or smuggle in another JSON field. */
+    assert(art_url_ok("https://example.com/a.png") == 1);
+    assert(art_url_ok("http://example.com/a.png?x=1&y=2") == 1);
+    assert(art_url_ok("https://example.com/a\"b.png") == 0);
+    assert(art_url_ok("https://example.com/a\\b.png") == 0);
+    assert(art_url_ok("https://example.com/a\nb.png") == 0);
+    assert(art_url_ok("https://example.com/a\tb.png") == 0);
+    assert(art_url_ok("ftp://example.com/a.png") == 0);
+    assert(art_url_ok("cusa12345") == 0);
+    assert(art_url_ok("") == 0);
+    assert(art_url_ok(NULL) == 0);
+    {
+        char longurl[600];
+        memset(longurl, 'a', sizeof longurl - 1);
+        memcpy(longurl, "https://", 8);
+        longurl[sizeof longurl - 1] = 0;
+        assert(art_url_ok(longurl) == 0);
+    }
     /* Real external-assets response shape (verified against live API). */
     const char *body = "[{\"url\":\"https://example.com/a.png\","
         "\"external_asset_path\":\"external/ABC/https/example.com/a.png\"},"
@@ -246,6 +852,32 @@ static void test_art_parse(void) {
     assert(art_parse_mp(body, strlen(body),
                         "https://example.com/b.png", out, sizeof out) == 1);
     assert(strcmp(out, "mp:external/DEF/https/example.com/b.png") == 0);
+    assert(art_resolve_mp_cached("mp:external/DEF/x", out, sizeof out) == 1);
+    assert(strcmp(out, "mp:external/DEF/x") == 0);
+    assert(art_resolve_mp_cached("https://example.com/zzz.png", out, sizeof out) == 0);
+    art_prefetch("mp:external/DEF/x");   /* already resolved: no transport */
+    /* The per-boot cache is multi-entry. Boot prefetches three static images
+     * (large, small, browser); with a single slot the last resolve evicted
+     * the rest, so the idle tile and the small badge silently lost their
+     * art and the builder is cache-only now. */
+    art_cache_clear();
+    art_cache_put("https://example.com/large.png", "mp:external/AAA/large.png");
+    art_cache_put("https://example.com/small.png", "mp:external/BBB/small.png");
+    art_cache_put("https://example.com/browser.png", "mp:external/CCC/browser.png");
+    assert(art_resolve_mp_cached("https://example.com/large.png", out, sizeof out) == 1);
+    assert(strcmp(out, "mp:external/AAA/large.png") == 0);
+    assert(art_resolve_mp_cached("https://example.com/small.png", out, sizeof out) == 1);
+    assert(strcmp(out, "mp:external/BBB/small.png") == 0);
+    assert(art_resolve_mp_cached("https://example.com/browser.png", out, sizeof out) == 1);
+    /* re-resolving one URL updates in place instead of duplicating it */
+    art_cache_put("https://example.com/small.png", "mp:external/BBB/small2.png");
+    assert(art_resolve_mp_cached("https://example.com/small.png", out, sizeof out) == 1);
+    assert(strcmp(out, "mp:external/BBB/small2.png") == 0);
+    /* only resolved mp: values are stored: a raw URL must never be echoed */
+    art_cache_put("https://example.com/bad.png", "https://example.com/bad.png");
+    assert(art_resolve_mp_cached("https://example.com/bad.png", out, sizeof out) == 0);
+    art_cache_clear();
+    assert(art_resolve_mp_cached("https://example.com/large.png", out, sizeof out) == 0);
     assert(art_parse_mp(body, strlen(body),
                         "https://example.com/zzz.png", out, sizeof out) == 0);
     assert(art_parse_mp("[]", 2, "x", out, sizeof out) == 0);
@@ -301,7 +933,7 @@ static void test_health_stage_activate(void) {
     assert(health_stage_activate(live) != 0);
     f = fopen(live, "rb");
     assert(f);
-    unsigned char chk[4];
+    unsigned char chk[8];
     assert(fread(chk, 1, 4, f) == 4);
     fclose(f);
     assert(chk[0] == 0x7f && chk[1] == 'E');
@@ -324,6 +956,21 @@ static void test_health_stage_activate(void) {
     assert(fread(chk, 1, 4, f) == 4);
     fclose(f);
     assert(chk[0] == 0x7f);
+
+    /* A corrupt backup must never replace the live file. The old code
+     * renamed .bak over .bin before checking it, so a bad backup turned
+     * one broken binary into two. */
+    f = fopen(bak, "wb");
+    assert(f); assert(fwrite("BAD-BACKUP", 1, 10, f) == 10); fclose(f);
+    f = fopen(live, "wb");
+    assert(f); assert(fwrite("BAD-LIVE", 1, 8, f) == 8); fclose(f);
+    assert(health_verify_or_rollback(live) == -1);
+    f = fopen(live, "rb");
+    assert(f);
+    memset(chk, 0, sizeof chk);
+    assert(fread(chk, 1, 8, f) == 8);
+    fclose(f);
+    assert(!memcmp(chk, "BAD-LIVE", 8));
 }
 
 static void test_manifest(void) {
@@ -340,6 +987,10 @@ static void test_manifest(void) {
     assert(!strcmp(hex, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
     assert(manifest_find(&m, "nope.bin", hex) != 0);
     assert(manifest_gate(&m) == 1);
+    assert(manifest_min_ok(&m, "1.0.0") == 1);
+    assert(manifest_min_ok(&m, "0.9.0") == 1);
+    assert(manifest_min_ok(&m, "0.8.0") == 0);
+    assert(manifest_min_ok(&m, "") == 0);
     assert(manifest_is_newer(&m, "0.9.0") == 1);
     assert(manifest_is_newer(&m, "1.0.0") == 0);
     /* wrong channel / platform refused */
@@ -357,8 +1008,18 @@ static void test_manifest(void) {
         "\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"}]}";
     manifest_t m3;
     assert(manifest_parse(jh, strlen(jh), &m3) == 0);
+    assert(manifest_min_ok(&m3, "0.0.1") == 1);   /* no minimum declared */
     assert(manifest_check(&m3, "a", (const unsigned char *)"abc", 3) == 0);
     assert(manifest_check(&m3, "a", (const unsigned char *)"abd", 3) != 0);
+    /* Release alias rule: a payload published as orbisrpc_sdk.elf has the
+     * same bytes as the manifest's orbisrpc.bin entry. The alias must verify
+     * against that canonical entry, and a missing fallback must still fail. */
+    assert(manifest_check_alias(&m3, "orbisrpc_sdk.elf", "a",
+                                (const unsigned char *)"abc", 3) == 0);
+    assert(manifest_check_alias(&m3, "orbisrpc_sdk.elf", "a",
+                                (const unsigned char *)"abd", 3) != 0);
+    assert(manifest_check_alias(&m3, "orbisrpc_sdk.elf", NULL,
+                                (const unsigned char *)"abc", 3) != 0);
 }
 
 static void test_manifest_sig(void) {
@@ -475,6 +1136,328 @@ static void test_cfg_titles(void) {
     assert(!strcmp(c.browser_art, "https://retro-games.cybermask.dpdns.org/images/web_browser.png"));
 }
 
+static void test_cfg_title_rules(void){
+    char dir[64], path[96], path2[96];
+    assert(make_tmpdir(dir, sizeof dir) == 0);
+    snprintf(path, sizeof path, "%s/cfg.json", dir);
+    snprintf(path2, sizeof path2, "%s/cfg2.json", dir);
+    FILE *f = fopen(path, "wb");
+    assert(f);
+    fputs("{\"token\":\"t\",\"status\":\"dnd\",\"timestamp_mode\":\"none\",\"title_rules\":{"
+          "\"CUSA11995\":{\"disabled\":true,\"details\":\"Swinging\",\"duration_min\":90,"
+          "\"art\":\"https://example.invalid/spidey.png\"},"
+          "\"CUSA00001\":{\"disabled\":false},"
+          "\"CUSA00002\":{\"details\":\"x\"},"
+          "\"bad key\":{\"disabled\":true},"
+          "\"CUSA00003\":42,"
+          "\"CUSA00004\":{\"disabled\":\"yes\"},"
+          "\"CUSA00005\":{\"art\":\"\"}}}", f);
+    fclose(f);
+    cfg_t c;
+    assert(cfg_load(path, &c) == 0);
+    assert(!strcmp(c.status, "dnd"));
+    assert(!strcmp(c.timestamp_mode, "none"));
+    /* disabled + details + art, one details-only; empty rules are dropped
+     * and bad keys/types are ignored. A string "disabled" is not a bool. */
+    assert(c.n_rules == 2);
+    const cfg_title_rule_t *r = cfg_title_rule(&c, "CUSA11995");
+    assert(r && r->disabled && !strcmp(r->details, "Swinging"));
+    assert(r->duration_min == 90);
+    assert(!strcmp(r->art, "https://example.invalid/spidey.png"));
+    r = cfg_title_rule(&c, "CUSA00002");
+    assert(r && !r->disabled && !strcmp(r->details, "x") && !r->art[0]);
+    assert(cfg_title_rule(&c, "CUSA00001") == NULL);
+    assert(cfg_title_rule(&c, "CUSA00004") == NULL);
+    assert(cfg_title_rule(&c, "CUSA00005") == NULL);
+    assert(cfg_title_rule(&c, "bad key") == NULL);
+    assert(cfg_title_rule(&c, "CUSA99999") == NULL);
+    assert(cfg_title_rule(NULL, "CUSA11995") == NULL);
+    /* save/load preserves the rules (and their absence stays absence). */
+    assert(cfg_save(path2, &c) == 0);
+    cfg_t c2;
+    assert(cfg_load(path2, &c2) == 0);
+    assert(!strcmp(c2.status, "dnd"));
+    assert(!strcmp(c2.timestamp_mode, "none"));
+    assert(c2.n_rules == 2);
+    r = cfg_title_rule(&c2, "CUSA11995");
+    assert(r && r->disabled && !strcmp(r->details, "Swinging"));
+    assert(r->duration_min == 90);
+    assert(!strcmp(r->art, "https://example.invalid/spidey.png"));
+}
+
+static void test_cfg_permissions(void) {
+    /* config.json carries a user token. It must never be group/world
+     * readable, including after a load of an older 0644 file. */
+    char dir[64], path[96];
+    assert(make_tmpdir(dir, sizeof dir) == 0);
+    snprintf(path, sizeof path, "%s/cfg.json", dir);
+    FILE *f = fopen(path, "wb");
+    assert(f);
+    fputs("{\"token\":\"test.token.fixture.value.for.host.tests.only\"}", f);
+    fclose(f);
+    assert(chmod(path, 0644) == 0);
+    cfg_t c;
+    assert(cfg_load(path, &c) == 0);
+    struct stat st;
+    assert(stat(path, &st) == 0);
+    assert((st.st_mode & 0777) == 0600);
+    assert(cfg_save(path, &c) == 0);
+    assert(stat(path, &st) == 0);
+    assert((st.st_mode & 0777) == 0600);
+}
+
+/* cfg_save used to rebuild the object from scratch, silently deleting every
+ * key it did not know (including ones written by a newer build or by hand). */
+static void test_cfg_preserves_unknown(void) {
+    char dir[64], path[96];
+    assert(make_tmpdir(dir, sizeof dir) == 0);
+    snprintf(path, sizeof path, "%s/cfg.json", dir);
+    FILE *f = fopen(path, "wb");
+    assert(f);
+    fputs("{\"token\":\"old-token\",\"future_key\":{\"a\":1},\"note\":\"keep me\"}", f);
+    fclose(f);
+    cfg_t c;
+    assert(cfg_load(path, &c) == 0);
+    strncpy(c.token, "new-token", sizeof c.token - 1);
+    c.token[sizeof c.token - 1] = 0;
+    assert(cfg_save(path, &c) == 0);
+    FILE *g = fopen(path, "rb");
+    assert(g);
+    char buf[2048];
+    size_t n = fread(buf, 1, sizeof buf - 1, g);
+    fclose(g);
+    buf[n] = 0;
+    assert(strstr(buf, "\"future_key\"") != NULL);
+    assert(strstr(buf, "\"keep me\"") != NULL);
+    assert(strstr(buf, "\"new-token\"") != NULL);
+    assert(strstr(buf, "\"old-token\"") == NULL);
+    /* exactly one token pair: a duplicate would let the stale one win */
+    int hits = 0;
+    for(const char *p = buf; (p = strstr(p, "\"token\"")) != NULL; p += 7) hits++;
+    assert(hits == 1);
+}
+
+static void test_cfg_migrate(void) {
+    char dir[64], path[96], bak[120], vbak[120], buf[2048];
+    assert(make_tmpdir(dir, sizeof dir) == 0);
+    snprintf(path, sizeof path, "%s/config.json", dir);
+    snprintf(bak, sizeof bak, "%s.bak", path);
+    snprintf(vbak, sizeof vbak, "%s.v1.bak", path);
+    const char *orig = "{\"token\":\"test-token-v1\","
+                       "\"titles\":{\"CUSA1\":\"Game\"},\"future_key\":42}";
+    FILE *f = fopen(path, "wb");
+    assert(f); fputs(orig, f); fclose(f);
+
+    cfg_t c;
+    assert(cfg_load(path, &c) == 0);
+    assert(c.schema_version == CFG_SCHEMA_VERSION);
+    assert(c.n_titles == 1 && !strcmp(c.title_ids[0], "CUSA1"));
+    assert(cfg_save(path, &c) == 0);
+    assert(read_text_file(path, buf, sizeof buf) > 0);
+    assert(strstr(buf, "\"schema_version\":2") != NULL);
+    assert(strstr(buf, "\"future_key\"") != NULL);
+    assert(strstr(buf, "test-token-v1") != NULL);
+    /* pre-save bytes are kept, including a one-time pristine v1 copy */
+    assert(read_text_file(bak, buf, sizeof buf) > 0);
+    assert(!strcmp(buf, orig));
+    assert(read_text_file(vbak, buf, sizeof buf) > 0);
+    assert(!strcmp(buf, orig));
+    struct stat st;
+    assert(stat(vbak, &st) == 0 && (st.st_mode & 0777) == 0600);
+
+    /* A second save rotates .bak but must never consume the v1 copy. */
+    strncpy(c.token, "test-token-v2", sizeof c.token - 1);
+    c.token[sizeof c.token - 1] = 0;
+    assert(cfg_save(path, &c) == 0);
+    assert(read_text_file(vbak, buf, sizeof buf) > 0);
+    assert(!strcmp(buf, orig));
+    assert(read_text_file(bak, buf, sizeof buf) > 0);
+    assert(strstr(buf, "\"schema_version\":2") != NULL);
+    assert(strstr(buf, "test-token-v1") != NULL);
+    assert(strstr(buf, "test-token-v2") == NULL);
+
+    /* A document from a newer build is not rewritten. */
+    f = fopen(path, "wb");
+    assert(f); fputs("{\"schema_version\":99,\"token\":\"keep\"}", f); fclose(f);
+    assert(cfg_save(path, &c) != 0);
+    assert(read_text_file(path, buf, sizeof buf) > 0);
+    assert(strstr(buf, "\"schema_version\":99") != NULL);
+    assert(cfg_migrate(NULL, 1) != 0);
+}
+
+/* Nonsense cadences must degrade to the documented bounds, not to a busy
+ * poll or a dead feature. */
+static void test_cfg_clamp(void) {
+    char dir[64], path[96];
+    assert(make_tmpdir(dir, sizeof dir) == 0);
+    snprintf(path, sizeof path, "%s/cfg.json", dir);
+    cfg_t c;
+    FILE *f = fopen(path, "wb");
+    assert(f);
+    fputs("{\"token\":\"t\",\"poll_interval_s\":1,\"presence_reconcile_s\":5,"
+          "\"presence_hold_s\":-5,\"lock_heartbeat_s\":1,\"lock_stale_s\":1,"
+          "\"reconnect_max_s\":1,\"timesync_interval_s\":1,\"log_max_kb\":1}", f);
+    fclose(f);
+    assert(cfg_load(path, &c) == 0);
+    assert(c.poll_interval_s == 5);
+    assert(c.presence_reconcile_s == 60);
+    assert(c.presence_hold_s == 0);
+    assert(c.lock_heartbeat_s == 30);
+    assert(c.lock_stale_s == 120);
+    assert(c.reconnect_max_s == 60);
+    assert(c.timesync_interval_s == 300);
+    assert(c.log_max_kb == 64);
+
+    f = fopen(path, "wb");
+    assert(f);
+    fputs("{\"token\":\"t\",\"poll_interval_s\":9999,\"presence_reconcile_s\":99999,"
+          "\"presence_hold_s\":99999,\"lock_heartbeat_s\":9999,"
+          "\"lock_stale_s\":99999,\"reconnect_max_s\":99999,"
+          "\"timesync_interval_s\":99999,\"log_max_kb\":99999}", f);
+    fclose(f);
+    assert(cfg_load(path, &c) == 0);
+    assert(c.poll_interval_s == 300);
+    assert(c.presence_reconcile_s == 3600);
+    assert(c.presence_hold_s == 1800);
+    assert(c.lock_heartbeat_s == 600);
+    assert(c.lock_stale_s == 86400);
+    assert(c.reconnect_max_s == 3600);
+    assert(c.timesync_interval_s == 86400);
+    assert(c.log_max_kb == 8192);
+
+    /* stale must leave at least two heartbeats of margin */
+    f = fopen(path, "wb");
+    assert(f);
+    fputs("{\"token\":\"t\",\"lock_heartbeat_s\":300,\"lock_stale_s\":400}", f);
+    fclose(f);
+    assert(cfg_load(path, &c) == 0);
+    assert(c.lock_heartbeat_s == 300);
+    assert(c.lock_stale_s == 600);
+
+    f = fopen(path, "wb");
+    assert(f);
+    fputs("{\"token\":\"t\",\"poll_interval_s\":12,\"presence_reconcile_s\":900}", f);
+    fclose(f);
+    assert(cfg_load(path, &c) == 0);
+    assert(c.poll_interval_s == 12 && c.presence_reconcile_s == 900);
+    /* D-11: the five-minute hold is the documented default. */
+    assert(c.presence_hold_s == 300);
+    /* Omitted recovery knobs keep the 1.1 built-ins. */
+    assert(c.lock_heartbeat_s == 60);
+    assert(c.lock_stale_s == 600);
+    assert(c.reconnect_max_s == 600);
+    assert(c.timesync_interval_s == 3600);
+    assert(c.log_max_kb == 512);
+    assert(strcmp(c.presence_details_media, "Watching on PlayStation 4") == 0);
+}
+
+/* Pure scheduling predicates the daemon uses for detection cadence,
+ * transition debounce, retry windows, and Rest Mode. */
+static void test_sched(void) {
+    int64_t last = 0;
+    /* first tick after a (re)connect always polls */
+    assert(sched_poll_due(100, &last, 12) == 1);
+    assert(last == 100);
+    /* inside the interval: no poll, and the deadline is not moved */
+    assert(sched_poll_due(105, &last, 12) == 0);
+    assert(last == 100);
+    /* exactly at the interval: poll */
+    assert(sched_poll_due(112, &last, 12) == 1);
+    assert(last == 112);
+    /* a backwards jump must not stall detection forever */
+    assert(sched_poll_due(50, &last, 12) == 1);
+    assert(last == 50);
+    /* nonsense interval is treated as 1s, never 0 (no busy poll) */
+    last = 0;
+    assert(sched_poll_due(10, &last, 0) == 1);
+    assert(sched_poll_due(10, &last, 0) == 0);
+    assert(sched_poll_due(11, &last, 0) == 1);
+
+    /* debounce collapses at long intervals so latency is not doubled */
+    assert(sched_transition_hits(1) == 2);
+    assert(sched_transition_hits(2) == 2);
+    assert(sched_transition_hits(5) == 1);
+    assert(sched_transition_hits(300) == 1);
+
+    /* Idle suppression must beat the post-close hold, but an uncertain
+     * detection still holds: a live game may be underneath. */
+    assert(sched_clear_idle_now(1, 1, 0) == 1);
+    assert(sched_clear_idle_now(1, 1, 1) == 0);
+    assert(sched_clear_idle_now(1, 0, 0) == 0);
+    assert(sched_clear_idle_now(0, 1, 0) == 0);
+    /* Home presence must not be posted with show_idle off. */
+    assert(sched_home_due(0, 0, 0, 0) == 1);
+    assert(sched_home_due(1, 0, 0, 0) == 0);
+    assert(sched_home_due(0, 1, 0, 0) == 0);
+    assert(sched_home_due(0, 0, 1, 0) == 0);
+    assert(sched_home_due(0, 0, 0, 1) == 0);
+
+    /* Best-effort lookups with no mapping are retried on a window, not on
+     * every poll: a dead network must not stall detection every 12s. */
+    int64_t rt = 0;
+    assert(sched_retry_due(1000, &rt, 900) == 1);
+    assert(rt == 1000);
+    assert(sched_retry_due(1500, &rt, 900) == 0);
+    assert(rt == 1000);
+    assert(sched_retry_due(1900, &rt, 900) == 1);
+    /* a backwards clock jump retries immediately rather than waiting */
+    assert(sched_retry_due(1800, &rt, 900) == 1);
+
+    /* Rest Mode (D-03): wall runs ahead of monotonic only while suspended.
+     * Normal ticks have near-zero drift; a 2h sleep shows ~7200s. */
+    assert(sched_suspend_drift(1, 1, 120) == 0);
+    assert(sched_suspend_drift(2, 1, 120) == 0);
+    assert(sched_suspend_drift(119, 0, 120) == 0);
+    assert(sched_suspend_drift(120, 0, 120) == 120);
+    assert(sched_suspend_drift(7200, 0, 120) == 7200);
+    /* a backwards/system-clock correction is not a suspend */
+    assert(sched_suspend_drift(-3600, 1, 120) == 0);
+    assert(sched_suspend_drift(0, 0, 120) == 0);
+    /* monotonic advancing with wall (no way to tell) is not a suspend */
+    assert(sched_suspend_drift(7200, 7200, 120) == 0);
+
+    /* Rebasing preserves elapsed playtime and drops the sleep hours. */
+    assert(sched_rebase_start(1000, 3600) == 4600);
+    assert(sched_rebase_start(1000, 0) == 1000);
+    assert(sched_rebase_start(0, 3600) == 0);
+
+    /* A pure loop stall (no wall/monotonic drift) is a different event
+     * from Rest Mode; threshold is 60s and must not fire on normal ticks. */
+    assert(sched_loop_stall(0, 60) == 0);
+    assert(sched_loop_stall(1, 60) == 0);
+    assert(sched_loop_stall(60, 60) == 0);
+    assert(sched_loop_stall(61, 60) == 1);
+    assert(sched_loop_stall(3600, 60) == 1);
+    /* nonsense threshold never turns every tick into a stall */
+    assert(sched_loop_stall(0, 0) == 0);
+    assert(sched_loop_stall(1, 0) == 0);
+    assert(sched_loop_stall(2, 0) == 1);
+}
+
+/* A long-running daemon previously only rotated the log at open, so the file
+ * grew without bound. Rotation must happen during the run and keep one
+ * previous generation. */
+static void test_log_rotation(void) {
+    char dir[64], path[96], old[120];
+    assert(make_tmpdir(dir, sizeof dir) == 0);
+    snprintf(path, sizeof path, "%s/log.txt", dir);
+    snprintf(old, sizeof old, "%s.1", path);
+    log_close();
+    log_set_cap(2048);
+    log_init(path);
+    char line[81];
+    memset(line, 'x', sizeof line - 1);
+    line[sizeof line - 1] = 0;
+    for(int i = 0; i < 200; i++) log_msg("%s", line);
+    log_close();
+    struct stat st;
+    assert(stat(path, &st) == 0);
+    assert(st.st_size <= 2048 + 128);   /* bounded: one line of overshoot */
+    assert(stat(old, &st) == 0);
+    assert(st.st_size <= 2048 + 128);
+    log_set_cap(0);                     /* restore default for later tests */
+}
+
 /* Test-only VFS shim. sqlite's DbPath-based xFullPathname can fail with a
  * silent SQLITE_CANTOPEN (no syscall, no errno, nothing logged) on some
  * runners. Our test paths are always absolute, so bypass it with a plain
@@ -564,6 +1547,8 @@ static void test_appdb(void) {
 }
 
 static void test_discord_builder(void) {
+    cfg_t saved = g_cfg;
+    cfg_defaults(&g_cfg);
     /* game presence: name shown, raw ID nowhere visible, hover has the ID */
     jl_val_t *a = discord_build_activity("On PS4", "Marvel's Spider-Man","Playing on PlayStation 4","ps_logo_blue",NULL,
         "CUSA11995", "1536977374795538532", "https://x/icons/", NULL, NULL,
@@ -582,13 +1567,28 @@ static void test_discord_builder(void) {
     assert(ts && ts->type == JL_OBJECT);
     v = jl_obj_get(ts, "start");
     assert(v && v->type == JL_NUMBER && v->inum == 1700000000LL * 1000LL);
+    /* art_base_url is configured, so the pack URL is the intended source.
+     * With no token it cannot resolve; the builder must omit art rather
+     * than send the generated key (a dangling key drops the whole activity). */
     const jl_val_t *as = jl_obj_get(a, "assets");
-    assert(as && as->type == JL_OBJECT);
-    v = jl_obj_get(as, "large_image");
-    assert(v && v->type == JL_STRING && !strcmp(v->str, "cusa11995"));
-    v = jl_obj_get(as, "large_text");
-    assert(v && v->type == JL_STRING && !strcmp(v->str, "CUSA11995"));
-    assert(jl_obj_get(as, "small_image") == NULL); /* no badge requested */
+    assert(as == NULL);
+    jl_free(a);
+    snprintf(g_cfg.timestamp_mode, sizeof g_cfg.timestamp_mode, "none");
+    a = discord_build_activity("On PS4", "Game", "Playing", NULL, NULL,
+        "CUSA11995", "app", NULL, NULL, NULL, 1700000000LL, "");
+    assert(a && jl_obj_get(a, "timestamps") == NULL);
+    jl_free(a);
+    snprintf(g_cfg.timestamp_mode, sizeof g_cfg.timestamp_mode, "elapsed");
+    g_cfg.n_rules = 1;
+    snprintf(g_cfg.title_rules[0].title_id,
+             sizeof g_cfg.title_rules[0].title_id, "CUSA11995");
+    g_cfg.title_rules[0].duration_min = 90;
+    a = discord_build_activity("On PS4", "Game", "Playing", NULL, NULL,
+        "CUSA11995", "app", NULL, NULL, NULL, 1700000000LL, "");
+    assert(a);
+    ts = jl_obj_get(a, "timestamps");
+    assert(ts && jl_obj_get(ts, "start") && jl_obj_get(ts, "end"));
+    assert(jl_obj_get(ts, "end")->inum == (1700000000LL + 90 * 60) * 1000LL);
     jl_free(a);
     /* system badge: mp: URL used as-is with platform hover text */
     a = discord_build_activity("On PS4", "Marvel's Spider-Man","Playing on PlayStation 4","ps_logo_blue",NULL,
@@ -634,6 +1634,7 @@ static void test_discord_builder(void) {
     jl_free(a);
     /* NULL name rejected */
     assert(discord_build_activity(NULL, NULL,"Idling on Home Menu",NULL,NULL, "home", "app", NULL, NULL, NULL, 0, "") == NULL);
+    g_cfg = saved;
 }
 
 static void test_cfg_learn(void) {
@@ -667,8 +1668,31 @@ static void test_installer_cfg(void) {
     assert(token_valid("has space.in.it.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") == 0);
     assert(token_valid("nodots") == 0);
     assert(token_valid(NULL) == 0);
+    /* Same validator as the daemon: a 151..200-char token is legal, and
+     * empty segments are not (they used to pass the installer's copy). */
+    {
+        char longtok[201];
+        int i = 0, j;
+        for(j = 0; j < 60; j++) longtok[i++] = 'A';
+        longtok[i++] = '.';
+        for(j = 0; j < 60; j++) longtok[i++] = 'B';
+        longtok[i++] = '.';
+        while(i < 180) longtok[i++] = 'C';
+        longtok[i] = 0;
+        assert(strlen(longtok) == 180);
+        assert(token_valid(longtok) == 1);
+    }
+    assert(token_valid(".abc.def.ghijklmnopqrstuvwxyz0123456789") == 0);
+    assert(token_valid("abc.def.ghijklmnopqrstuvwxyz0123456789.") == 0);
+    assert(token_valid("abc..ghijklmnopqrstuvwxyz0123456789abc") == 0);
+    assert(token_valid("YOUR_TOKEN_HERE") == 0);
     /* save creates, preserves, round-trips */
     assert(icfg_token_save(path, "MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz") == 0);
+    {
+        struct stat stb;
+        assert(stat(path, &stb) == 0);
+        assert((stb.st_mode & 0777) == 0600);   /* token file is not group/world readable */
+    }
     assert(icfg_set_str(path, "presence_state", "On PS4") == 0);
     assert(icfg_set_int(path, "poll_interval_s", 12) == 0);
     /* invalid token refused, file untouched */
@@ -1080,23 +2104,24 @@ static void test_gamecache(void) {
     assert(gamecache_parse("{}", 2, NULL, 8, now) == -1);
     assert(gamecache_parse("{}", 2, e, 0, now) == -1);
 
-    /* --- staleness: an old entry is dropped so it gets re-resolved --- */
+    /* --- staleness: old rows stay on disk; get() ignores them --- */
     {
         char doc[256];
         snprintf(doc, sizeof doc,
             "{\"games\":[{\"id\":\"CUSA32836\",\"name\":\"Old\",\"at\":%lld}]}",
             (long long)(now - GAMECACHE_TTL_SECS - 60));
-        assert(gamecache_parse(doc, strlen(doc), e, 8, now) == 0);
+        assert(gamecache_parse(doc, strlen(doc), e, 8, now) == 1);
+        assert(e[0].at == now - GAMECACHE_TTL_SECS - 60);
         /* fresh entry survives */
         snprintf(doc, sizeof doc,
             "{\"games\":[{\"id\":\"CUSA32836\",\"name\":\"New\",\"at\":%lld}]}",
             (long long)(now - 10));
         assert(gamecache_parse(doc, strlen(doc), e, 8, now) == 1);
     }
-    /* a missing timestamp is treated as stale, not trusted blindly */
+    /* a missing timestamp parses but is treated as stale by get() */
     {
         const char *doc = "{\"games\":[{\"id\":\"CUSA32836\",\"name\":\"NoAt\"}]}";
-        assert(gamecache_parse(doc, strlen(doc), e, 8, now) == 0);
+        assert(gamecache_parse(doc, strlen(doc), e, 8, now) == 1);
     }
 
     /* --- round trip, including quotes and backslashes in the name --- */
@@ -1120,6 +2145,24 @@ static void test_gamecache(void) {
         assert(!strcmp(out[0].art, "https://cdn/a.png"));
         assert(!strcmp(out[1].name, "Homebrew Tool"));
         assert(out[1].art[0] == 0);
+        free(json);
+    }
+
+    /* Control bytes must not leak into the serialized JSON. retro names
+     * decode \n and \t escapes, and a raw newline made the file invalid on
+     * the next boot, silently dropping every cached title. */
+    {
+        gamecache_entry_t in[1], out[1];
+        char *json;
+        memset(in, 0, sizeof in);
+        strcpy(in[0].id, "CUSA33333");
+        strcpy(in[0].name, "Line\nBreak\tTool");
+        in[0].at = now;
+        json = gamecache_serialize(in, 1);
+        assert(json != NULL);
+        assert(strchr(json, '\n') == NULL && strchr(json, '\t') == NULL);
+        assert(gamecache_parse(json, strlen(json), out, 1, now) == 1);
+        assert(!strcmp(out[0].name, "Line Break Tool"));
         free(json);
     }
 
@@ -1156,6 +2199,14 @@ static void test_gamecache(void) {
         assert(gamecache_put("CUSA32836", "Renamed", "", "pkgzone") == 1);
         assert(gamecache_get("CUSA32836", nm, sizeof nm, ar, sizeof ar) == 1);
         assert(!strcmp(nm, "Renamed"));
+        /* identical content right after a write is a no-op */
+        assert(gamecache_put("CUSA32836", "Renamed", "", "pkgzone") == 0);
+        /* a persisted mp: mapping wins over the raw URL on the next read */
+        assert(gamecache_set_mp("CUSA32836", "mp:external/x/y.png") == 1);
+        assert(gamecache_get("CUSA32836", nm, sizeof nm, ar, sizeof ar) == 1);
+        assert(!strcmp(ar, "mp:external/x/y.png"));
+        assert(gamecache_set_mp("CUSA32836", "not-mp") == 0);
+        assert(gamecache_set_mp("MISSING01", "mp:x") == 0);
     }
     gamecache_reset();
 }
@@ -1312,6 +2363,30 @@ static void test_activity_assets(void) {
     assert(as && as->type == JL_OBJECT);
     assert(jl_obj_get(as, "small_image") == NULL);
     jl_free(a);
+
+    /* A configured cover URL that has not resolved must NOT fall back to a
+     * title-id asset key: an uploaded-key miss drops the whole activity, so
+     * the old fallback removed presence whenever external-assets was down.
+     * Sending no art keeps the game tile visible. */
+    art_cache_clear();
+    a = discord_build_activity("Firmware 13.52", "Some Game",
+        "Playing on PlayStation 4", NULL, NULL,
+        "CUSA11995", "app", NULL, "https://example.com/unresolved.png",
+        NULL, 0, "");
+    assert(a);
+    as = jl_obj_get(a, "assets");
+    assert(as == NULL || jl_obj_get(as, "large_image") == NULL);
+    jl_free(a);
+
+    /* Same rule when the configured URL produced the pack fallback. */
+    a = discord_build_activity("Firmware 13.52", "Some Game",
+        "Playing on PlayStation 4", NULL, NULL,
+        "CUSA11995", "app", "https://example.com/pack/", NULL,
+        NULL, 0, "");
+    assert(a);
+    as = jl_obj_get(a, "assets");
+    assert(as == NULL || jl_obj_get(as, "large_image") == NULL);
+    jl_free(a);
 }
 
 /* --- retro: prefix routing and the entry extractor -----------------
@@ -1365,6 +2440,24 @@ static void test_retro(void) {
         assert(name[0] == 0);
     }
 
+    /* The streaming window is a fixed byte buffer, not a C string. An
+     * exact-size heap copy makes the old strstr() an ASAN heap-overflow;
+     * the bounded find must stay inside len. */
+    {
+        const char *frag =
+            "[{\"id\":\"SLPM87404\",\"name\":\"NO NUL\",\"cover\":\"https://x/n.jpg\"}]";
+        size_t n = strlen(frag);
+        char *nb = malloc(n);
+        assert(nb);
+        memcpy(nb, frag, n);
+        char name[RETRO_MAX_NAME], url[RETRO_MAX_URL];
+        assert(retro_extract(nb, n, "\"id\":\"SLPM87404\"",
+                             name, sizeof name, url, sizeof url) == 1);
+        assert(!strcmp(name, "NO NUL"));
+        assert(!strcmp(url, "https://x/n.jpg"));
+        free(nb);
+    }
+
     /* names carry quotes and backslashes; raw bytes would show \\ and \" */
     {
         const char *body =
@@ -1386,6 +2479,43 @@ static void test_retro(void) {
         assert(strlen(name) == 164);
         assert(strstr(name, "Gundam The Best") != NULL);
     }
+
+    /* D-08: the local file path resolves before any network fetch, including
+     * a match that spans the reader's chunk boundary. */
+    {
+        char dir[64], path[96];
+        assert(make_tmpdir(dir, sizeof dir) == 0);
+        snprintf(path, sizeof path, "%s/ps1.json", dir);
+        FILE *f = fopen(path, "wb");
+        assert(f);
+        fputs("[{\"id\":\"SLPM87404\",\"name\":\"LOCAL GAME\",\"cover\":\"https://x/l.jpg\"}]", f);
+        fclose(f);
+        char name[RETRO_MAX_NAME], url[RETRO_MAX_URL];
+        assert(retro_local_scan(path, "\"id\":\"SLPM87404\"",
+                                name, sizeof name, url, sizeof url) == 1);
+        assert(!strcmp(name, "LOCAL GAME"));
+        assert(!strcmp(url, "https://x/l.jpg"));
+        assert(retro_local_scan(path, "\"id\":\"NOPE00000\"",
+                                name, sizeof name, url, sizeof url) == 0);
+        assert(name[0] == 0);
+        remove(path);
+        assert(retro_local_scan(path, "\"id\":\"SLPM87404\"",
+                                name, sizeof name, url, sizeof url) == -1);
+
+        /* A match that spans the reader's chunk boundary must survive the
+         * tail carry-over; a fresh index is 1.2 MB, so this is the normal
+         * case, not an edge case. */
+        f = fopen(path, "wb");
+        assert(f);
+        for(int i = 0; i < 66200; i++) fputc(' ', f);
+        fputs("[{\"id\":\"SLPM55146\",\"name\":\"BOUNDARY GAME\",\"cover\":\"\"}]", f);
+        fclose(f);
+        assert(retro_local_scan(path, "\"id\":\"SLPM55146\"",
+                                name, sizeof name, url, sizeof url) == 1);
+        assert(!strcmp(name, "BOUNDARY GAME"));
+        assert(url[0] == 0);
+        remove(path);
+    }
 }
 
 /* --- visibility flags + homebrew classification -------------------
@@ -1398,6 +2528,7 @@ static void test_show_flags(void) {
     /* all on by default: a config that predates the keys keeps today's
      * behaviour rather than silently hiding everything */
     assert(c.show_firmware == 1);
+    assert(c.show_logo     == 1);
     assert(c.show_idle     == 1);
     assert(c.show_media    == 1);
     assert(c.show_homebrew == 1);
@@ -1420,6 +2551,211 @@ static void test_show_flags(void) {
     assert(is_homebrew_id(NULL) == 0);
     assert(is_homebrew_id("") == 0);
     assert(is_homebrew_id("AB") == 0);
+
+    char dir[64], path[96];
+    assert(make_tmpdir(dir, sizeof dir) == 0);
+    snprintf(path, sizeof path, "%s/cfg.json", dir);
+    FILE *f = fopen(path, "wb");
+    assert(f);
+    fputs("{\"token\":\"t\",\"show_logo\":false}", f);
+    fclose(f);
+    assert(cfg_load(path, &c) == 0 && c.show_logo == 0);
+    assert(cfg_save(path, &c) == 0);
+    cfg_t reloaded;
+    assert(cfg_load(path, &reloaded) == 0 && reloaded.show_logo == 0);
+    remove(path);
+}
+
+/* D-12: the token check must explain every rejection. */
+static void test_token_shape(void) {
+    char why[160];
+    const char *good = "test.token.fixture.value.for.host.tests.only";
+    assert(token_reason(good, why, sizeof why) == 0);
+    assert(why[0] == 0);
+    /* The format is undocumented; 3+ non-empty segments are accepted so a
+     * real token with an extra segment is never refused. */
+    {
+        char extra[128];
+        snprintf(extra, sizeof extra, "%s.extra", good);
+        assert(token_reason(extra, why, sizeof why) == 0);
+    }
+
+    assert(token_reason("", why, sizeof why) == -1);
+    assert(strstr(why, "empty") != NULL);
+    assert(token_reason(NULL, why, sizeof why) == -1);
+
+    assert(token_reason("SET_ME", why, sizeof why) == -1);
+    assert(strstr(why, "placeholder") != NULL);
+
+    assert(token_reason("short.token.here", why, sizeof why) == -1);
+    assert(strstr(why, "too short") != NULL);
+
+    char longs[220];
+    memset(longs, 'a', sizeof longs - 1);
+    longs[sizeof longs - 1] = 0;
+    assert(token_reason(longs, why, sizeof why) == -1);
+    assert(strstr(why, "too long") != NULL);
+
+    /* two segments */
+    char nodots[80];
+    snprintf(nodots, sizeof nodots, "%s.%s",
+             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    assert(token_reason(nodots, why, sizeof why) == -1);
+    assert(strstr(why, "dot-separated") != NULL);
+
+    /* leading dot -> empty first segment, reported as such */
+    char lead[80];
+    snprintf(lead, sizeof lead, ".%s", good);
+    assert(token_reason(lead, why, sizeof why) == -1);
+    assert(strstr(why, "empty token segment") != NULL);
+
+    /* illegal character names the position */
+    char bad[80];
+    snprintf(bad, sizeof bad, "%s", good);
+    bad[5] = '!';
+    assert(token_reason(bad, why, sizeof why) == -1);
+    assert(strstr(why, "illegal character") != NULL);
+    assert(strstr(why, "position 5") != NULL);
+}
+
+/* D-09: homebrew titles no index carries still get a human name. */
+static void test_builtin_titles(void) {
+    assert(builtin_title_name("ELYS00001") != NULL);
+    assert(strcmp(builtin_title_name("ELYS00001"), "Elysium") == 0);
+    assert(builtin_title_name("CUSA00001") == NULL);
+    assert(builtin_title_name("") == NULL);
+    assert(builtin_title_name(NULL) == NULL);
+}
+
+/* D-18: GoldHEN's kernel-log banner is the only version source a payload has. */
+static void test_goldhen(void) {
+    int v[4], min[4];
+    assert(goldhen_parse_ver("2.4b18.10", v) == 0);
+    assert(v[0] == 2 && v[1] == 4 && v[2] == 18 && v[3] == 10);
+    assert(goldhen_parse_ver(GOLDHEN_MIN, min) == 0);
+    assert(goldhen_ver_cmp(v, min) == 0);
+
+    assert(goldhen_parse_ver("2.4b18.8", v) == 0);
+    assert(goldhen_ver_cmp(v, min) < 0);
+    assert(goldhen_parse_ver("2.4b19.0", v) == 0);
+    assert(goldhen_ver_cmp(v, min) > 0);
+    assert(goldhen_parse_ver("junk", v) == -1);
+
+    char out[32];
+    const char *log =
+        "boot\nGoldHEN v2.4b18.8 loaded\n"
+        "later: GoldHEN v2.4b18.10 ready\n";
+    assert(goldhen_version_from_log(log, out, sizeof out) == 0);
+    assert(strcmp(out, "2.4b18.10") == 0);
+    assert(goldhen_version_from_log("no banner here", out, sizeof out) == -1);
+}
+
+/* D-04: a lock from before this boot is stale even if its pid was recycled. */
+static void test_lock_stale(void) {
+    /* previous-boot mtime: reclaim regardless of pid liveness */
+    assert(lock_entry_stale(1000, 2000, 42, 1) == 1);
+    /* same boot, live holder: stand down */
+    assert(lock_entry_stale(2500, 2000, 42, 1) == 0);
+    /* same boot, dead holder: reclaim */
+    assert(lock_entry_stale(2500, 2000, 42, 0) == 1);
+    /* no pid in the file: reclaim */
+    assert(lock_entry_stale(2500, 2000, 0, 1) == 1);
+    /* boot time unknown: fall back to liveness only */
+    assert(lock_entry_stale(1000, 0, 42, 1) == 0);
+    assert(lock_entry_stale(1000, 0, 42, 0) == 1);
+
+    /* Heartbeat: a live pid that stopped touching the lock is wedged, not
+     * busy. Only a gap strictly beyond the threshold reclaims, and a
+     * backwards clock or unknown mtime never does. */
+    assert(lock_heartbeat_stale(1000, 1060, 600) == 0);
+    assert(lock_heartbeat_stale(1000, 1600, 600) == 0);
+    assert(lock_heartbeat_stale(1000, 1601, 600) == 1);
+    assert(lock_heartbeat_stale(1000, 10000, 600) == 1);
+    assert(lock_heartbeat_stale(0, 10000, 600) == 0);   /* unknown mtime */
+    assert(lock_heartbeat_stale(5000, 1000, 600) == 0); /* clock went back */
+    assert(lock_heartbeat_stale(1000, 1601, 0) == 0);   /* disabled */
+
+    /* Payload Guest runs every load with the same pid (46), so a reload
+     * looks like "our own stale lock". A per-instance token tells a live
+     * peer from a leftover: a fresh lock with another token must win. */
+    assert(lock_entry_reclaim(2500, 2000, 2501, 600, 1, 0xAAAA, 0xBBBB, 1) == 0);
+    assert(lock_entry_reclaim(2500, 2000, 2501, 600, 1, 0xAAAA, 0xAAAA, 0) == 0);
+    assert(lock_entry_reclaim(2500, 2000, 3101, 600, 1, 0xAAAA, 0xBBBB, 1) == 1);
+    assert(lock_entry_reclaim(1000, 2000, 2501, 600, 1, 0xAAAA, 0xBBBB, 1) == 1);
+    /* the configured stale window is honoured */
+    assert(lock_entry_reclaim(2500, 2000, 2619, 120, 1, 0xAAAA, 0xBBBB, 1) == 0);
+    assert(lock_entry_reclaim(2500, 2000, 2621, 120, 1, 0xAAAA, 0xBBBB, 1) == 1);
+    /* legacy pid-only locks keep the old liveness rule */
+    assert(lock_entry_reclaim(2500, 2000, 2501, 600, 0, 0, 0xBBBB, 1) == 0);
+    assert(lock_entry_reclaim(2500, 2000, 2501, 600, 0, 0, 0xBBBB, 0) == 1);
+
+    /* Ownership: same pid is not enough. The daemon must not release or
+     * keep serving on a lock another instance wrote. */
+    assert(lock_token_owned(2, 46, 0xAAAA, 46, 0xAAAA) == 1);
+    assert(lock_token_owned(2, 46, 0xBBBB, 46, 0xAAAA) == 0);
+    assert(lock_token_owned(2, 46, 0xAAAA, 47, 0xAAAA) == 0);
+    assert(lock_token_owned(1, 46, 0, 46, 0xAAAA) == 1);      /* legacy */
+    assert(lock_token_owned(1, 46, 0, 47, 0xAAAA) == 0);
+    assert(lock_token_owned(0, 0, 0, 46, 0xAAAA) == 0);
+}
+
+/* D-14: a pasted token arrives quoted/padded, or bare and breaks JSON. */
+static void test_cfg_token_parsing(void) {
+    char dir[64], path[96];
+    assert(make_tmpdir(dir, sizeof dir) == 0);
+    snprintf(path, sizeof path, "%s/cfg.json", dir);
+    cfg_t c;
+    const char *tok = "test.token.fixture.value.for.host.tests.only";
+
+    FILE *f = fopen(path, "wb");
+    assert(f);
+    fprintf(f, "{\"token\":\"  \\\"%s\\\"  \"}", tok);
+    fclose(f);
+    assert(cfg_load(path, &c) == 0);
+    assert(strcmp(c.token, tok) == 0);
+
+    /* bare value: repair the one field instead of resetting everything */
+    f = fopen(path, "wb");
+    assert(f);
+    fprintf(f, "{\"token\": %s , \"poll_interval_s\": 7}", tok);
+    fclose(f);
+    assert(cfg_load(path, &c) == 0);
+    assert(strcmp(c.token, tok) == 0);
+    assert(c.poll_interval_s == 7);
+
+    /* single quotes around the token are trimmed too */
+    f = fopen(path, "wb");
+    assert(f);
+    fprintf(f, "{\"token\":\"'%s'\"}", tok);
+    fclose(f);
+    assert(cfg_load(path, &c) == 0);
+    assert(strcmp(c.token, tok) == 0);
+}
+
+static void test_notify(void){
+#ifdef NOTIFY_TESTABLE
+    /* "Connected to Discord" was throttled to once per 5 minutes, so a
+     * reconnecting daemon popped the same toast all day (testers reported it
+     * every few minutes). It is once per boot now: the once-map must make the
+     * second and third call silent. */
+    notify_test_reset();
+    notify_once_boot("connected", "Connected to Discord");
+    notify_once_boot("connected", "Connected to Discord");
+    notify_once_boot("connected", "Connected to Discord");
+    assert(notify_test_count() == 1);
+    /* Keys are independent: a different once-key still fires. */
+    notify_once_boot("boot", "orbisRPC loaded");
+    assert(notify_test_count() == 2);
+    /* The failure toast is rate-limited, not once-only: the first call fires,
+     * an immediate repeat inside the window is dropped. */
+    notify_throttled("connect", "Cannot reach Discord - retrying", 300);
+    assert(notify_test_count() == 3);
+    notify_throttled("connect", "Cannot reach Discord - retrying", 300);
+    assert(notify_test_count() == 3);
+    notify_test_reset();
+    assert(notify_test_count() == 0);
+#endif
 }
 
 int main(void) {
@@ -1438,10 +2774,17 @@ int main(void) {
     test_procwalk_find_and_pid();
     test_json();
     test_gateway_op_spoof();
+    test_identity_consistency();
+    test_identify_capabilities();
+    test_resume_flow();
+    test_presence_send();
     test_json_oom_safe();
     test_json_hostile();
     test_tmdb();
     test_updater();
+    test_updater_http();
+    test_diag();
+    assert(test_replay() == 0);
     test_sfo();
     test_base64();
     test_art_parse();
@@ -1450,6 +2793,19 @@ int main(void) {
     test_manifest();
     test_manifest_sig();
     test_cfg_titles();
+    test_cfg_title_rules();
+    test_cfg_permissions();
+    test_cfg_preserves_unknown();
+    test_cfg_migrate();
+    test_cfg_clamp();
+    test_sched();
+    test_notify();
+    test_token_shape();
+    test_builtin_titles();
+    test_goldhen();
+    test_lock_stale();
+    test_cfg_token_parsing();
+    test_log_rotation();
     test_cfg_learn();
     test_installer_cfg();
     test_appdb();

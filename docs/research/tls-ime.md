@@ -60,3 +60,6 @@ Workaround in place: token pre-seeded via config; IME still unresolved.
   Fixed per Apollo pattern (init + terminate per dialog).
 - 30s dialog watchdog blanked idle screens — removed, blocking waits now.
 - Exit path terminates dialogs, unloads modules, `exit(0)`.
+
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms. -->

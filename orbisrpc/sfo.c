@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* sfo.c - PARAM.SFO TITLE extractor (bounds-checked, no libc beyond string).
  * Every PS4 game carries sce_sys/param.sfo with a TITLE field. Inside the
  * game process it is reachable via the app0 mount; these paths work on ANY

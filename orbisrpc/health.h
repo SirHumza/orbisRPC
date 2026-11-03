@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* health.h - crash recovery: unclean-boot marker, counter, safe mode.
  *
  * Production semantics (v1.0.1+):

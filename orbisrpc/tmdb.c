@@ -1,12 +1,16 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* tmdb.c - Sony TMDB runtime resolver: plain-HTTP GET + cache.
- * Transport mirrors ws.c patterns (resolver pool, SNDTIMEO connect cap,
- * recv deadline). One attempt, no retries: failure falls through. */
+ * Transport uses net_tcp_connect() for a bounded non-blocking connect and
+ * deadline-pumped reads. One attempt, no retries: failure falls through. */
 #include "tmdb.h"
 #include "clock.h"
 #include "tmdb_crypto.h"
 #include "log.h"
 #include "tls.h"
 #include "updater_http.h"
+#include "netconnect.h"
 #ifdef ORBISRPC_SDK_PAYLOAD
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -24,6 +28,7 @@
 #endif
 #include <string.h>
 #include <stdlib.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
 #include <sys/time.h>
@@ -34,7 +39,9 @@
 #define TMDB_DEADLINE_S 10
 #define TMDB_HTTPS_DEADLINE_S 12
 
+#ifndef ORBISRPC_SDK_PAYLOAD
 static int32_t s_pool = -1;
+#endif
 static int s_ready = 0;
 /* Mirror ws.c net_ensure exactly: sysmodule first, static-once guard,
  * 128KB pool (4KB starves the resolver), and deliberately NO NetCtl
@@ -62,27 +69,8 @@ static int http_get(const char *host, const char *path,
     if(out_status) *out_status = 0;
     if(net_up() < 0) return -1;
 #ifdef ORBISRPC_SDK_PAYLOAD
-    struct addrinfo hints, *res = NULL;
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    {
-        char portbuf[16];
-        snprintf(portbuf, sizeof portbuf, "%d", TMDB_PORT);
-        if(getaddrinfo(host, portbuf, &hints, &res) != 0 || !res){
-            log_msg("tmdb: dns fail");
-            return -1;
-        }
-    }
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if(fd < 0){ log_msg("tmdb: socket fail"); freeaddrinfo(res); return -1; }
-    struct timeval tv = { .tv_sec = TMDB_DEADLINE_S, .tv_usec = 0 };
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-    if(connect(fd, res->ai_addr, res->ai_addrlen) < 0){
-        log_msg("tmdb: connect fail"); freeaddrinfo(res); close(fd); return -1;
-    }
-    freeaddrinfo(res);
+    int fd = net_tcp_connect(host, TMDB_PORT, TMDB_DEADLINE_S);
+    if(fd < 0){ log_msg("tmdb: connect fail"); return -1; }
 #else
     OrbisNetInAddr in;
     memset(&in, 0, sizeof in);
@@ -134,7 +122,9 @@ static int http_get(const char *host, const char *path,
 #ifdef ORBISRPC_SDK_PAYLOAD
         int r = (int)send(fd, req+sent, (size_t)(rl-sent), 0);
         if(r > 0){ sent += r; continue; }
-        if(orbis_mono_s() > dl || r == 0){ close(fd); return -1; }
+        if(r == 0){ close(fd); return -1; }
+        if(orbis_mono_s() > dl){ close(fd); return -1; }
+        usleep(20000); /* non-blocking: EAGAIN is not a failure */
 #else
         int r = sceNetSend(fd, req+sent, rl-sent, 0);
         if(r > 0){ sent += r; continue; }
@@ -150,6 +140,11 @@ static int http_get(const char *host, const char *path,
         char tmp[1024];
 #ifdef ORBISRPC_SDK_PAYLOAD
         int r = (int)recv(fd, tmp, sizeof tmp, 0);
+        if(r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)){
+            if(orbis_mono_s() > dl) break;
+            usleep(20000); /* non-blocking socket: wait for the server */
+            continue;
+        }
 #else
         int r = sceNetRecv(fd, tmp, sizeof tmp, 0);
 #endif
@@ -162,7 +157,7 @@ static int http_get(const char *host, const char *path,
             char *e = strstr(hb, "\r\n\r\n");
             if(e){
                 hdr_done = 1;
-                if(!strncmp(hb, "HTTP/1.", 7)) status = atoi(hb+9);
+                if(!strncmp(hb, "HTTP/1.", 7)) status = (int)strtol(hb + 9, NULL, 10);
                 off = (size_t)(e + 4 - hb) - (hl - cp);
                 /* off = body bytes already in this chunk */
                 if(off > (size_t)r) off = (size_t)r;
@@ -203,27 +198,8 @@ static int https_get_tmdb(const char *path, char *out, size_t cap, int *out_stat
     if(!path || !out || cap < 2) return -1;
     if(net_up() < 0) return -1;
 #ifdef ORBISRPC_SDK_PAYLOAD
-    struct addrinfo hints, *res = NULL;
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    if(getaddrinfo(TMDB_HOST, "443", &hints, &res) != 0 || !res){
-        log_msg("tmdb: dns fail for %s", TMDB_HOST);
-        return -1;
-    }
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if(fd < 0){ log_msg("tmdb: socket fail errno=%d", errno); freeaddrinfo(res); return -1; }
-    struct timeval tv = { .tv_sec = TMDB_HTTPS_DEADLINE_S, .tv_usec = 0 };
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
-    if(connect(fd, res->ai_addr, res->ai_addrlen) < 0){
-        log_msg("tmdb: connect %s:443 fail errno=%d", TMDB_HOST, errno);
-        freeaddrinfo(res); close(fd); return -1;
-    }
-    freeaddrinfo(res);
-    {
-        int fl = fcntl(fd, F_GETFL, 0);
-        if(fl >= 0) fcntl(fd, F_SETFL, fl | O_NONBLOCK);
-    }
+    int fd = net_tcp_connect(TMDB_HOST, 443, TMDB_HTTPS_DEADLINE_S);
+    if(fd < 0){ log_msg("tmdb: connect %s:443 fail", TMDB_HOST); return -1; }
     tls_ctx_t *t = tls_start(fd, TMDB_HOST);
     if(!t){
         log_msg("tmdb: tls handshake failed for %s (see tls: lines above)", path);
@@ -256,6 +232,7 @@ static int https_get_tmdb(const char *path, char *out, size_t cap, int *out_stat
     tls_free(t);
     close(fd);
     if(bl == 0){ log_msg("tmdb: empty body for %s", path); return -1; }
+    raw[bl] = 0; /* upd_parse_response's strstr contract */
     int st = 0;
     size_t olen = 0;
     char *body = upd_parse_response(raw, bl, cap, &st, &olen, NULL, 0);

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
 name: Bug report
 description: Something broke on-console. Testers: try Discord testers-chat first.
 labels: [bug]

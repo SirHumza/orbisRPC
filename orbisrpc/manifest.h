@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* manifest.h - signed release manifest: parse, policy, signature verify.
  *
  * Release channel trust (v1.0.1+):
@@ -34,8 +37,17 @@ int manifest_find(const manifest_t *m, const char *name, char out_hex[65]);
 /* Check data against the listed hash for name. 0 match, -1 mismatch/unlisted. */
 int manifest_check(const manifest_t *m, const char *name,
                    const unsigned char *data, size_t n);
+/* Verify `name`; when the manifest does not list that exact release-asset
+ * name, verify against `fallback` instead. Releases publish the same payload
+ * under orbisrpc_sdk.elf and orbisrpc.bin, but the manifest lists only one. */
+int manifest_check_alias(const manifest_t *m, const char *name,
+                         const char *fallback,
+                         const unsigned char *data, size_t n);
 /* 1 when manifest version is newer than local, 0 otherwise. */
 int manifest_is_newer(const manifest_t *m, const char *local_version);
+/* 1 when this build satisfies the manifest's minimum_version (or it has
+ * none). 0 when the release requires a newer base. */
+int manifest_min_ok(const manifest_t *m, const char *local_version);
 /* Channel/platform gate: 1 accepted (stable/ps4-goldhen), 0 refused. */
 int manifest_gate(const manifest_t *m);
 /* Verify raw ECDSA P-256 signature (r||s, 64 bytes) over msg with raw

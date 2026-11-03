@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* procwalk.h - firmware-proof process-table record scanning.
  *
  * sysctl KERN_PROC_ALL (mib {1,14,8,0}) hands back a buffer of

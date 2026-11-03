@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* timesync.h - SNTP wall-clock correction for Discord timestamps.
  *
  * Jailbroken consoles commonly block Sony servers (ban avoidance), which

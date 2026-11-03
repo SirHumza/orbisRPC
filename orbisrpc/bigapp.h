@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* bigapp.h - classify what the console reports as the foreground app.
  *
  * Split out of detect.c so it can be unit-tested off-console: detect.c pulls

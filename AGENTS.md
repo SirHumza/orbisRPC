@@ -35,5 +35,9 @@ Beta Discord Rich Presence daemon for jailbroken PS4. Testers install the
   `docs/research/`. Keep them in sync with behavior changes.
 - Never tell testers to use Payload Guest for orbisRPC — it crashes. Autorun via
   `/data/payloads` is not recommended on test builds.
-- License is undecided (MIT vs GPL). Don't add GPL code or a LICENSE
-  file until the owners pick.
+- License is GPL-3.0-or-later (see `LICENSE`), with the attribution term
+  in `NOTICE`. Keep the SPDX header and copyright line on new source files,
+  and do not add GPL-incompatible third-party code.
+
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms. -->

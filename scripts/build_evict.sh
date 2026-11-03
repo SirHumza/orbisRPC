@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
 # build_evict.sh - evict.elf via ps4-payload-sdk (daemon-world linkage only).
 # Usage: PS4_PAYLOAD_SDK=/path ./scripts/build_evict.sh
 set -e

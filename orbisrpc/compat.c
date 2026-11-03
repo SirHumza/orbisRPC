@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* compat.c - tiny libc shims for the PS4 link environment.
  * SceLibcInternal lacks getentropy/__errno_location/gmtime_r, and
  * mbedTLS wants a platform entropy poll. Compiled into payload. */

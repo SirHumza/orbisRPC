@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* manifest.c - signed release manifest (host-testable + PS4).
  * Parsing via jsonlite; hashing + ECDSA via mbedTLS (already linked). */
 #include "manifest.h"
@@ -121,9 +124,28 @@ int manifest_check(const manifest_t *m, const char *name,
     return 0;
 }
 
+int manifest_check_alias(const manifest_t *m, const char *name,
+                         const char *fallback,
+                         const unsigned char *data, size_t n){
+    if(!m || !name) return -1;
+    /* Prefer the exact name: a manifest that lists both forms must have each
+     * one match its own hash, never a sibling's. */
+    if(manifest_find(m, name, NULL) == 0)
+        return manifest_check(m, name, data, n);
+    if(fallback && fallback[0] && manifest_find(m, fallback, NULL) == 0)
+        return manifest_check(m, fallback, data, n);
+    return -1;
+}
+
 int manifest_is_newer(const manifest_t *m, const char *local_version){
     if(!m || !local_version) return 0;
     return updater_cmp(m->version, local_version) > 0;
+}
+
+int manifest_min_ok(const manifest_t *m, const char *local_version){
+    if(!m || !local_version || !local_version[0]) return 0;
+    if(!m->min_version[0]) return 1;
+    return updater_cmp(local_version, m->min_version) >= 0;
 }
 
 int manifest_gate(const manifest_t *m){

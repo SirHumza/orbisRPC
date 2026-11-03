@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* appdb.h - display names from the system app.db (read-only SQLite). */
 #ifndef APPDB_H
 #define APPDB_H

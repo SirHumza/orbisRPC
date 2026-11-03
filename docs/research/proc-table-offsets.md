@@ -117,3 +117,6 @@ None of this has run on a console. Specifically unverified: that
 `sceSystemServiceGetAppIdOfBigApp` reports the same values in a *spawned*
 payload as it does in a process the user launched, and that Settings detection
 survives a ring larger than the probed size.
+
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms. -->

@@ -1,12 +1,19 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* lock.c - pid lockfile with stale detection. No flock on PS4 libc,
  * so use atomic create (O_CREAT|O_EXCL) + process-table liveness
  * (sysctl, no signals needed in spawned context). */
 #include "lock.h"
+#include "log.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <time.h>
+#include <sys/stat.h>
+#include <sys/time.h>
 #ifdef ORBISRPC_SDK_PAYLOAD
 #include <sys/types.h>
 #include <sys/sysctl.h>
@@ -50,48 +57,145 @@ static int pid_live(int pid){
 #endif
 
 static int s_held = 0;
+/* Unique per instance, not per process: Payload Guest can run two loads
+ * with the same pid, and both must still be distinguishable. */
+static uint64_t s_token = 0;
+static int64_t s_stale_s = LOCK_STALE_S;
 
-int lock_acquire(void){
-    int fd = open(LOCK_PATH, O_CREAT|O_EXCL|O_WRONLY, 0644);
-    if(fd >= 0){
-        char b[32];
-        int n = snprintf(b, sizeof b, "%d\n", (int)getpid());
-        if(n > 0) (void)write(fd, b, (size_t)n);
-        close(fd);
-        s_held = 1;
+void lock_set_stale(int seconds){
+    if(seconds < 60) seconds = 60;
+    s_stale_s = seconds;
+}
+
+static uint64_t make_token(void){
+    static unsigned seq;                 /* shared by same-process reloads */
+    seq++;
+    uint64_t x = (uint64_t)time(NULL);
+    x ^= ((uint64_t)(uintptr_t)&seq) << 32;
+    x ^= (uint64_t)(uintptr_t)&x;
+    x ^= ((uint64_t)getpid()) << 16;
+    x ^= (uint64_t)seq * 0x9e3779b97f4a7c15ULL;
+    return x ? x : 1;
+}
+
+static void write_lock(int fd){
+    char b[48];
+    int n = snprintf(b, sizeof b, "%d %016llx\n",
+                     (int)getpid(), (unsigned long long)s_token);
+    if(n > 0) (void)write(fd, b, (size_t)n);
+    close(fd);
+}
+
+/* Wall-clock epoch of this boot. A lock older than it is from a previous
+ * boot and must not stand down this one (D-04). Returns 0 when unknowable,
+ * in which case lock_entry_stale() falls back to pid liveness only. */
+static int64_t boot_wall(void){
+#ifdef ORBISRPC_SDK_PAYLOAD
+    int mib[2] = { 1, 21 }; /* CTL_KERN, KERN_BOOTTIME */
+    struct timeval tv;
+    size_t sz = sizeof tv;
+    if(sysctl(mib, 2, &tv, &sz, NULL, 0) == 0 && tv.tv_sec > 0)
+        return (int64_t)tv.tv_sec;
+    return 0;
+#else
+    struct timespec ts;
+    if(clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)time(NULL) - (int64_t)ts.tv_sec;
+#endif
+}
+
+/* Is the lock's current holder genuinely alive? A live pid that has stopped
+ * touching the lock (LOCK_HEARTBEAT_S cadence, LOCK_STALE_S threshold) is a
+ * wedged single-threaded payload, not a working daemon, so it must not block
+ * recovery. Returns 1 when the lock may be reclaimed. */
+static int holder_stale(void){
+    FILE *f = fopen(LOCK_PATH, "rb");
+    if(!f) return 1;                 /* vanished: nothing to preserve */
+    int pid = 0;
+    unsigned long long tok = 0;
+    int parsed = fscanf(f, "%d %llx", &pid, &tok);
+    fclose(f);
+    if(parsed < 1) pid = 0;
+    struct stat st;
+    int64_t mt = (stat(LOCK_PATH, &st) == 0) ? (int64_t)st.st_mtime : 0;
+    int64_t now = (int64_t)time(NULL);
+    int live = pid_live(pid);
+    int has_token = (parsed == 2 && tok != 0);
+    if(!lock_entry_reclaim(mt, boot_wall(), now, s_stale_s, has_token,
+                           (uint64_t)tok, s_token, live)){
+        log_msg("lock: held by pid %d token %08llx (age %llds); standing down",
+                pid, tok, mt > 0 ? (long long)(now - mt) : -1LL);
         return 0;
     }
-    /* Exists: check liveness of the holder. */
-    FILE *f = fopen(LOCK_PATH, "rb");
-    if(!f) return -1;
-    int pid = 0;
-    if(fscanf(f, "%d", &pid) != 1) pid = 0;
-    fclose(f);
-    if(pid_live(pid)) return 1; /* live peer: stand down */
-    /* Stale (holder dead or unreadable pid): reclaim. */
+    if(mt > 0 && lock_heartbeat_stale(mt, now, s_stale_s))
+        log_msg("lock: holder pid %d token %08llx silent for %llds; reclaiming",
+                pid, tok, (long long)(now - mt));
+    return 1;
+}
+
+int lock_acquire(void){
+    if(s_held) return 1;             /* already guarding this instance */
+    if(s_token == 0) s_token = make_token();
+    int fd = open(LOCK_PATH, O_CREAT|O_EXCL|O_WRONLY, 0644);
+    if(fd >= 0){
+        write_lock(fd);
+        s_held = 1;
+        log_msg("lock: acquired (pid %d token %08llx)",
+                (int)getpid(), (unsigned long long)s_token);
+        return 0;
+    }
+    if(!holder_stale()) return 1;    /* live, progressing peer: stand down */
+    /* Stale (previous boot, dead pid, unreadable pid, or no heartbeat):
+     * reclaim. */
     remove(LOCK_PATH);
     fd = open(LOCK_PATH, O_CREAT|O_EXCL|O_WRONLY, 0644);
     if(fd < 0){
         /* Lost the race: re-check once — a live peer may hold it now. */
-        f = fopen(LOCK_PATH, "rb");
-        if(f){
-            pid = 0;
-            if(fscanf(f, "%d", &pid) != 1) pid = 0;
-            fclose(f);
-            if(pid_live(pid)) return 1;
-        }
+        if(!holder_stale()) return 1;
         return -1;
     }
-    {
-        char b[32];
-        int n = snprintf(b, sizeof b, "%d\n", (int)getpid());
-        if(n > 0) (void)write(fd, b, (size_t)n);
-        close(fd);
-    }
+    write_lock(fd);
     s_held = 1;
+    log_msg("lock: reclaimed and acquired (pid %d token %08llx)",
+            (int)getpid(), (unsigned long long)s_token);
     return 0;
 }
 
+void lock_refresh(void){
+    if(!s_held) return;
+    /* utimes(NULL) stamps both times with the current clock; the mtime is
+     * what lock_heartbeat_stale() reads. Failure is non-fatal: the mtime
+     * simply stays old, and a holder that cannot touch its own lock for
+     * LOCK_STALE_S is not making progress either way. */
+    (void)utimes(LOCK_PATH, NULL);
+}
+
+int lock_owned(void){
+    if(!s_held) return 1;            /* running unguarded: nothing to lose */
+    FILE *f = fopen(LOCK_PATH, "rb");
+    if(!f) return 1;                 /* unreadable is not proof of takeover */
+    int pid = 0;
+    unsigned long long tok = 0;
+    int parsed = fscanf(f, "%d %llx", &pid, &tok);
+    fclose(f);
+    return lock_token_owned(parsed, pid, (uint64_t)tok,
+                            (int)getpid(), s_token) ? 1 : 0;
+}
+
 void lock_release(void){
-    if(s_held){ remove(LOCK_PATH); s_held = 0; }
+    if(!s_held) return;
+    /* Only remove our own lock: if it was reclaimed (stale detection raced a
+     * slow boot), deleting it would release the successor's guard. Same-pid
+     * reloads make the token, not the pid, the identity check. */
+    FILE *f = fopen(LOCK_PATH, "rb");
+    if(f){
+        int pid = 0;
+        unsigned long long tok = 0;
+        int parsed = fscanf(f, "%d %llx", &pid, &tok);
+        fclose(f);
+        if(lock_token_owned(parsed, pid, (uint64_t)tok,
+                            (int)getpid(), s_token))
+            remove(LOCK_PATH);
+    }
+    s_held = 0;
 }

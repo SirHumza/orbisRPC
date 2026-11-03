@@ -1,7 +1,9 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
 CC ?= cc
 # Host tests target POSIX systems (glibc under -std=c11 hides fileno/strdup/etc;
 # _DEFAULT_SOURCE re-enables usleep and friends).
-CFLAGS += -std=c11 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -Wall -Wextra -Werror -DHEALTH_TESTABLE -I../orbisrpc -I../third_party/mbedtls/include -I$(SQLITE_DIR)
+CFLAGS += -std=c11 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -Wall -Wextra -Werror -DHEALTH_TESTABLE -DLOG_TESTABLE -DNOTIFY_TESTABLE -MMD -MP -I../orbisrpc -I../third_party/mbedtls/include -I$(SQLITE_DIR)
 
 TARGET := test_utils
 OBJDIR := .objs
@@ -10,7 +12,7 @@ MBEDTLS_DIR := ../third_party/mbedtls/library
 # Same exclusion set as scripts/build.sh (POSIX-only modules).
 MBEDTLS_SRCS := $(filter-out $(MBEDTLS_DIR)/net_sockets.c $(MBEDTLS_DIR)/timing.c $(MBEDTLS_DIR)/entropy_poll.c,$(wildcard $(MBEDTLS_DIR)/*.c))
 
-ORBIS_SRCS := ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c ../orbisrpc/tmdb_crypto.c ../orbisrpc/updater_util.c ../orbisrpc/art.c ../orbisrpc/log.c ../orbisrpc/health.c ../orbisrpc/manifest.c ../orbisrpc/compat.c ../orbisrpc/cfg.c ../orbisrpc/appdb.c ../orbisrpc/discord.c ../orbisrpc/procwalk.c ../orbisrpc/bigapp.c ../orbisrpc/pkgzone.c ../orbisrpc/gamecache.c ../orbisrpc/fw.c ../orbisrpc/notify.c ../orbisrpc/retro.c
+ORBIS_SRCS := ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c ../orbisrpc/tmdb_crypto.c ../orbisrpc/updater_util.c ../orbisrpc/updater_http.c ../orbisrpc/art.c ../orbisrpc/diag.c ../orbisrpc/log.c ../orbisrpc/health.c ../orbisrpc/manifest.c ../orbisrpc/compat.c ../orbisrpc/cfg.c ../orbisrpc/appdb.c ../orbisrpc/discord.c ../orbisrpc/procwalk.c ../orbisrpc/bigapp.c ../orbisrpc/pkgzone.c ../orbisrpc/gamecache.c ../orbisrpc/fw.c ../orbisrpc/notify.c ../orbisrpc/retro.c
 INST_SRCS := ../installer/icfg.c
 # SQLite amalgamation: -O0 for host iteration speed (payload uses -O2).
 SQLITE_DIR := ../third_party/sqlite/sqlite-amalgamation-3510100
@@ -27,19 +29,43 @@ ASAN_INST_OBJS := $(patsubst ../installer/%.c,$(ASAN_OBJDIR)/inst_%.o,$(INST_SRC
 ASAN_MBEDTLS_OBJS := $(patsubst $(MBEDTLS_DIR)/%.c,$(ASAN_OBJDIR)/mbed_%.o,$(MBEDTLS_SRCS))
 ASAN_OBJS := $(ASAN_OBJDIR)/test_utils.o $(ASAN_ORBIS_OBJS) $(ASAN_INST_OBJS) $(ASAN_MBEDTLS_OBJS) $(ASAN_OBJDIR)/sqlite3.o
 
-.PHONY: all clean test asan
+# Header dependencies: without these, editing a header left stale objects and
+# a "green" run that never compiled the change. sqlite3.c is built without
+# dep tracking, so its .d entries are expected to be absent.
+DEPS := $(ORBIS_OBJS:.o=.d) $(INST_OBJS:.o=.d) $(MBEDTLS_OBJS:.o=.d) \
+        $(ASAN_ORBIS_OBJS:.o=.d) $(ASAN_INST_OBJS:.o=.d) $(ASAN_MBEDTLS_OBJS:.o=.d) \
+        $(OBJDIR)/test_utils.d $(ASAN_OBJDIR)/test_utils.d
+-include $(DEPS)
+
+.PHONY: all clean test asan ws ws-asan net net-asan
 
 all: $(TARGET)
 
-test: $(TARGET)
+test: $(TARGET) ws net
 	./$(TARGET)
+
+ws:
+	$(CC) $(CFLAGS) -DORBISRPC_SDK_PAYLOAD -o test_ws test_ws.c ../orbisrpc/ws.c ../orbisrpc/netconnect.c ../orbisrpc/log.c ../orbisrpc/compat.c -lm
+	./test_ws
+
+net:
+	$(CC) $(CFLAGS) -DORBISRPC_SDK_PAYLOAD -o test_net test_net.c ../orbisrpc/netconnect.c ../orbisrpc/log.c ../orbisrpc/compat.c -lm
+	./test_net
 
 $(TARGET): $(TEST_OBJS)
 	$(CC) $(CFLAGS) -o $@ $(TEST_OBJS) -lm
 
-asan: $(ASAN_OBJS)
+asan: $(ASAN_OBJS) ws-asan net-asan
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) -o test_utils_asan $(ASAN_OBJS) -lm
-	./test_utils_asan
+	UBSAN_OPTIONS=halt_on_error=1 ./test_utils_asan
+
+ws-asan:
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) -DORBISRPC_SDK_PAYLOAD -o test_ws_asan test_ws.c ../orbisrpc/ws.c ../orbisrpc/netconnect.c ../orbisrpc/log.c ../orbisrpc/compat.c -lm
+	UBSAN_OPTIONS=halt_on_error=1 ./test_ws_asan
+
+net-asan:
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) -DORBISRPC_SDK_PAYLOAD -o test_net_asan test_net.c ../orbisrpc/netconnect.c ../orbisrpc/log.c ../orbisrpc/compat.c -lm
+	UBSAN_OPTIONS=halt_on_error=1 ./test_net_asan
 
 $(OBJDIR):
 	mkdir -p $(OBJDIR)
@@ -78,4 +104,4 @@ $(ASAN_OBJDIR)/mbed_%.o: $(MBEDTLS_DIR)/%.c | $(ASAN_OBJDIR)
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) -Wno-unused-parameter -c -o $@ $<
 
 clean:
-	rm -rf $(TARGET) test_utils_asan $(OBJDIR) $(ASAN_OBJDIR) *.o
+	rm -rf $(TARGET) test_utils_asan test_ws test_ws_asan $(OBJDIR) $(ASAN_OBJDIR) *.o

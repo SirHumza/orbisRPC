@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* jsonlite.c */
 #define _POSIX_C_SOURCE 200809L /* strdup must be visible under -std=c11 (glibc) */
 #include "jsonlite.h"
@@ -21,6 +24,21 @@ static void skip_ws(jl_parse_t *p) {
 static jl_val_t *parse_value(jl_parse_t *p);
 static jl_val_t *parse_value_depth(jl_parse_t *p, int depth);
 
+/* Read exactly four hex digits (JSON \uXXXX). Returns 0 on success. */
+static int hex4(const char *s, unsigned *out){
+    unsigned v = 0;
+    for(int i = 0; i < 4; i++){
+        char h = s[i];
+        v <<= 4;
+        if(h >= '0' && h <= '9') v |= (unsigned)(h - '0');
+        else if(h >= 'a' && h <= 'f') v |= (unsigned)(h - 'a' + 10);
+        else if(h >= 'A' && h <= 'F') v |= (unsigned)(h - 'A' + 10);
+        else return -1;
+    }
+    *out = v;
+    return 0;
+}
+
 /* Stack depth cap: network JSON nests a few levels; a hostile 100k-deep
  * array would otherwise exhaust the daemon/game thread stack. Counter
  * advances twice per nesting level, so 128 allows ~64 deep. */
@@ -41,15 +59,34 @@ static jl_val_t *parse_string(jl_parse_t *p) {
             switch(e){ case '"':c='"';break; case '\\':c='\\';break; case '/':c='/';break;
                 case 'b':c='\b';break; case 'f':c='\f';break; case 'n':c='\n';break;
                 case 'r':c='\r';break; case 't':c='\t';break;
-                case 'u':{ /* decode \uXXXX to utf8 */ if (p->cur+4>p->end){p->err=1;break;}
-                    unsigned cp=0; for(int i=0;i<4;i++){char h=*p->cur++;
-                        cp<<=4; if(h>='0'&&h<='9')cp|=(h-'0'); else if(h>='a'&&h<='f')cp|=(h-'a'+10);
-                        else if(h>='A'&&h<='F')cp|=(h-'A'+10); else {p->err=1;break;}}
-                    if(p->err)break;
+                case 'u':{ /* decode \uXXXX (and surrogate pairs) to utf8 */
+                    if((size_t)(p->end-p->cur) < 4){p->err=1;break;}
+                    unsigned cp=0;
+                    if(hex4(p->cur,&cp)!=0){p->err=1;break;}
+                    p->cur+=4;
+                    /* A high surrogate must be followed by \uXXXX low
+                     * surrogate; decode the pair as one 4-byte code point.
+                     * A lone surrogate is replaced with U+FFFD instead of
+                     * emitting invalid UTF-8 (two 3-byte sequences), which
+                     * Discord rejects in a presence payload. */
+                    if(cp>=0xD800 && cp<=0xDBFF){
+                        if((size_t)(p->end-p->cur) >= 6 &&
+                           p->cur[0]=='\\' && p->cur[1]=='u'){
+                            unsigned lo=0;
+                            if(hex4(p->cur+2,&lo)!=0){p->err=1;break;}
+                            if(lo>=0xDC00 && lo<=0xDFFF){
+                                cp=0x10000+((cp-0xD800)<<10)+(lo-0xDC00);
+                                p->cur+=6;
+                            } else cp=0xFFFD;
+                        } else cp=0xFFFD;
+                    } else if(cp>=0xDC00 && cp<=0xDFFF){
+                        cp=0xFFFD;
+                    }
                     char outb[5]; int on=0;
                     if(cp<0x80)outb[on++]=cp;
                     else if(cp<0x800){outb[on++]=(char)(0xC0|(cp>>6));outb[on++]=(char)(0x80|(cp&0x3F));}
-                    else {outb[on++]=(char)(0xE0|(cp>>12));outb[on++]=(char)(0x80|((cp>>6)&0x3F));outb[on++]=(char)(0x80|(cp&0x3F));}
+                    else if(cp<0x10000){outb[on++]=(char)(0xE0|(cp>>12));outb[on++]=(char)(0x80|((cp>>6)&0x3F));outb[on++]=(char)(0x80|(cp&0x3F));}
+                    else {outb[on++]=(char)(0xF0|(cp>>18));outb[on++]=(char)(0x80|((cp>>12)&0x3F));outb[on++]=(char)(0x80|((cp>>6)&0x3F));outb[on++]=(char)(0x80|(cp&0x3F));}
                     if(len+(size_t)on+1>cap){
                         size_t ncap=(len+(size_t)on+1)*2;
                         char *nb=(char*)realloc(buf,ncap);

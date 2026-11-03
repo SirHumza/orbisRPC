@@ -1,9 +1,13 @@
 # Installer (Setup PKG, `ORPC00001`)
 
-> Status: design + code exist in `installer/`, but **no PKG ships with
-> test builds** — testers install the `.elf` directly (see repo README).
-> The PKG arrives with the official release and will also set up autorun
-> and the nanoDNS exception.
+> Status: design + code exist in `installer/`, but **no PKG ships in 1.1**
+> — testers install the `.elf` directly (see repo README). The PKG path is
+> **experimental**: the install step crashed with `CE-34878-0` on the test
+> console (D-06), and launching through the Discord-client PKG route
+> triggered a kernel panic (D-07). Neither was reproducible without
+> hardware, so both stay out of the release until a console confirms them.
+> The installer now writes `/data/orbisRPC/log.txt` (fallback
+> `/data/log.txt`) so a failure leaves evidence.
 
 ## What it does
 
@@ -30,10 +34,15 @@ No loopback ports, no injection, no boot proof to go wrong.
 confirm → sceKernelLoadStartModule(evict.elf) — kills old daemon
         → copy evict.elf to /data/payloads/evict.elf
         → copy orbisrpc.bin to /data/payloads/orbisrpc.bin
+        → copy config.json only when it does not already exist
         → save config.json with Discord token (pre-populated)
         → (token entry skipped if already valid)
         → done
 ```
+
+Reinstalling never overwrites an existing `/data/orbisRPC/config.json`,
+so the saved token, learned titles and operator settings survive a PKG
+update. The packaged config is used for a fresh install only.
 
 The `evict.elf` is launched via `sceKernelLoadStartModule` during
 install — it reads `daemon.lock`, kills the running daemon, exits.
@@ -78,3 +87,6 @@ shows where, it can't write the queue itself.
 the installer copies both payloads, launches evict.elf to kill the
 old daemon, and pre-saves the config token.
 Output: `IV0000-ORPC00001_00-ORBISRPCSETUP000.pkg`.
+
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms. -->

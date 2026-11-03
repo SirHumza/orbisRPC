@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* release_pubkey.h - embedded release-channel public key (P-256, raw X||Y).
  *
  * PRODUCTION KEY: generated 2026-09-25 with

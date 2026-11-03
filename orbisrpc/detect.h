@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
+ */
 /* detect.h - find current foreground game title + app cache dir. */
 #ifndef DETECT_H
 #define DETECT_H
@@ -36,6 +39,9 @@ int detect_name_for_title(const char *titleId, char *out_name, size_t cap);
 /* Last resolved titleId (e.g. "CUSA00740") or NULL if none yet.
  * Used as the Discord asset key so icons follow automatically. */
 const char *detect_last_titleid(void);
+/* D-18: GoldHEN version from the kernel log banner, 0 + out filled when
+ * found, -1 when the banner is not visible. */
+int detect_goldhen_version(char *out, size_t cap);
 /* 1 when the last resolve produced a real name (0 = raw-ID fallback). */
 int detect_last_ok(void);/* Last resolved artwork URL (Sony CDN via TMDB, or empty). */
 const char *detect_last_art(void);
