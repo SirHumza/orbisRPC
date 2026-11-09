@@ -811,7 +811,7 @@ static void test_cfg_titles(void) {
     snprintf(path2, sizeof path2, "%s/cfg2.json", dir);
     FILE *f = fopen(path, "wb");
     assert(f);
-    fputs("{\"token\":\"t\",\"titles\":{\"CUSA11995\":\"Marvel's Spider-Man\","
+    fputs("\xEF\xBB\xBF\r\n{\"token\":\"t\",\"titles\":{\"CUSA11995\":\"Marvel's Spider-Man\","
           "\"BAD KEY!\": \"junk\", \"CUSA00001\": \"x\", \"TOOLONGTITLEID12345\": \"y\","
           "\"CUSA00002\": 42}}", f);
     fclose(f);

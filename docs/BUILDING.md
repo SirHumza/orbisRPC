@@ -3,6 +3,8 @@
 ## Requirements
 
 - Linux or macOS with `clang-18`, `lld-18`, `llvm-18`.
+- Make sure `llvm-config` and `ld.lld` from that LLVM installation are on
+  `PATH`; if `llvm-config` has a versioned name, set `LLVM_CONFIG` to its path.
 - The [OpenOrbis PS4 toolchain](https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain)
   for the Setup app — `OO_PS4_TOOLCHAIN`.
 - The ps4-payload-sdk **built from git** — never the release ZIP. The

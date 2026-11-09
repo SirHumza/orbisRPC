@@ -25,6 +25,8 @@ This file tracks the next concrete work; completion is based on evidence in
 - [x] Reject escaped NULs at daemon and installer config parsing boundaries.
 - [x] Reject ambiguous duplicate token and QoS config keys; explicit token edits repair duplicates and invalidate old QoS state.
 - [x] Reject credentials that cannot fit destination buffers; never truncate token-loader output.
+- [x] Normalize pasted token boundaries without changing internal bytes; accept a leading config BOM in both readers.
+- [x] Declare C++11/POSIX installer build requirements and use the POSIX page-size query.
 - [x] Make malformed optional title overrides non-fatal again.
 - [x] Rewrite README claims to match the current source and installer flow.
 - [x] Fix macOS package tool selection and gate the setup app's font assets.
@@ -32,7 +34,7 @@ This file tracks the next concrete work; completion is based on evidence in
 - [x] Run host suite, ASan/UBSan suite, and strict secret/e2e checks on this tree.
 - [x] Build the SDK payload and setup PKG; inspect ELF imports and packaged files.
 - [x] Run final checks after the last source/documentation updates.
-- [ ] Commit validated work and push branch `1.1` to GitHub.
+- [x] Commit validated work and push branch `1.1` to GitHub.
 
 ## Remaining project work
 

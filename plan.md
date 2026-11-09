@@ -173,11 +173,11 @@ Every item requires a measurable user benefit, bounded resource cost, documented
 
 ## 10. Verification and release gates
 
-- [ ] `make -C tests test` passes.
-- [ ] `make -C tests asan` passes with no address/undefined-behavior findings.
-- [ ] `ORBISRPC_STRICT_SECRETS=1 python3 tests/e2e_consumer.py` passes.
-- [ ] Build payload using the pinned git SDK; inspect NEEDED entries and firmware gate output.
-- [ ] Build PKG and inspect packaged payload/config/assets; prove packaged ELF matches the intended build.
+- [x] `make -C tests test` passes on the current source tree.
+- [x] `make -C tests asan` passes with no address/undefined-behavior findings.
+- [x] `ORBISRPC_STRICT_SECRETS=1 python3 tests/e2e_consumer.py` passes, including the built daemon ELF linkage check.
+- [x] Build payload using the pinned git SDK; inspect NEEDED entries and firmware gate output. SDK `573b4a0` gate passed for 13.50/13.52, and strict consumer checks found only daemon-world libraries.
+- [x] Build PKG and inspect packaged payload/config/assets; prove packaged ELF matches the intended build. `pkg_validate` passed, expected config/assets were extracted, and the embedded daemon SHA-256 matched build output and staged ELF.
 - [ ] Exercise clean install, upgrade, uninstall, cancellation, bad config, invalid token, network outage, and update rollback on console.
 - [ ] Test supported firmware matrix using documented tester/device evidence; label any untested firmware explicitly.
 - [ ] Run at least 24 hours of continuous presence and a 72-hour soak including game switches, Wi-Fi outages, daemon restarts, and repeated rest-mode cycles.
@@ -193,7 +193,7 @@ These are failure cases to investigate, not claims that each bug currently exist
 
 - [x] B01 Reject embedded NULs in credential/config strings rather than validating only a prefix. Daemon config loading rejects decoded NULs transactionally; the installer JSON parser rejects `\u0000` because its string values are NUL-terminated. Host tests cover both boundaries.
 - [x] B02 Reject credentials that exceed the daemon session buffers and have `icfg_token_load()` fail with an empty output when the caller buffer cannot hold the full token. The installer edit validator also caps accepted user-token length. Offline tests prove oversized auth/QoS never reach the socket and small token buffers never receive prefixes.
-- [ ] B03 Handle CRLF, UTF-8 BOM, pasted whitespace, and outer quote normalization consistently at input boundaries.
+- [x] B03 Handle CRLF and pasted boundary whitespace/quotes at token entry, and accept a UTF-8 BOM at the start of daemon and installer JSON config files. Token normalization preserves internal bytes; strict validation still rejects internal whitespace. Host tests cover BOM+CRLF, matching quote pairs, internal whitespace, and capacity failure.
 - [x] B04 Reject duplicate `token` and `qos_token` config keys in daemon and installer readers. Ordinary installer saves fail closed on ambiguity; an explicit token edit can replace duplicate credentials with one token and clears stale/ambiguous QoS state. Host tests cover both.
 - [ ] B05 Reject wrong JSON root types and non-finite/out-of-range numbers before conversion to integers.
 - [ ] B06 Verify boolean handling agrees across the two JSON implementations and the settings UI.
@@ -283,6 +283,7 @@ These are failure cases to investigate, not claims that each bug currently exist
 - [ ] B78 Confirm support instructions match actual log paths, stop behavior, loading methods, and current package availability.
 - [ ] B79 Audit dependency updates for ABI, firmware, licensing, and security regressions before adopting them.
 - [ ] B80 Test diagnostic redaction using synthetic credential canaries across every export and logging path.
+- [x] B81 Declare the installer C++ standard and POSIX API surface explicitly; use `sysconf(_SC_PAGESIZE)` instead of hidden legacy `getpagesize()`. Full package build verifies the console target compiles and links.
 
 ## More feature suggestions
 

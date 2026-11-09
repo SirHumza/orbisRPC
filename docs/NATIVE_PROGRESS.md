@@ -63,6 +63,12 @@ Base commit: `e5dd5b8` on branch `1.1`.
 - `discord_connect()` now refuses token or QoS values too large for its session
   buffers before opening a socket. The installer token loader checks capacity
   and leaves output empty on failure instead of saving a truncated prefix.
+- Token entry now removes only leading/trailing ASCII whitespace, an optional
+  UTF-8 BOM, and one matching outer quote pair; token contents are not altered.
+  Daemon and installer config readers also accept a UTF-8 BOM before JSON.
+- Installer builds now declare C++11 and the POSIX API surface explicitly;
+  page-size reporting uses `sysconf(_SC_PAGESIZE)` instead of the legacy BSD
+  `getpagesize()` declaration hidden by strict feature macros.
 - Added offline gateway, token-lineage, and installer settings regression
   programs to the host test Makefile. The test target now runs the installer
   config test every time, even when its binary is already built.
@@ -83,6 +89,9 @@ Base commit: `e5dd5b8` on branch `1.1`.
   `make all` produced the daemon ELF and a 10 MiB setup PKG, including the
   pending-rotation follow-up. The generated GP4
   manifest includes `orbisRPC.elf`, config, and all three FreeType fonts.
+- Current build verification rebuilt the daemon and Setup PKG; `pkg_validate`
+  passed, extracted package assets were present, and the daemon SHA-256 inside
+  the PKG matched both `build-sdk/orbisrpc_sdk.elf` and the staged payload.
 - `git diff --check`: passed.
 - No console test was run. Build success does not prove the PKG launches or that
   Discord accepts the account token on PS4.

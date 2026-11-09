@@ -33,11 +33,24 @@ static void test_installer_cfg(void) {
     assert(token_valid("has space.in.it.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") == 0);
     assert(token_valid("nodots") == 0);
     assert(token_valid(NULL) == 0);
+    char normalized[160];
+    assert(token_normalize(normalized, sizeof normalized,
+        "  \"MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz\"\r\n") == 0);
+    assert(!strcmp(normalized, "MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz"));
+    assert(token_valid(normalized));
+    assert(token_normalize(normalized, sizeof normalized,
+        "\xEF\xBB\xBF 'MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz' \n") == 0);
+    assert(token_valid(normalized));
+    assert(token_normalize(normalized, sizeof normalized,
+        "MTIz.ABCdef_0123456789-xYz ABCDEFGHijklmnopQRSTUVwxyz") == 0);
+    assert(!token_valid(normalized)); /* never remove internal whitespace */
+    char tiny[4] = "old";
+    assert(token_normalize(tiny, sizeof tiny, "longer") != 0 && tiny[0] == 0);
     /* fixture via stdio: no C write API exists anymore (the C++ settings
      * page owns writes); these tests pin the read + carry API it relies on */
     FILE *f = fopen(path, "wb");
     assert(f);
-    fputs("{\"token\":\"MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz\","
+    fputs("\xEF\xBB\xBF\r\n{\"token\":\"MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz\","
           "\"qos_token\":\"server-signed-qos\",\"presence_state\":\"On PS4\","
           "\"poll_interval_s\":12}", f);
     fclose(f);

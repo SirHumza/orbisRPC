@@ -119,10 +119,10 @@ OBJS        := $(patsubst $(SOURCEDIR)/%.c, $(INTDIR)/%.o, $(CFILES)) \
 SHARED_OBJS := $(patsubst %.cpp, $(INTDIR)/shared/%.o, $(SHARED))
 OBJS        += $(SHARED_OBJS)
 
-CFLAGS      := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -c \
+CFLAGS      := --target=x86_64-pc-freebsd12-elf -D_POSIX_C_SOURCE=200809L -fPIC -funwind-tables -c \
                $(EXTRA_DEFS) $(EXTRA_INCLUDES) \
                -isysroot $(TOOLCHAIN) -isystem $(TOOLCHAIN)/include
-CXXFLAGS    := $(CFLAGS) -isystem $(TOOLCHAIN)/include/c++/v1
+CXXFLAGS    := $(CFLAGS) -std=c++11 -isystem $(TOOLCHAIN)/include/c++/v1
 LDFLAGS     := -m elf_x86_64 -pie --script $(TOOLCHAIN)/link.x --eh-frame-hdr \
                -L$(TOOLCHAIN)/lib $(LIBS) $(TOOLCHAIN)/lib/crt1.o
 

@@ -104,7 +104,15 @@ int cfg_load(const char *path, cfg_t *c) {
     size_t n = fread(buf, 1, (size_t)sz, f); fclose(f);
     if(n != (size_t)sz){ free(buf); log_msg("config read failed at %s", path); return -1; }
     buf[n] = 0;
-    jl_val_t *root = jl_parse(buf, n);
+    const char *json = buf;
+    size_t json_len = n;
+    if(json_len >= 3 && (unsigned char)json[0] == 0xef &&
+       (unsigned char)json[1] == 0xbb &&
+       (unsigned char)json[2] == 0xbf){
+        json += 3;
+        json_len -= 3;
+    }
+    jl_val_t *root = jl_parse(json, json_len);
     free(buf);
     if (!root) { log_msg("config parse failed; keeping current config"); return -1; }
     if (root->type != JL_OBJECT) {

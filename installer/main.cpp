@@ -242,7 +242,13 @@ int main()
 			// Clearing the field restores the placeholder rather than saving an
 			// empty credential. An empty token is not a way to run without one;
 			// it is a token that cannot work, and it would look deliberate.
-			std::string entered = buf;
+			char normalized[UI_INPUT_MAX];
+			if (token_normalize(normalized, sizeof normalized, buf) != 0)
+			{
+				view->SetStatus("token is too long");
+				return;
+			}
+			std::string entered = normalized;
 			if (entered.empty())
 				entered = "SET_ME";
 

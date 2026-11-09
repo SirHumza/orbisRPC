@@ -33,6 +33,12 @@
   stale QoS state after a changed account credential.
 - [x] Over-capacity daemon credentials are rejected before network setup;
   installer token loading returns an error rather than a truncated prefix.
+- [x] Token entry trims only boundary whitespace and one matching quote pair;
+  daemon and installer config readers accept a leading UTF-8 BOM.
+- [x] Build the 13.50/13.52-gated daemon and setup PKG; validate package digests
+  and confirm the extracted embedded daemon matches the build SHA-256.
+- [x] Make installer C++11 and POSIX requirements explicit so the macOS build
+  compiles the complete Setup app and package.
 - [x] Offline tests cover READY-only promotion, auth/QoS extraction, nested
   decoys, and IDENTIFY QoS presence/absence. Full exact wire acceptance remains
   unverified against Discord.
