@@ -47,6 +47,8 @@ Base commit: `e5dd5b8` on branch `1.1`.
   UTF-8 reasons in both authentication and active-session dispatch. Empty
   CLOSE remains valid and disconnects without a status; code 4004 is preserved
   for invalid-token handling.
+- Added a heartbeat regression proving unrelated Gateway dispatches do not
+  reset the ACK timer and a missing ACK still closes the session after grace.
 - Added offline gateway, token-lineage, and installer settings regression
   programs to the host test Makefile. The test target now runs the installer
   config test every time, even when its binary is already built.

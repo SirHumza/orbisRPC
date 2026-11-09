@@ -144,6 +144,29 @@ static void test_first_heartbeat_ack_window(void){
     assert(discord_tick(&d) == -1);
 }
 
+static void test_unrelated_dispatch_does_not_ack_heartbeat(void){
+    static const char dispatch[] = "{\"op\":0,\"s\":7,\"t\":\"PRESENCE_UPDATE\"}";
+    discord_t d;
+    memset(&d, 0, sizeof d);
+    d.connected = 1;
+    d.hb_interval_ms = 5000;
+    d.last_heartbeat = fake_now;
+    d.last_ack = fake_now;
+    d.sent_hb = 1;
+    scripted_recv = 1;
+    scripted_result = (int)sizeof dispatch - 1;
+    scripted_opcode = 1;
+    scripted_fin = 1;
+    scripted_payload = dispatch;
+    assert(discord_tick(&d) == 0);
+    assert(d.last_ack == fake_now);
+
+    fake_now += 26; /* > 2 heartbeat intervals + 15 second grace */
+    d.last_heartbeat = fake_now;
+    assert(discord_tick(&d) == -1);
+    assert(!d.connected);
+}
+
 static void test_empty_close_frame_disconnects_immediately(void){
     discord_t d;
     memset(&d, 0, sizeof d);
@@ -383,6 +406,7 @@ int main(void){
     test_rotation_take_validation();
     test_credentials_clear_after_session();
     test_first_heartbeat_ack_window();
+    test_unrelated_dispatch_does_not_ack_heartbeat();
     test_empty_close_frame_disconnects_immediately();
     test_invalid_close_payload_disconnects();
     test_empty_ping_is_answered();

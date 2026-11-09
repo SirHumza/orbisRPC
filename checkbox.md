@@ -36,6 +36,8 @@
 - [x] CLOSE payload validation rejects one-byte payloads, reserved/out-of-range
   codes, malformed UTF-8 reasons, and payloads over the control-frame limit;
   empty CLOSE and Discord 4004 remain valid cases.
+- [x] An unrelated Gateway dispatch does not refresh the heartbeat ACK timer;
+  the session expires after the configured ACK grace window.
 - [x] Offline decision-helper test covers retry while disk retains the origin,
   repeated rotations, and manual edits taking precedence. Actual filesystem
   write-failure injection remains unverified.
