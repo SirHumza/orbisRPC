@@ -2,10 +2,13 @@
 #include "../installer/jsonlite.h"
 
 #include <assert.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 namespace {
@@ -39,8 +42,41 @@ char *Read()
 
 } // namespace
 
-int main()
+int main(int argc, char **argv)
 {
+	if (argc == 5 && strcmp(argv[1], "rotate") == 0)
+	{
+		const int readyFd = atoi(argv[2]);
+		const int releaseFd = atoi(argv[3]);
+		const int lockFd = open(argv[4], O_CREAT | O_RDWR, 0600);
+		assert(lockFd >= 0);
+		struct flock lock = {};
+		lock.l_type = F_WRLCK;
+		lock.l_whence = SEEK_SET;
+		assert(fcntl(lockFd, F_SETLKW, &lock) == 0);
+		char signal = 'x';
+		assert(write(readyFd, &signal, 1) == 1);
+		close(readyFd);
+		assert(read(releaseFd, &signal, 1) == 1);
+		close(releaseFd);
+		Write("{\"token\":\"daemon.rotated.token\",\"show_firmware\":true}");
+		lock.l_type = F_UNLCK;
+		assert(fcntl(lockFd, F_SETLK, &lock) == 0);
+		close(lockFd);
+		return 0;
+	}
+	if (argc == 3 && strcmp(argv[1], "save") == 0)
+	{
+		const int readyFd = atoi(argv[2]);
+		Settings childSettings;
+		childSettings.Load();
+		childSettings.Toggle(kSetShowFirmware);
+		char signal = 'x';
+		assert(write(readyFd, &signal, 1) == 1);
+		close(readyFd);
+		return childSettings.Save() == 0 ? 0 : 1;
+	}
+
 	char *saved;
 	const char embedded_nul[] = "{\"token\":\"prefix.valid.token\\u0000suffix\"}";
 	jl_val_t *with_nul = jl_parse(embedded_nul, sizeof embedded_nul - 1);
@@ -107,6 +143,65 @@ int main()
 	assert(strstr(saved, "\"unknown\":{\"nested\":7}"));
 	free(saved);
 
+	// Installer and daemon writers serialize the complete read-modify-write.
+	// Hold the shared sidecar lock while a child attempts Save, then change the
+	// token as the daemon would before releasing it. The child must preserve it.
+	Write("{\"token\":\"old.token.value\",\"show_firmware\":true}");
+	char lockPath[512];
+	const int lockPathLen = snprintf(lockPath, sizeof lockPath, "%s.lock", kConfig);
+	assert(lockPathLen > 0 && static_cast<size_t>(lockPathLen) < sizeof lockPath);
+	int ready[2], release[2];
+	assert(pipe(ready) == 0 && pipe(release) == 0);
+	pid_t locker = fork();
+	assert(locker >= 0);
+	if (locker == 0)
+	{
+		close(ready[0]);
+		close(release[1]);
+		char readyText[16], releaseText[16];
+		assert(snprintf(readyText, sizeof readyText, "%d", ready[1]) > 0);
+		assert(snprintf(releaseText, sizeof releaseText, "%d", release[0]) > 0);
+		execl(argv[0], argv[0], "rotate", readyText, releaseText, lockPath,
+		      static_cast<char *>(nullptr));
+		_exit(127);
+	}
+	close(ready[1]);
+	close(release[0]);
+	char signal;
+	assert(read(ready[0], &signal, 1) == 1 && signal == 'x');
+	close(ready[0]);
+	int childReady[2];
+	assert(pipe(childReady) == 0);
+	pid_t child = fork();
+	assert(child >= 0);
+	if (child == 0)
+	{
+		close(childReady[0]);
+		char fdText[16];
+		assert(snprintf(fdText, sizeof fdText, "%d", childReady[1]) > 0);
+		execl(argv[0], argv[0], "save", fdText, static_cast<char *>(nullptr));
+		_exit(127);
+	}
+	close(childReady[1]);
+	assert(read(childReady[0], &signal, 1) == 1 && signal == 'x');
+	close(childReady[0]);
+	struct timespec pause = {0, 50000000};
+	nanosleep(&pause, nullptr);
+	int status = 0;
+	const pid_t early = waitpid(child, &status, WNOHANG);
+	if (early != 0)
+		fprintf(stderr, "save exited while lock held: pid=%d status=%d\n", (int)early, status);
+	assert(early == 0);
+	assert(write(release[1], "x", 1) == 1);
+	close(release[1]);
+	assert(waitpid(locker, &status, 0) == locker);
+	assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+	assert(waitpid(child, &status, 0) == child);
+	assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+	saved = Read();
+	assert(strstr(saved, "\"token\":\"daemon.rotated.token\""));
+	free(saved);
+
 	Write("{\"token\":\"old.token.value\",\"qos_token\":\"signed-old\","
 	      "\"unknown\":7}");
 	Settings tokenEdit;
@@ -133,6 +228,7 @@ int main()
 	free(saved);
 
 	(void)remove(kConfig);
+	(void)remove("./installer-safety-fixture/config.json.lock");
 	(void)rmdir(kDir);
 	return 0;
 }

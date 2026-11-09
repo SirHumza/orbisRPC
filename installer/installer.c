@@ -21,6 +21,7 @@
 #include "carrykeys.h"
 #include "paths.h"
 #include "installer_flow.h"
+#include "../orbisrpc/config_lock.h"
 
 #ifndef SETUP_VERSION
 #define SETUP_VERSION "1.0.0"
@@ -327,7 +328,7 @@ static const char *const g_carry_keys[] = {
  * Every failure here is non-fatal. A missing or unparseable old config means
  * nothing to carry, and a failed apply means the new config is intact minus the
  * user's options -- worth reporting, never worth aborting an install over. */
-static void install_config(const char *src)
+static int install_config(const char *src)
 {
     /* Static, not stack: ICFG_CARRY_MAX entries of a ~250-byte struct is a few
      * KB, and this runs where the stack has no room to spare. */
@@ -335,6 +336,11 @@ static void install_config(const char *src)
 
     int found = 0;
     int applied = 0;
+    int config_lock = config_lock_acquire(ICFG_PATH);
+    if(config_lock < 0){
+        ilog("cfg-lock", errno, 0, 0);
+        return -1;
+    }
 
     /* 1. Capture, BEFORE anything overwrites the file. This is the whole trick:
      * after the overwrite the old values no longer exist anywhere. */
@@ -355,11 +361,13 @@ static void install_config(const char *src)
         applied = icfg_carry_apply(ICFG_PATH, snap, CARRY_COUNT);
 
     ilogv("cfg-carried", applied, 0);
+    config_lock_release(config_lock);
 
     if(found > 0 && applied != found)
         uibridge_ok("Settings",
                     "The new settings could not be fully applied.\n\n"
                     "Some of your saved options were reset to defaults.");
+    return 0;
 }
 
 static int write_template(void){
@@ -439,7 +447,7 @@ static int step_files(const char *payloadSource, const char *configSource){
     /* Config replaced, with the user's own options carried across. One call
      * because the capture has to happen before the overwrite, and that ordering
      * is the whole feature. */
-    install_config(configSource);
+    if(install_config(configSource) != 0) return -1;
     ilogv("cfg-done", 0, 0);
     return 0;
 }

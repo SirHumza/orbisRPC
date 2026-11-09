@@ -9,8 +9,17 @@
 #include <math.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include "config_lock.h"
 
 cfg_t g_cfg;
+
+int cfg_lock(const char *path){
+    return config_lock_acquire(path);
+}
+
+void cfg_unlock(int fd){
+    config_lock_release(fd);
+}
 
 void cfg_defaults(cfg_t *c) {
     if(!c) return;

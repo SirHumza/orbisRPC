@@ -64,6 +64,9 @@ typedef struct {
 } cfg_t;
 extern cfg_t g_cfg;
 int cfg_load(const char *path, cfg_t *c);
+/* Cross-process transaction lock for read/modify/save; release with cfg_unlock. */
+int cfg_lock(const char *path);
+void cfg_unlock(int fd);
 /* Atomic save (tmp + fsync + rename). 0 saved, -1 failed (caller must
  * surface, not assume). */
 int cfg_save(const char *path, const cfg_t *c);

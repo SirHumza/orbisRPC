@@ -100,6 +100,13 @@ Base commit: `e5dd5b8` on branch `1.1`.
   the PKG matched both `build-sdk/orbisrpc_sdk.elf` and the staged payload.
 - Rebuilt the Setup PKG after installer numeric-parser and boolean-setting
   changes; PKG digests and the strict host consumer suite passed.
+- Config writes now use a persistent sidecar advisory lock shared by the daemon
+  and installer. The daemon holds it across reload/modify/save, while the
+  installer acquires it before reading the current JSON and keeps it through
+  atomic replacement. Installation also locks config capture/replacement/carry-over,
+  and aborts that stage if the lock cannot be acquired. A separate-process regression covers a rotated token
+  arriving while the installer saves. This protects app-managed writers; direct
+  external FTP edits do not participate in the lock.
 - `git diff --check`: passed.
 - No console test was run. Build success does not prove the PKG launches or that
   Discord accepts the account token on PS4.

@@ -121,7 +121,7 @@ $(OBJDIR)/auth_rotation: test_auth_rotation.c ../orbisrpc/auth_rotation.h | $(OB
 $(ASAN_OBJDIR)/auth_rotation: test_auth_rotation.c ../orbisrpc/auth_rotation.h | $(ASAN_OBJDIR)
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) -o $@ $<
 SETTINGS_TEST_FLAGS := -std=c++11 -Wall -Wextra -Werror -I../installer -DSETTINGS_PATH='"./installer-safety-fixture/config.json"' -DSETTINGS_DIR='"./installer-safety-fixture"'
-$(OBJDIR)/installer_safety: test_installer_safety.cpp ../installer/settings.cpp ../installer/settings.h $(OBJDIR)/inst_jsonlite.o | $(OBJDIR)
+$(OBJDIR)/installer_safety: test_installer_safety.cpp ../installer/settings.cpp ../installer/settings.h ../orbisrpc/config_lock.h $(OBJDIR)/inst_jsonlite.o | $(OBJDIR)
 	$(CXX) $(SETTINGS_TEST_FLAGS) -o $@ test_installer_safety.cpp ../installer/settings.cpp $(OBJDIR)/inst_jsonlite.o
-$(ASAN_OBJDIR)/installer_safety: test_installer_safety.cpp ../installer/settings.cpp ../installer/settings.h $(ASAN_OBJDIR)/inst_jsonlite.o | $(ASAN_OBJDIR)
+$(ASAN_OBJDIR)/installer_safety: test_installer_safety.cpp ../installer/settings.cpp ../installer/settings.h ../orbisrpc/config_lock.h $(ASAN_OBJDIR)/inst_jsonlite.o | $(ASAN_OBJDIR)
 	$(CXX) $(SETTINGS_TEST_FLAGS) $(ASAN_FLAGS) -o $@ test_installer_safety.cpp ../installer/settings.cpp $(ASAN_OBJDIR)/inst_jsonlite.o

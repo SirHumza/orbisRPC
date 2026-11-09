@@ -45,6 +45,8 @@
   either reader; installer saves encode booleans, never numeric substitutes.
 - [x] Verify unrelated settings saves preserve nested unknown config data and
   the current on-disk token rather than stale values loaded into the UI.
+- [x] Serialize daemon and installer config transactions with a shared sidecar
+  lock; a cross-process regression verifies a concurrent token rotation survives.
 - [x] Offline tests cover READY-only promotion, auth/QoS extraction, nested
   decoys, and IDENTIFY QoS presence/absence. Full exact wire acceptance remains
   unverified against Discord.

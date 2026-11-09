@@ -11,6 +11,7 @@
 
 #include "jsonlite.h"
 #include "paths.h"
+#include "../orbisrpc/config_lock.h"
 
 // The daemon's own config, not a copy. This was deliberately a scratch path --
 // /data/orbispkg_test/settings.json -- while the page was a mockup, which is
@@ -24,6 +25,20 @@
 #define SETTINGS_MAX  (16u * 1024u)
 
 namespace {
+
+class ConfigLock
+{
+public:
+	explicit ConfigLock(const char *path) : fd_(config_lock_acquire(path)) {}
+	~ConfigLock() { config_lock_release(fd_); }
+
+	bool locked() const { return fd_ >= 0; }
+
+private:
+	int fd_;
+	ConfigLock(const ConfigLock &);
+	ConfigLock &operator=(const ConfigLock &);
+};
 
 void RemoveDuplicateKey(jl_val_t *object, const char *key)
 {
@@ -310,6 +325,9 @@ void Settings::Load()
 int Settings::Save()
 {
 	if (EnsureDir(SETTINGS_DIR) != 0)
+		return -1;
+	ConfigLock lock(SETTINGS_PATH);
+	if (!lock.locked())
 		return -1;
 
 	// Read-modify-write, not write.

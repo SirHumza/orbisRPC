@@ -207,7 +207,8 @@ static void persist_qos_token(void){
         return;
     }
     cfg_t disk = g_cfg;
-    if(cfg_load(CFG_PATH, &disk) != 0){
+    int config_lock = cfg_lock(CFG_PATH);
+    if(config_lock < 0 || cfg_load(CFG_PATH, &disk) != 0){
         remember_pending_qos(qos, s_dc.token);
         strncpy(g_cfg.qos_token, qos, sizeof g_cfg.qos_token - 1);
         g_cfg.qos_token[sizeof g_cfg.qos_token - 1] = 0;
@@ -234,6 +235,7 @@ static void persist_qos_token(void){
             log_msg("WARN: QoS token active in memory; config save will retry");
         }
     }
+    cfg_unlock(config_lock);
     memset(qos, 0, sizeof qos);
 }
 
@@ -251,7 +253,8 @@ static void persist_rotated_token(void){
     }
 
     cfg_t disk = g_cfg;
-    if(cfg_load(CFG_PATH, &disk) != 0){
+    int config_lock = cfg_lock(CFG_PATH);
+    if(config_lock < 0 || cfg_load(CFG_PATH, &disk) != 0){
         remember_pending_token(rotated, s_dc.token);
         strncpy(g_cfg.token, rotated, sizeof g_cfg.token - 1);
         g_cfg.token[sizeof g_cfg.token - 1] = 0;
@@ -290,6 +293,7 @@ static void persist_rotated_token(void){
             notify_throttled("token-save", "Discord token update could not be saved", 300);
         }
     }
+    cfg_unlock(config_lock);
     memset(rotated, 0, sizeof rotated);
 }
 
@@ -415,7 +419,9 @@ int daemon_run(void){
     int safe_mode = health_boot_note_crash();
     if(safe_mode)
         log_msg("WARN: repeated unclean boots; safe mode (updates off)");
-    if(cfg_load(CFG_PATH, &g_cfg) != 0){
+    cfg_defaults(&g_cfg);
+    int config_lock = cfg_lock(CFG_PATH);
+    if(config_lock >= 0 && cfg_load(CFG_PATH, &g_cfg) != 0){
         /* First boot: drop a template so FTP edit is the only step */
         FILE *probe = fopen(CFG_PATH, "rb");
         if(!probe){
@@ -427,7 +433,9 @@ int daemon_run(void){
         } else fclose(probe);
         log_msg("config load failed; running on defaults until valid config appears");
         notify_once_boot("cfgfail", "config.json unreadable - using defaults");
-    }
+    } else if(config_lock < 0)
+        log_msg("WARN: config lock unavailable; using defaults until reload");
+    cfg_unlock(config_lock);
     if(!g_cfg.enabled){ log_msg("disabled in config; exiting"); health_mark_clean(); log_close(); return 0; }
     log_set_debug(g_cfg.debug);
     if(g_cfg.debug) log_dbg("debug logging on (config)");
@@ -516,7 +524,8 @@ int daemon_run(void){
          * On parse failure keep s_sess.last-good config instead of stale defaults. */
         {
             cfg_t next = g_cfg;
-            if(cfg_load(CFG_PATH, &next) == 0){
+            int config_lock = cfg_lock(CFG_PATH);
+            if(config_lock >= 0 && cfg_load(CFG_PATH, &next) == 0){
                 auth_rotation_action_t rotation_action =
                     auth_rotation_disk_action(&s_token_rotation, next.token);
                 if(rotation_action == AUTH_ROTATION_APPLY){
@@ -561,6 +570,7 @@ int daemon_run(void){
                 log_set_debug(g_cfg.debug);
             }
             else log_msg("config reload failed; keeping last-good config");
+            cfg_unlock(config_lock);
         }
         if(!have_token(&g_cfg)){
             log_msg("no token in config; waiting %ds", backoff);

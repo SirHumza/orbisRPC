@@ -436,6 +436,7 @@ $(SOURCEDIR)/eboot.bin: $(INTDIR) $(OBJS)
 # every header rebuilds the lot whenever any one changes, which at this size costs
 # a couple of seconds and is cheaper than debugging a stale object.
 HEADERS    := $(wildcard $(SOURCEDIR)/*.h)
+$(INTDIR)/settings.o $(INTDIR)/installer.o: orbisrpc/config_lock.h
 
 # Makefile is a prerequisite too, for the same reason. EXTRA_DEFS feeds
 # -DSETUP_VERSION into every compile, so bumping VERSION
