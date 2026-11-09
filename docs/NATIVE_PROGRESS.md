@@ -69,6 +69,10 @@ Base commit: `e5dd5b8` on branch `1.1`.
 - Installer builds now declare C++11 and the POSIX API surface explicitly;
   page-size reporting uses `sysconf(_SC_PAGESIZE)` instead of the legacy BSD
   `getpagesize()` declaration hidden by strict feature macros.
+- Installer JSON numbers now follow JSON grammar, reject conversion overflow
+  and non-finite values, and fail integer reads for fractional or out-of-range
+  values. Daemon config rejection remains transactional for invalid roots and
+  numeric fields.
 - Added offline gateway, token-lineage, and installer settings regression
   programs to the host test Makefile. The test target now runs the installer
   config test every time, even when its binary is already built.
@@ -92,6 +96,8 @@ Base commit: `e5dd5b8` on branch `1.1`.
 - Current build verification rebuilt the daemon and Setup PKG; `pkg_validate`
   passed, extracted package assets were present, and the daemon SHA-256 inside
   the PKG matched both `build-sdk/orbisrpc_sdk.elf` and the staged payload.
+- Rebuilt the Setup PKG after installer numeric-parser changes; PKG digests and
+  the strict host consumer suite passed.
 - `git diff --check`: passed.
 - No console test was run. Build success does not prove the PKG launches or that
   Discord accepts the account token on PS4.

@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <math.h>
 
 #define JL_MAX_DEPTH 64
 
@@ -416,29 +418,32 @@ static jl_val_t *parse_number(jl_parser *ps)
 	char scratch[64];
 	size_t n;
 	int is_int = 1;
+	char *end;
+	long integer;
+	double number;
 	jl_val_t *v;
 
-	if (ps->p < ps->end && (*ps->p == '-' || *ps->p == '+'))
+	if (ps->p < ps->end && *ps->p == '-')
 		++ps->p;
-
-	while (ps->p < ps->end)
-	{
-		const char c = *ps->p;
-
-		if (c >= '0' && c <= '9') { ++ps->p; continue; }
-		if (c == '.')             { is_int = 0; ++ps->p; continue; }
-		if (c == 'e' || c == 'E') { is_int = 0; ++ps->p; continue; }
-		if (c == '-' || c == '+')
-		{
-			/* Only valid straight after an exponent marker. */
-			if (ps->p > start && (ps->p[-1] == 'e' || ps->p[-1] == 'E'))
-			{
-				++ps->p;
-				continue;
-			}
-			break;
-		}
-		break;
+	if(ps->p >= ps->end) return NULL;
+	if(*ps->p == '0'){
+		++ps->p;
+		if(ps->p < ps->end && *ps->p >= '0' && *ps->p <= '9') return NULL;
+	}else if(*ps->p >= '1' && *ps->p <= '9'){
+		do { ++ps->p; } while(ps->p < ps->end && *ps->p >= '0' && *ps->p <= '9');
+	}else return NULL;
+	if(ps->p < ps->end && *ps->p == '.'){
+		is_int = 0;
+		++ps->p;
+		if(ps->p >= ps->end || *ps->p < '0' || *ps->p > '9') return NULL;
+		do { ++ps->p; } while(ps->p < ps->end && *ps->p >= '0' && *ps->p <= '9');
+	}
+	if(ps->p < ps->end && (*ps->p == 'e' || *ps->p == 'E')){
+		is_int = 0;
+		++ps->p;
+		if(ps->p < ps->end && (*ps->p == '+' || *ps->p == '-')) ++ps->p;
+		if(ps->p >= ps->end || *ps->p < '0' || *ps->p > '9') return NULL;
+		do { ++ps->p; } while(ps->p < ps->end && *ps->p >= '0' && *ps->p <= '9');
 	}
 
 	n = (size_t)(ps->p - start);
@@ -448,20 +453,27 @@ static jl_val_t *parse_number(jl_parser *ps)
 	memcpy(scratch, start, n);
 	scratch[n] = '\0';
 
-	v = alloc_value(JL_NUMBER);
-	if (!v)
-		return NULL;
-
 	if (is_int)
 	{
-		v->num_is_int = 1;
-		v->inum = strtol(scratch, NULL, 10);
-		v->num = (double)v->inum;
+		errno = 0;
+		integer = strtol(scratch, &end, 10);
+		if(errno == ERANGE || end != scratch + n) return NULL;
 	}
 	else
 	{
+		errno = 0;
+		number = strtod(scratch, &end);
+		if(errno == ERANGE || end != scratch + n || !isfinite(number)) return NULL;
+	}
+	v = alloc_value(JL_NUMBER);
+	if (!v) return NULL;
+	if(is_int){
+		v->num_is_int = 1;
+		v->inum = integer;
+		v->num = (double)integer;
+	}else{
 		v->num_is_int = 0;
-		v->num = strtod(scratch, NULL);
+		v->num = number;
 	}
 
 	return v;

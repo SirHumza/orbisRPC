@@ -39,6 +39,8 @@
   and confirm the extracted embedded daemon matches the build SHA-256.
 - [x] Make installer C++11 and POSIX requirements explicit so the macOS build
   compiles the complete Setup app and package.
+- [x] Reject wrong config roots, malformed/non-finite JSON numbers, integer
+  overflow, out-of-range numeric conversions, and fractional integer settings.
 - [x] Offline tests cover READY-only promotion, auth/QoS extraction, nested
   decoys, and IDENTIFY QoS presence/absence. Full exact wire acceptance remains
   unverified against Discord.

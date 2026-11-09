@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <limits.h>
+#include <math.h>
 #include <unistd.h>
 #include <sys/stat.h>
 
@@ -168,7 +170,17 @@ int icfg_get_int(const char *path, const char *key, long *out){
     if(!r || !key){ if(r) jl_free(r); return -1; }
     v = jl_obj_get(r, key);
     if(v && v->type == JL_NUMBER){
-        *out = v->num_is_int ? (long)v->inum : (long)v->num;
+        if(v->num_is_int){
+            *out = (long)v->inum;
+        }else{
+            long double num = (long double)v->num;
+            if(!isfinite(v->num) || num < (long double)LONG_MIN ||
+               num > (long double)LONG_MAX || num != truncl(num)){
+                jl_free(r);
+                return -1;
+            }
+            *out = (long)v->num;
+        }
         jl_free(r);
         return 0;
     }
