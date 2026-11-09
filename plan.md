@@ -6,7 +6,7 @@
 
 **Stack:** ps4-payload-sdk built from pinned git source, OpenOrbis installer, vendored mbedTLS and SQLite, existing host tests and GitHub Actions.
 
-**Specifications:** All 19 defects in `/Users/mac/Desktop/PS4/orbisRPC-1.1-fixes.pdf`, the user's daemon/PKG/QR/auto-update requests, and `AGENTS.md`.
+**Specifications:** The portable PDF requirement matrix below, the user’s daemon/PKG/QR/auto-update requests, and `AGENTS.md`. The original PDF is a local supporting source; cloud execution must not depend on accessing the laptop.
 
 Implementation is paused for plan review. Existing edits are candidates, not proof of completion. Execute tasks in order; keep the full scope open until its evidence exists.
 
@@ -361,7 +361,7 @@ The installer diagnostics dashboard already listed means a native PKG screen, no
 | R5: richer everyday use | Profiles, templates, history, native setup improvements, localization | Behavioral/UI tests and resource budgets |
 | R6: sustained engineering | Soak automation, performance gates, dependency maintenance, release evidence | Repeatable CI and documented hardware results |
 
-Previously written updater code has not passed the full acceptance gate. Its staging notification, rollback-generation handling, startup blocking, and ELF validation require review before enablement.
+Do not assume an auto-updater exists on this branch. Earlier experimental updater edits were discarded with the old workspace. Inspect the actual branch before implementing update transport, signature verification, staging, and recovery.
 
 ## Advanced feature tracks and feasibility gates
 
@@ -483,10 +483,203 @@ Acceptance: performance changes include before/after measurements; maintenance c
 
 ## Decision log
 
-- Planning remains the only authorized action for this request; earlier implementation edits are preserved.
+- Planning remains the only authorized action for this request. The 1.1 branch contains committed gateway work and this plan; discarded workspace experiments are not deliverables.
 - The master backlog remains open across releases; each shippable increment has a finite evidence gate.
 - Excluded web dashboard, join/spectate buttons, and PS5 Remote Play presence are not in scope.
 - Multiple account profiles require deliberate switching; rejected credentials must not trigger token cycling.
 - Firmware support is established by evidence, not a numerical range in marketing copy.
 - Delta updates, telemetry, and automatic offset discovery are research tracks until justified and validated.
 - No feature is counted as delivered because it has a checkbox, proposal, or empty stub.
+
+
+## Portable requirements matrix: all 19 PDF defects
+
+This matrix preserves the actionable requirements from the PDF for cloud workers. Reported symptoms are evidence to investigate, not proof of the proposed cause.
+
+| ID | Reported symptom | Required result and acceptance evidence |
+|---|---|---|
+| D-01 | Timer survives exits/reboots incorrectly | Define session boundaries; invalidate stale/future continuation; offer reset without reinstall; test exit/relaunch/reboot/switch |
+| D-02 | Presence disappears after hours | Missing ACK/silent-peer recovery reconnects automatically; log disconnect cause/code; sustained console test |
+| D-03 | Rest mode stops updates and includes sleep time | Re-establish network/presence and apply documented timer policy after wake; repeated console suspend cycles |
+| D-04 | Stale lock prevents next launch | Dead ownership cannot permanently block boot; concurrent live launches remain excluded; stale/reused PID tests |
+| D-05 | No stop mechanism | Bounded graceful stop during each daemon state; persist session and release resources; document recovery |
+| D-06 | Installer CE-34878-0/no logs | Reproduce affected firmware, diagnose early failures, produce persistent logs, verify corrected PKG on device |
+| D-07 | Experimental Discord-client PKG crashes | Exclude unvalidated client build from stable distribution; label any experimental artifact accurately |
+| D-08 | Raw IDs/no artwork when remote metadata fails | Local metadata first, persistent cache, bounded remote fallback, generic art; offline cold-start test |
+| D-09 | ELYS00001 unknown | Add authoritative mapping and generic fallback; regression fixture |
+| D-10 | nanoDNS breaks GTA Online | Identify necessary exceptions from evidence; reversible minimal edits; GTA Online console test |
+| D-11 | Presence lingers after shutdown | Explain server-observed expiry; clear gracefully where possible; expose only locally controllable timing, never promise control of Discord expiry |
+| D-12 | Previously usable token rejected without reason | Specific local validation errors, distinct gateway rejection/transport states, recover on correction; no credential disclosure |
+| D-13 | Installer token field ignores input | Working IME/controller flow with cancel/save/validation; true QR login only after feasibility proof |
+| D-14 | Quoting/input formatting confusion | Normalize pasted token at entry; explain JSON syntax; never accept a malformed whole document silently |
+| D-15 | DNS loopback without nanoDNS causes endless retries | Diagnose observed resolver failure and provide accurate nanoDNS hint; bounded retries and clear state |
+| D-16 | Users cannot retrieve logs | Always attempt early capped/rotated logging; report writable log path and one-step retrieval guidance |
+| D-17 | Loading path confusion | Supported loader instructions and observable startup diagnostics; do not falsely require a path for an injected payload |
+| D-18 | GoldHEN loading differences | Detect capabilities where possible, publish tested combinations, explain unsupported loading routes without inventing a minimum version |
+| D-19 | Expiring/untrusted download surface | Authorized versioned release with checksums/signatures and build identity; retain stable provenance |
+
+## Executor contract: discover missing necessities and act on them
+
+The engineer executing this plan is responsible for finding omitted requirements while investigating. A checklist is a starting inventory, not a limit on competent engineering.
+
+- [ ] When implementation reveals a necessary option, recovery path, validation rule, migration, diagnostic, or test, add a concrete task and implement it in the same increment when tightly related.
+- [ ] Record why it is needed, who benefits, its default, compatibility impact, resource/privacy cost, and how it is verified.
+- [ ] Prefer a clear default over adding a switch for every internal detail. Expose controls when users have a real choice: privacy, network sources, sharing, notifications, updates, retention, or appearance.
+- [ ] Fix closely related confirmed bugs rather than leaving a known broken dependency behind. Defer unrelated work with a reason and priority.
+- [ ] Research uncertain platform/API behavior before building a feature around it; record supported capabilities and failure behavior.
+- [ ] Never invent proof, silently narrow a requirement, mark a suggestion implemented, or add empty production stubs to satisfy a checkbox.
+
+### User-control completeness audit
+
+For every user-visible feature, explicitly answer these questions in its task record:
+
+1. Should the user be able to enable/disable it? What is the safe, useful default?
+2. Is it global, per profile, per title, or per session? Which scopes are actually needed?
+3. Where is it configured: PKG UI, config JSON, CLI, or a temporary runtime control?
+4. Does a change apply immediately, after reconnect, or after restart? Is that shown accurately?
+5. What happens to already published presence, open connections, cached data, and pending jobs when disabled?
+6. Does the setting survive upgrade and round-trip through the installer without dropping unknown fields?
+7. What are invalid-value, missing-key, older-schema, and conflicting-override behaviors?
+8. Does disabling it stop the relevant requests, writes, notifications, or sharing in reality?
+9. Is the effective value visible in diagnostics with its source and any override explained?
+10. Are docs, shipped defaults, daemon parsing, installer persistence, and behavioral tests consistent?
+
+Required audit candidates include auto-update, each external metadata/art source, presence categories, elapsed timers, firmware display, privacy exclusions, notification level, debug logging, history retention, cache limits, profile selection, and any future optional collection/export feature.
+
+### Configuration design decisions
+
+- Keep old valid config files working; migrate only when necessary and preserve a recoverable original.
+- Define one precedence order after auditing current behavior; document defaults → file → explicit runtime overrides, with nested/legacy key conflicts resolved consistently.
+- Use typed validation and bounds; avoid silent truncation, arbitrary sleeps, unsupported fields, and hidden settings that the UI overwrites.
+- Apply reload as a validated snapshot; failed edits keep the last-good state and produce an actionable sanitized error.
+- Add no credential-bearing command-line option or diagnostic dump.
+- Every enable/disable control needs a behavioral test that observes its effect, including transition from enabled to disabled.
+
+## Implementation task packet template
+
+Before coding each increment, fill this short packet in the progress record:
+
+- Requirement IDs and observed failure/user benefit.
+- Current source evidence, exact files and interfaces to change, and dependencies.
+- Intended behavior, defaults, limits, persistence, cancellation, and recovery.
+- Regression scenario and assertions; hardware evidence needed separately.
+- Commands/gates to run and their expected outcomes.
+- Documentation/config/UI changes required together.
+- Result: commit, commands/exit status, console evidence, unresolved limitations, next priority.
+
+The first execution packet must audit commit `3e692a0` and establish actual branch state. A prior local host/strict-scan pass exists in conversation history, but ASan was interrupted while compiling SQLite; neither is a substitute for fresh cloud results on the selected commit. Then prioritize reproduced account/data safety and runtime failures before feature expansion.
+
+## Plan quality gate
+
+- [ ] Every PDF ID appears in the matrix and has a concrete owning task.
+- [ ] Every mandatory feature has defaults, user controls where useful, failure behavior, and acceptance evidence.
+- [ ] Every optional research track has a feasibility gate and can be rejected with an explicit reason.
+- [ ] No task depends on an inaccessible laptop path, unstaged file, discarded experiment, or undocumented secret.
+- [ ] Hardware claims are separated from host simulation, source inspection, and successful builds.
+- [ ] Exclusions remain enforced across new suggestions.
+- [ ] The next executable increment is specific enough for another engineer to start without reconstructing the conversation.
+
+
+## Accepted user features: controller-friendly customization
+
+These 13 features are requested scope, not speculative suggestions. Reuse existing presets/privacy/template/history code where it is correct; each feature needs an actual PKG control, documented config representation, tested behavior, and migration compatibility.
+
+| Feature | Required experience and acceptance |
+|---|---|
+| Per-game custom presence | Edit display name, message, and supported cover override by title ID; preview, reset, and persist; stale edits cannot overwrite other settings |
+| Quick privacy toggle | Pause sharing while detection continues; clear prior presence, suppress queued publications, show paused state, and resume current title intentionally |
+| Favourite presets | Built-in Minimal/Detailed plus named user styles; save/duplicate/delete/preview; exclude credentials from style exports |
+| Custom idle message | Set home/idle text independently from game text; apply visibility and privacy policies consistently |
+| Playtime page | Today, most-played titles, and recent sessions from bounded local history; disclose suspended/idle-time policy and allow history deletion |
+| Session goals | Optional duration goal with one notification per threshold/session; no duplicate alerts after reconnect; disable/cancel from PKG |
+| Game launch messages | Per-title saved text such as “Going for platinum”; publish only user-provided text without inferring achievements or game progress |
+| Custom artwork picker | Browse/import supported local image files with size/format validation; explain that a console file path is not a Discord image URL. Resolve a supported delivery mechanism before promising that imported artwork appears remotely; retain default covers on failure |
+| Presence preview | Show actual computed fields/assets/timer mode before saving; disclose approximate rendering and do not claim the server accepted a preview |
+| Temporary status | Expire after a chosen duration or session end; define precedence over saved messages, clear on cancellation, and avoid resurrection after reboot |
+| Hide selected games | Select titles in the PKG; exclude their identity/art/timer from Discord; separate this from explicit local history deletion preferences |
+| Timer choices | Current game session, since PS4 startup, since daemon launch, or hidden; manual reset where meaningful, with clear labels and tests |
+| Quiet mode | Suppress routine connection/success notifications; keep failures discoverable in native status/logs and separately configure actionable failure alerts |
+
+### Timer contract: “do not reset until the PS4 restarts”
+
+- [ ] Add an optional `console_session` timer mode: retain one PS4-session anchor across title switches, game closes, reconnects, and daemon reinjection within the same boot.
+- [ ] Keep `game_session` as the backward-compatible default; offer `daemon_session` and `hidden` separately with accurate descriptions.
+- [ ] Research a reliable boot identity/start-time source on supported firmware. Persisted wall time alone cannot distinguish reboot from daemon restart.
+- [ ] If actual boot start cannot be determined, label the fallback “Since OrbisRPC started tracking this PS4 session”; never fabricate a boot timestamp.
+- [ ] Reset console-session anchor on verified full reboot; never reuse an anchor from a previous boot or a future/corrupt timestamp.
+- [ ] Offer an explicit rest-mode policy: include suspended time or exclude suspended time. Default to excluding it for activity duration; explain the choice in the UI.
+- [ ] Separate display-timer anchors from per-game history accounting: a shared console timer must not count previous games toward the current game's statistics.
+- [ ] Define manual reset as resetting the selected display anchor, with a confirmation that explains it no longer represents actual startup time; alternatively switch to a clearly labeled custom session anchor.
+- [ ] Apply mode changes without losing history or resetting unrelated anchors; reconnects must preserve the selected anchor.
+- [ ] Test A→B→home→A, close/relaunch, reconnect, reinjection, full reboot, rest-mode cycles, RTC correction, invalid persistence, privacy pause, and mode switching.
+
+## GitHub issue audit: open and closed
+
+Snapshot: 2026-11-09. Enumerated all issue pages with `state=all`, excluding pull requests: **40 issues**. Retrieved paginated issue comments, including the title-request discussion. Linked attachments, external research documents, Discord conversations, videos, and hardware logs need their own inspection before their contents support a fix claim. Refresh this inventory when execution resumes.
+
+Closed state is not proof of repair. Distinguish closed-as-fixed, closed-as-documented, redirected support, triage cleanup, duplicates, and unreproduced reports. Match claimed fixes to current source, tests, release artifacts, and console evidence.
+
+| Issue | Snapshot state | Subject |
+|---|---|---|
+| [#1](https://github.com/SirHumza/orbisRPC/issues/1) | closed | Crashes on launch |
+| [#2](https://github.com/SirHumza/orbisRPC/issues/2) | closed | Daemon crashes on launch on all firmwares (9.00, 12.50, 13.52) |
+| [#3](https://github.com/SirHumza/orbisRPC/issues/3) | closed | "Text input failed. Skipping." — token dialog fails, can't enter Discord token |
+| [#4](https://github.com/SirHumza/orbisRPC/issues/4) | closed | Payload Guest crashes when launching orbisrpc on 12.50+ — use GoldHEN Settings instead |
+| [#5](https://github.com/SirHumza/orbisRPC/issues/5) | closed | Installer auto-runs in a loop after completing — should hand off to daemon |
+| [#6](https://github.com/SirHumza/orbisRPC/issues/6) | closed | README: add Discord token security warning + manual token entry instructions |
+| [#8](https://github.com/SirHumza/orbisRPC/issues/8) | closed | Packaging mismatch vs Apollo: CATEGORY=gd, ATTRIBUTE=0, missing --authinfo — likely causes launch crash |
+| [#9](https://github.com/SirHumza/orbisRPC/issues/9) | closed | Updater validates only ELF magic bytes (64 bytes) — malicious binary can pass health checks |
+| [#10](https://github.com/SirHumza/orbisRPC/issues/10) | closed | Update mechanism has no TLS cert pinning and accepts relative redirects — MITM surface |
+| [#11](https://github.com/SirHumza/orbisRPC/issues/11) | closed | docs/injecting.md references broken elfldr/payloader that segfaults |
+| [#12](https://github.com/SirHumza/orbisRPC/issues/12) | closed | docs/TROUBLESHOOTING.md and README use inconsistent GoldHEN menu names |
+| [#13](https://github.com/SirHumza/orbisRPC/issues/13) | closed | kinfo_proc layout assumptions (offset 447, recsz>=479) are fragile across firmware versions |
+| [#14](https://github.com/SirHumza/orbisRPC/issues/14) | closed | build.sh standalone daemon missing -DORBISRPC_SDK_PAYLOAD, uses wrong detection path |
+| [#15](https://github.com/SirHumza/orbisRPC/issues/15) | closed | Firmware-support bug: payload build skips ShellCoreUtil, relies only on fragile sysctl scanning |
+| [#16](https://github.com/SirHumza/orbisRPC/issues/16) | closed | No runtime capability probing — daemon assumes one fixed system-module set on every firmware from 9.00 to 13.52 |
+| [#17](https://github.com/SirHumza/orbisRPC/issues/17) | closed | No watchdog — a single daemon crash ends presence silently with no auto-restart or user feedback |
+| [#18](https://github.com/SirHumza/orbisRPC/issues/18) | closed | Release process — fixes on main never reach the published Setup PKG |
+| [#19](https://github.com/SirHumza/orbisRPC/issues/19) | closed | Two divergent build paths with no parity check (scripts/build.sh vs scripts/build_sdk.sh) |
+| [#20](https://github.com/SirHumza/orbisRPC/issues/20) | closed | Discord token stored plaintext in /data/orbisRPC/config.json — readable via FTP from any device |
+| [#21](https://github.com/SirHumza/orbisRPC/issues/21) | closed | Presence runs but never appears in-game — game detection false-negative with no diagnostics |
+| [#22](https://github.com/SirHumza/orbisRPC/issues/22) | closed | No support path — crashing users cannot share log.txt, klog, or firmware info |
+| [#23](https://github.com/SirHumza/orbisRPC/issues/23) | closed | Any transient network or sysctl error aborts the daemon — no retry or backoff |
+| [#24](https://github.com/SirHumza/orbisRPC/issues/24) | closed | Focus detection via klog AppFocusChanged events (community proposal) |
+| [#25](https://github.com/SirHumza/orbisRPC/issues/25) | closed | 13.52 |
+| [#26](https://github.com/SirHumza/orbisRPC/issues/26) | closed | CE-34878-0 |
+| [#27](https://github.com/SirHumza/orbisRPC/issues/27) | closed | 13.52 (CE-34878-0) |
+| [#37](https://github.com/SirHumza/orbisRPC/issues/37) | open | 🎮 Missing game/homebrew title? Post it here (no PR needed) |
+| [#39](https://github.com/SirHumza/orbisRPC/issues/39) | closed | Discord rich presence status not displaying |
+| [#40](https://github.com/SirHumza/orbisRPC/issues/40) | closed | NanoDNS setup/load order confusion |
+| [#41](https://github.com/SirHumza/orbisRPC/issues/41) | closed | DNS/clock or internal-check failure suspicion |
+| [#42](https://github.com/SirHumza/orbisRPC/issues/42) | closed | Discord account security emails (ToS concern) |
+| [#43](https://github.com/SirHumza/orbisRPC/issues/43) | closed | Payload beta stability concern blocking auto-run |
+| [#44](https://github.com/SirHumza/orbisRPC/issues/44) | closed | Settings header broken |
+| [#45](https://github.com/SirHumza/orbisRPC/issues/45) | closed | Crash on launch (FW 13.52, klog attached) |
+| [#46](https://github.com/SirHumza/orbisRPC/issues/46) | closed | Error on 13.02 (new-version implementation pending) |
+| [#49](https://github.com/SirHumza/orbisRPC/issues/49) | open | Bug |
+| [#53](https://github.com/SirHumza/orbisRPC/issues/53) | closed | Super Mario wonders |
+| [#54](https://github.com/SirHumza/orbisRPC/issues/54) | closed | Skate 3 \| XeMoisties |
+| [#55](https://github.com/SirHumza/orbisRPC/issues/55) | open | Discord logs me out on a device I took the token from after a while |
+| [#56](https://github.com/SirHumza/orbisRPC/issues/56) | open | Investigations... |
+
+### Findings that must affect execution
+
+- [ ] **#1/#2/#4/#25–27/#45/#46:** preserve device-specific launch/crash regressions, including 9.00, 11.00, 13.02, 13.04, and 13.52 reports. Support redirection or cleanup closures do not establish a console fix.
+- [ ] **#3/#6:** test IME input and manual recovery; token safety copy must accurately describe every network recipient and storage limit.
+- [ ] **#5:** prove installer and daemon identities/paths cannot be confused in autorun or handoff; do not introduce an installer relaunch loop.
+- [ ] **#8:** verify packaging field semantics from authoritative sources and actual builds; do not copy another app's authority/flags blindly.
+- [ ] **#9:** validate full executable bounds and reject malformed/overflowed manifest asset lists; a magic-byte check alone is insufficient.
+- [ ] **#10:** correct the threat model: an intercepted connection does not forge a valid signature without the signing key. Verify independent signing, TLS hostname checking, and redirect policy; evaluate pinning with an operational rotation plan rather than assuming it is required.
+- [ ] **#11/#12:** old loader instructions conflict with current contributor constraints. Follow verified current loading routes and preserve the explicit prohibition on recommending Payload Guest.
+- [ ] **#13–16/#19/#21/#23/#24:** validate detection APIs, build-context parity, runtime capability fallback, transient-error recovery, and focus transitions. Klog focus parsing remains a measured research option, not an assumed replacement.
+- [ ] **#17:** distinguish an internal retry loop from a watchdog capable of restarting a dead process; require console proof for either claim.
+- [ ] **#18:** build published artifacts from their exact tag; verify the PKG embeds the same payload/config represented by release notes.
+- [ ] **#20/#22:** private file permissions are not a guarantee against privileged anonymous FTP; document limits and provide secret-free support exports.
+- [ ] **#37/#53/#54:** reconcile every submitted title, including submissions without art. A missing cover must not prevent adding a verified display name. Track later corrections such as CUSA52463 → Deltarune; never guess names from unknown-title auto-reports.
+- [ ] **#37:** prefer durable art sources over expiring attachment URLs; preserve provenance without copying reporter account identities into shipped metadata.
+- [ ] **#39–43:** reproduce connected-but-invisible presence separately from DNS failure, clock failure, and account challenges. Documentation closures do not replace runtime diagnosis; stable startup guidance must reflect proven loader order.
+- [ ] **#44:** add a native Settings header/layout/navigation regression check; cleanup closure contains no proof of a repaired UI.
+- [ ] **#49:** add detection fixtures and console checks for the named no-trophy-directory apps (Cyber TV, RetroArch, pFBN, EmuSuNi, Vue, Netflix, SMB/FTP/WebDAV clients, Remote PKG installer, Cheats Manager, ezRemote, Itemzflow, PS4PKGInstaller). Do not assume trophy directories exist; do not recommend Payload Guest as a loader because it appears in this app list.
+- [ ] **#55/#56:** reconcile contradictory token-refresh claims using protocol evidence and actual branch behavior. Issue #56 is static research with explicit open questions, not live proof that a fingerprint, capability value, native login, or rotation policy prevents security challenges. Validate legitimate credential lifecycle/recovery without promising account safety or implementing enforcement evasion.
+
+Each item gets an issue-to-task mapping, current source evidence, regression test, and console verification requirement where applicable. Record why any proposed fix is rejected or replaced; retain the original user symptom in the regression ledger.
