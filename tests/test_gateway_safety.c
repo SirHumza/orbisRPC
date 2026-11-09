@@ -25,6 +25,7 @@ static int scripted_fin;
 static const char *scripted_payload;
 static int connect_script;
 static int auth_step;
+static int connect_attempts;
 
 int64_t orbis_mono_s(void){ return fake_now; }
 void log_msg(const char *fmt, ...){ (void)fmt; }
@@ -36,6 +37,7 @@ int art_resolve_mp(const char *app_id, const char *token, const char *url,
 int detect_media_type(const char *title){ (void)title; return 0; }
 int ws_connect(ws_t *w, const char *host, int port, const char *resource, const char *key){
     (void)host; (void)port; (void)resource; (void)key;
+    connect_attempts++;
     if(connect_script){ w->connected = 1; return 0; }
     return -1;
 }
@@ -180,6 +182,20 @@ static void test_connect_resets_session_state_before_identify(void){
     assert(d.presence_sent_at[0] == 0 && d.pending_presence_len == 0);
     connect_script = 0;
     discord_clear_credentials(&d);
+}
+
+static void test_connect_rejects_credentials_that_do_not_fit(void){
+    discord_t d;
+    char long_token[513], long_qos[513];
+    memset(long_token, 'x', sizeof long_token - 1);
+    long_token[sizeof long_token - 1] = 0;
+    memset(long_qos, 'y', sizeof long_qos - 1);
+    long_qos[sizeof long_qos - 1] = 0;
+    connect_attempts = 0;
+    assert(discord_connect(&d, long_token, NULL) == -1);
+    assert(!d.token[0] && connect_attempts == 0);
+    assert(discord_connect(&d, "short", long_qos) == -1);
+    assert(!d.token[0] && !d.qos_token[0] && connect_attempts == 0);
 }
 
 static void test_unrelated_dispatch_does_not_ack_heartbeat(void){
@@ -445,6 +461,7 @@ int main(void){
     test_credentials_clear_after_session();
     test_first_heartbeat_ack_window();
     test_connect_resets_session_state_before_identify();
+    test_connect_rejects_credentials_that_do_not_fit();
     test_unrelated_dispatch_does_not_ack_heartbeat();
     test_empty_close_frame_disconnects_immediately();
     test_invalid_close_payload_disconnects();

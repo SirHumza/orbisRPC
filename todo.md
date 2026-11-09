@@ -24,6 +24,7 @@ This file tracks the next concrete work; completion is based on evidence in
 - [x] Verify fresh IDENTIFY resets prior Discord session and parser state.
 - [x] Reject escaped NULs at daemon and installer config parsing boundaries.
 - [x] Reject ambiguous duplicate token and QoS config keys; explicit token edits repair duplicates and invalidate old QoS state.
+- [x] Reject credentials that cannot fit destination buffers; never truncate token-loader output.
 - [x] Make malformed optional title overrides non-fatal again.
 - [x] Rewrite README claims to match the current source and installer flow.
 - [x] Fix macOS package tool selection and gate the setup app's font assets.

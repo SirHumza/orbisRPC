@@ -218,8 +218,14 @@ static int send_identify(discord_t *d, const char *token, const char *qos_token)
 }
 
 int discord_connect(discord_t *d, const char *token, const char *qos_token){
-    if(!d || !token || !token[0]) return -1;
+    if(!d) return -1;
     memset(d,0,sizeof(*d));
+    if(!token || !token[0]) return -1;
+    if(strlen(token) >= sizeof d->token ||
+       (qos_token && strlen(qos_token) >= sizeof d->qos_token)){
+        log_msg("discord: credential exceeds session capacity");
+        return -1;
+    }
     strncpy(d->token, token, sizeof d->token-1);
     d->token[sizeof d->token-1] = 0;
     if(qos_token && qos_token[0]){

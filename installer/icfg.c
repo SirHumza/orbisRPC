@@ -82,15 +82,20 @@ static int icfg_write(const char *path, jl_val_t *r){
 }
 
 int icfg_token_load(const char *path, char *out, size_t cap){
-    jl_val_t *r = icfg_read(path);
+    jl_val_t *r;
     const jl_val_t *v;
     if(!out || cap == 0) return -1;
     out[0] = 0;
+    r = icfg_read(path);
     if(!r) return -1;
     v = jl_obj_get(r, "token");
     if(v && v->type == JL_STRING && v->str){
-        strncpy(out, v->str, cap - 1);
-        out[cap - 1] = 0;
+        size_t n = strlen(v->str);
+        if(n >= cap){
+            jl_free(r);
+            return -1;
+        }
+        memcpy(out, v->str, n + 1);
     }
     jl_free(r);
     return 0;

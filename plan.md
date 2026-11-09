@@ -192,7 +192,7 @@ These are failure cases to investigate, not claims that each bug currently exist
 ### Authentication and configuration
 
 - [x] B01 Reject embedded NULs in credential/config strings rather than validating only a prefix. Daemon config loading rejects decoded NULs transactionally; the installer JSON parser rejects `\u0000` because its string values are NUL-terminated. Host tests cover both boundaries.
-- [ ] B02 Reject overlong credentials without silently truncating them into different credentials.
+- [x] B02 Reject credentials that exceed the daemon session buffers and have `icfg_token_load()` fail with an empty output when the caller buffer cannot hold the full token. The installer edit validator also caps accepted user-token length. Offline tests prove oversized auth/QoS never reach the socket and small token buffers never receive prefixes.
 - [ ] B03 Handle CRLF, UTF-8 BOM, pasted whitespace, and outer quote normalization consistently at input boundaries.
 - [x] B04 Reject duplicate `token` and `qos_token` config keys in daemon and installer readers. Ordinary installer saves fail closed on ambiguity; an explicit token edit can replace duplicate credentials with one token and clears stale/ambiguous QoS state. Host tests cover both.
 - [ ] B05 Reject wrong JSON root types and non-finite/out-of-range numbers before conversion to integers.

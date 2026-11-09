@@ -60,6 +60,9 @@ Base commit: `e5dd5b8` on branch `1.1`.
   installer config readers. Unrelated settings saves fail closed; explicitly
   editing the token repairs duplicate credential entries and clears stale QoS
   state whenever the account token changes.
+- `discord_connect()` now refuses token or QoS values too large for its session
+  buffers before opening a socket. The installer token loader checks capacity
+  and leaves output empty on failure instead of saving a truncated prefix.
 - Added offline gateway, token-lineage, and installer settings regression
   programs to the host test Makefile. The test target now runs the installer
   config test every time, even when its binary is already built.

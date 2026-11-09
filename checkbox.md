@@ -31,6 +31,8 @@
 - [x] Duplicate credential keys are rejected consistently by daemon and
   installer readers; explicit token repair collapses duplicates and clears
   stale QoS state after a changed account credential.
+- [x] Over-capacity daemon credentials are rejected before network setup;
+  installer token loading returns an error rather than a truncated prefix.
 - [x] Offline tests cover READY-only promotion, auth/QoS extraction, nested
   decoys, and IDENTIFY QoS presence/absence. Full exact wire acceptance remains
   unverified against Discord.

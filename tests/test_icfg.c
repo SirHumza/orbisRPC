@@ -45,6 +45,9 @@ static void test_installer_cfg(void) {
     long n = 0;
     assert(icfg_token_load(path, tok, sizeof tok) == 0);
     assert(!strcmp(tok, "MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz"));
+    char short_tok[8] = "stale";
+    assert(icfg_token_load(path, short_tok, sizeof short_tok) != 0);
+    assert(short_tok[0] == 0);
     assert(icfg_get_str(path, "presence_state", st, sizeof st) == 0);
     assert(!strcmp(st, "On PS4"));
     assert(icfg_get_int(path, "poll_interval_s", &n) == 0 && n == 12);
