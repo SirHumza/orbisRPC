@@ -38,7 +38,8 @@ static void test_installer_cfg(void) {
     FILE *f = fopen(path, "wb");
     assert(f);
     fputs("{\"token\":\"MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz\","
-          "\"presence_state\":\"On PS4\",\"poll_interval_s\":12}", f);
+          "\"qos_token\":\"server-signed-qos\",\"presence_state\":\"On PS4\","
+          "\"poll_interval_s\":12}", f);
     fclose(f);
     char tok[160], st[64];
     long n = 0;
@@ -50,24 +51,29 @@ static void test_installer_cfg(void) {
     /* missing file: loads fail soft */
     assert(icfg_get_str("/nonexistent/x.json", "k", st, sizeof st) != 0);
     /* carry round-trip across a wholesale overwrite */
-    const char *keys[] = { "token", "presence_state", "poll_interval_s", "nope_missing", NULL };
-    icfg_carry_t vals[4];
-    assert(icfg_carry_capture(path, keys, vals, 4) == 3);
+    const char *keys[] = { "token", "qos_token", "presence_state", "poll_interval_s", "nope_missing", NULL };
+    icfg_carry_t vals[5];
+    assert(icfg_carry_capture(path, keys, vals, 5) == 4);
     snprintf(path2, sizeof path2, "%s/config2.json", dir);
     FILE *g = fopen(path2, "wb");
     assert(g);
     fputs("{\"schema_version\":1}", g);
     fclose(g);
-    assert(icfg_carry_apply(path2, vals, 4) == 3);
+    assert(icfg_carry_apply(path2, vals, 5) == 4);
+    struct stat st_mode;
+    assert(stat(path2, &st_mode) == 0);
+    assert((st_mode.st_mode & 0777) == 0600);
     assert(icfg_token_load(path2, tok, sizeof tok) == 0);
     assert(!strcmp(tok, "MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz"));
+    assert(icfg_get_str(path2, "qos_token", st, sizeof st) == 0);
+    assert(!strcmp(st, "server-signed-qos"));
     assert(icfg_get_int(path2, "poll_interval_s", &n) == 0 && n == 12);
     /* corrupt source: capture yields all-absent, never garbage */
     FILE *h = fopen(path, "wb");
     assert(h);
     fputs("{not json", h);
     fclose(h);
-    assert(icfg_carry_capture(path, keys, vals, 4) == 0);
+    assert(icfg_carry_capture(path, keys, vals, 5) == 0);
 }
 
 int main(void){

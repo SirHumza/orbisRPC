@@ -5,6 +5,7 @@
 #include "../orbisrpc/updater.h"
 #include "../orbisrpc/art.h"
 #include "../orbisrpc/health.h"
+#include "../orbisrpc/clock.h"
 #include "../orbisrpc/cfg.h"
 #include "../orbisrpc/appdb.h"
 #include "../orbisrpc/discord.h"
@@ -35,10 +36,14 @@ int ws_connect(ws_t *w, const char *h, int p, const char *r, const char *k){
     (void)w; (void)h; (void)p; (void)r; (void)k; return -1;
 }
 int ws_send_text(ws_t *w, const char *m, size_t n){
-    (void)w; (void)m; (void)n; return -1;
+    extern int test_ws_send_ok, test_ws_send_calls;
+    (void)w; (void)m; test_ws_send_calls++;
+    return test_ws_send_ok ? (int)n : -1;
 }
 int ws_recv_frame(ws_t *w, char *b, size_t c, int *o, int *f){
-    (void)w; (void)b; (void)c; (void)o; (void)f; return -1;
+    extern int test_ws_recv_idle;
+    (void)w; (void)b; (void)c; (void)o; (void)f;
+    return test_ws_recv_idle ? 0 : -1;
 }
 int ws_pong(ws_t *w){ (void)w; return -1; }
 int ws_close(ws_t *w){ (void)w; return -1; }
@@ -61,6 +66,8 @@ int ws_close(ws_t *w){ (void)w; return -1; }
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+
+int test_ws_send_ok = 0, test_ws_send_calls = 0, test_ws_recv_idle = 0;
 
 /* Portable temp dir (mkdtemp needs feature macros this toolchain lacks). */
 static int make_tmpdir(char *out, size_t cap){
@@ -417,6 +424,46 @@ static void test_ws_env(void) {
         assert(!strcmp(e.t, "READY"));
     }
 
+    /* A replacement token can occur after the retained prefix of a large
+     * READY. The scanner must keep working after the early envelope report. */
+    {
+        ws_env_t e;
+        ws_env_init(&e);
+        const char *head = "{\"op\":0,\"s\":41,\"t\":\"READY\",\"d\":{\"padding\":\"";
+        const char *tail = "\",\"auth_token\":\"rotated-secret\"}}";
+        char padding[WS_ENV_WINDOW + 128];
+        memset(padding, 'x', sizeof padding);
+        ws_env_feed(&e, (const unsigned char*)head, strlen(head));
+        ws_env_feed(&e, (const unsigned char*)padding, sizeof padding);
+        assert(!e.have_auth_token);
+        ws_env_feed(&e, (const unsigned char*)tail, strlen(tail));
+        assert(e.have_auth_token);
+        assert(!strcmp(e.auth_token, "rotated-secret"));
+        assert(!e.have_qos_token);
+    }
+
+    /* QoS credentials are server-issued and must survive a chunk boundary. */
+    {
+        ws_env_t e;
+        ws_env_init(&e);
+        const char *a = "{\"op\":0,\"t\":\"READY\",\"d\":{\"qos_token\":\"signed-";
+        const char *b = "qos-value\"}}";
+        ws_env_feed(&e, (const unsigned char*)a, strlen(a));
+        ws_env_feed(&e, (const unsigned char*)b, strlen(b));
+        assert(e.have_qos_token);
+        assert(!strcmp(e.qos_token, "signed-qos-value"));
+    }
+
+    /* Do not capture an auth_token-like string value or an escaped value. */
+    {
+        ws_env_t e;
+        ws_env_init(&e);
+        const char *p = "{\"op\":0,\"t\":\"READY\",\"d\":{"
+                        "\"note\":\"auth_token fake\",\"auth_token\":\"bad\\nvalue\"}}";
+        ws_env_feed(&e, (const unsigned char*)p, strlen(p));
+        assert(!e.have_auth_token);
+    }
+
     /* Window saturation must not spin forever waiting for more, and must not
      * overflow the fixed 2 KB window. */
     {
@@ -761,6 +808,26 @@ static void test_cfg_titles(void) {
     fclose(f);
     cfg_t c;
     assert(cfg_load(path, &c) == 0);
+    /* The independent metadata switches must not overwrite each other. */
+    f = fopen(path, "wb");
+    assert(f);
+    fputs("{\"token\":\"t\",\"retro_enabled\":false,\"custom_enabled\":true}", f);
+    fclose(f);
+    assert(cfg_load(path, &c) == 0);
+    assert(c.retro_enabled == 0 && c.custom_enabled == 1);
+    f = fopen(path, "wb");
+    assert(f);
+    fputs("{\"token\":\"t\",\"retro_enabled\":true,\"custom_enabled\":false}", f);
+    fclose(f);
+    assert(cfg_load(path, &c) == 0);
+    assert(c.retro_enabled == 1 && c.custom_enabled == 0);
+    f = fopen(path, "wb");
+    assert(f);
+    fputs("{\"token\":\"t\",\"titles\":{\"CUSA11995\":\"Marvel's Spider-Man\","
+          "\"BAD KEY!\": \"junk\", \"CUSA00001\": \"x\", \"TOOLONGTITLEID12345\": \"y\","
+          "\"CUSA00002\": 42}}", f);
+    fclose(f);
+    assert(cfg_load(path, &c) == 0);
     assert(c.n_titles == 1); /* only the well-formed entry survives */
     char name[128];
     assert(cfg_title(&c, "CUSA11995", name, sizeof name) == 0);
@@ -770,10 +837,15 @@ static void test_cfg_titles(void) {
     assert(cfg_title(NULL, "CUSA11995", name, sizeof name) != 0);
     /* round-trip: save preserves overrides + home_art */
     strncpy(c.home_art, "pslogo", sizeof c.home_art - 1);
+    strncpy(c.qos_token, "signed-qos-value", sizeof c.qos_token - 1);
     assert(cfg_save(path2, &c) == 0);
+    struct stat config_st;
+    assert(stat(path2, &config_st) == 0);
+    assert((config_st.st_mode & 0777) == 0600);
     cfg_t c2;
     assert(cfg_load(path2, &c2) == 0);
     assert(c2.n_titles == 1);
+    assert(!strcmp(c2.qos_token, "signed-qos-value"));
     assert(cfg_title(&c2, "CUSA11995", name, sizeof name) == 0);
     assert(!strcmp(name, "Marvel's Spider-Man"));
     assert(!strcmp(c2.home_art, "pslogo"));
@@ -957,6 +1029,93 @@ static void test_discord_builder(void) {
     jl_free(a);
     /* NULL name rejected */
     assert(discord_build_activity(NULL, NULL,"Idling on Home Menu",NULL,NULL, "home", "app", NULL, NULL, NULL, 0, "") == NULL);
+}
+
+static void test_discord_rotated_token_take(void){
+    discord_t d;
+    char out[64];
+    memset(&d, 0, sizeof d);
+    assert(discord_take_rotated_token(&d, out, sizeof out) == 0);
+    strcpy(d.ws.rotated_token, "rotated-token");
+    assert(discord_take_rotated_token(&d, out, 4) == -1);
+    assert(d.ws.rotated_token[0] != 0);
+    assert(discord_take_rotated_token(&d, out, sizeof out) == 1);
+    assert(!strcmp(out, "rotated-token"));
+    assert(d.ws.rotated_token[0] == 0);
+    strcpy(d.ws.rotated_token, "bad token");
+    assert(discord_take_rotated_token(&d, out, sizeof out) == -1);
+    assert(d.ws.rotated_token[0] == 0);
+    strcpy(d.ws.qos_token, "signed-qos-value");
+    assert(discord_take_qos_token(&d, out, sizeof out) == 1);
+    assert(!strcmp(out, "signed-qos-value"));
+    assert(d.ws.qos_token[0] == 0);
+}
+
+static void test_discord_identify_builder(void){
+    jl_val_t *p = discord_build_identify("user-token", NULL);
+    assert(p);
+    const jl_val_t *v = jl_obj_get(p, "op");
+    assert(v && v->type == JL_NUMBER && v->inum == 2);
+    const jl_val_t *d = jl_obj_get(p, "d");
+    assert(d && d->type == JL_OBJECT);
+    v = jl_obj_get(d, "token");
+    assert(v && v->type == JL_STRING && !strcmp(v->str, "user-token"));
+    assert(jl_obj_get(d, "qos_token") == NULL);
+    jl_free(p);
+
+    p = discord_build_identify("user-token", "signed-qos-value");
+    assert(p);
+    d = jl_obj_get(p, "d");
+    v = jl_obj_get(d, "qos_token");
+    assert(v && v->type == JL_STRING && !strcmp(v->str, "signed-qos-value"));
+    jl_free(p);
+    assert(discord_build_identify(NULL, "signed-qos-value") == NULL);
+}
+
+static void test_discord_heartbeat_builder(void){
+    jl_val_t *p = discord_build_heartbeat(42);
+    assert(p);
+    const jl_val_t *v = jl_obj_get(p, "op");
+    assert(v && v->type == JL_NUMBER && v->inum == 1);
+    const jl_val_t *d = jl_obj_get(p, "d");
+    assert(d && d->type == JL_OBJECT);
+    v = jl_obj_get(d, "seq");
+    assert(v && v->type == JL_NUMBER && v->inum == 42);
+    const jl_val_t *q = jl_obj_get(d, "qos");
+    assert(q && q->type == JL_OBJECT);
+    v = jl_obj_get(q, "active");
+    assert(v && v->type == JL_BOOL && v->num == 1);
+    v = jl_obj_get(q, "reasons");
+    assert(v && v->type == JL_ARRAY && v->count == 0);
+    jl_free(p);
+
+    p = discord_build_heartbeat(0);
+    assert(p);
+    d = jl_obj_get(p, "d");
+    v = jl_obj_get(d, "seq");
+    assert(v && v->type == JL_NULL);
+    jl_free(p);
+}
+
+static void test_discord_presence_coalescing(void){
+    discord_t d;
+    memset(&d, 0, sizeof d);
+    d.connected = 1;
+    d.hb_interval_ms = 45000;
+    int64_t now = orbis_mono_s();
+    d.last_heartbeat = now;
+    test_ws_send_ok = 1;
+    test_ws_recv_idle = 1;
+    test_ws_send_calls = 0;
+    for(int i = 0; i < 6; i++) assert(discord_clear_presence(&d) == 0);
+    assert(test_ws_send_calls == 5);
+    assert(d.pending_presence_len > 0);
+    for(size_t i = 0; i < 5; i++) d.presence_sent_at[i] = now - 21;
+    assert(discord_tick(&d) == 0);
+    assert(test_ws_send_calls == 6);
+    assert(d.pending_presence_len == 0);
+    test_ws_send_ok = 0;
+    test_ws_recv_idle = 0;
 }
 
 static int64_t s_stub_arg = -1;
@@ -1848,6 +2007,10 @@ int main(void) {
     test_cfg_learn();
     test_appdb();
     test_discord_builder();
+    test_discord_rotated_token_take();
+    test_discord_identify_builder();
+    test_discord_heartbeat_builder();
+    test_discord_presence_coalescing();
     test_time_apply_unsynced();
     test_time_apply_small_drift();
     test_time_apply_steps_and_zeroes();

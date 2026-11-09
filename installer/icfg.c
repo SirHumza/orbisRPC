@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #define ICFG_MAX (64u*1024u)
 
@@ -60,7 +61,11 @@ static int icfg_write(const char *path, jl_val_t *r){
     if(!s) return -1;
     f = fopen(tmp, "wb");
     if(!f){ free(s); return -1; }
-    if(fputs(s, f) < 0) ok = 0;
+    {
+        int fd = fileno(f);
+        if(fd < 0 || fchmod(fd, S_IRUSR | S_IWUSR) != 0) ok = 0;
+    }
+    if(ok && fputs(s, f) < 0) ok = 0;
     if(ok){
         int fd = fileno(f);
         if(fd >= 0 && fsync(fd) != 0) ok = 0;

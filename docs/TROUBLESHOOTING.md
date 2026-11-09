@@ -62,8 +62,10 @@ Store) isn't detected yet — under investigation.
 
 ## Token rejected (close 4004)
 
-Your token died (password change / logout-all). Paste a fresh one into
-the config; the daemon survives 4004s and picks it up without reinstall.
+Discord rejected the login (close `4004`). This can mean a bad or revoked
+token, or that Discord requires account recovery. Follow any prompts in the
+official Discord client first; then update `token` in the config. The daemon
+survives 4004s and picks up a replacement without reinstall.
 Never share the config file — a user token is full account access.
 
 ## Payload won't start

@@ -49,6 +49,23 @@ static void make_key(char *out){
     b64_encode(b,16,out);
 }
 
+static uint32_t random_u32(void){
+    uint32_t value = 0;
+    int fd = open("/dev/urandom", O_RDONLY);
+    if(fd >= 0){
+        size_t got = 0;
+        while(got < sizeof value){
+            long n = read(fd, (char *)&value + got, sizeof value - got);
+            if(n <= 0) break;
+            got += (size_t)n;
+        }
+        close(fd);
+        if(got == sizeof value) return value;
+    }
+    /* Jitter is not a secret; monotonic time gives a safe fallback. */
+    return (uint32_t)time(NULL) ^ (uint32_t)orbis_mono_s() * 2654435761u;
+}
+
 /* Gateway events live INSIDE the JSON text payload ("op":N) — not in the
  * WebSocket frame header (1=text, 8=close, 9=ping). Scan top-level keys
  * with string-awareness so a nested `"op":` inside a string value can't
@@ -123,27 +140,50 @@ static int rx_frame(discord_t *d, char *buf, size_t cap, int *op, int *fin, int6
     }
 }
 
-static int send_identify(discord_t *d, const char *token){
+jl_val_t *discord_build_identify(const char *token, const char *qos_token){
+    if(!token || !token[0]) return NULL;
     jl_val_t *root=jl_new_object();
-    if(!root) return -1;
+    if(!root) return NULL;
     jl_obj_set(root,"op",jl_new_int(2));
     jl_val_t *dd=jl_new_object();
-    if(!dd){ jl_free(root); return -1; }
+    if(!dd){ jl_free(root); return NULL; }
     jl_obj_set(dd,"token",jl_new_string(token));
     jl_val_t *pp=jl_new_object();
-    if(!pp){ jl_free(root); return -1; }
+    if(!pp){ jl_free(dd); jl_free(root); return NULL; }
     jl_obj_set(pp,"os",jl_new_string("windows"));
     jl_obj_set(pp,"browser",jl_new_string("Discord Client"));
     jl_obj_set(pp,"device",jl_new_string(""));
     jl_obj_set(dd,"properties",pp);
     jl_val_t *pr=jl_new_object();
-    if(!pr){ jl_free(root); return -1; }
+    if(!pr){ jl_free(dd); jl_free(root); return NULL; }
     jl_obj_set(pr,"status",jl_new_string("online"));
     jl_obj_set(pr,"activities",jl_new_array());
     jl_obj_set(pr,"afk",jl_new_bool(0));
     jl_obj_set(pr,"since",jl_new_null());
     jl_obj_set(dd,"presence",pr);
+    if(qos_token && qos_token[0])
+        jl_obj_set(dd,"qos_token",jl_new_string(qos_token));
     jl_obj_set(root,"d",dd);
+    return root;
+}
+
+jl_val_t *discord_build_heartbeat(int seq){
+    jl_val_t *root = jl_new_object();
+    jl_val_t *d = jl_new_object();
+    jl_val_t *qos = jl_new_object();
+    if(!root || !d || !qos){ jl_free(root); jl_free(d); jl_free(qos); return NULL; }
+    jl_obj_set(root, "op", jl_new_int(1));
+    jl_obj_set(d, "seq", seq > 0 ? jl_new_int(seq) : jl_new_null());
+    jl_obj_set(qos, "active", jl_new_bool(1));
+    jl_obj_set(qos, "reasons", jl_new_array());
+    jl_obj_set(d, "qos", qos);
+    jl_obj_set(root, "d", d);
+    return root;
+}
+
+static int send_identify(discord_t *d, const char *token, const char *qos_token){
+    jl_val_t *root=discord_build_identify(token, qos_token);
+    if(!root) return -1;
     char *s=jl_stringify(root); jl_free(root);
     if(!s) return -1;
     int rc = ws_send_text(&d->ws,s,strlen(s));
@@ -151,11 +191,15 @@ static int send_identify(discord_t *d, const char *token){
     return rc < 0 ? -1 : 0;
 }
 
-int discord_connect(discord_t *d, const char *token){
+int discord_connect(discord_t *d, const char *token, const char *qos_token){
     if(!d || !token || !token[0]) return -1;
     memset(d,0,sizeof(*d));
     strncpy(d->token, token, sizeof d->token-1);
     d->token[sizeof d->token-1] = 0;
+    if(qos_token && qos_token[0]){
+        strncpy(d->qos_token, qos_token, sizeof d->qos_token - 1);
+        d->qos_token[sizeof d->qos_token - 1] = 0;
+    }
     char key[64]=""; make_key(key);
     int rc=ws_connect(&d->ws, GW_HOST, GW_PORT, GW_PATH, key);
     if(rc){ log_msg("ws connect fail %d",rc); return -1; }
@@ -186,7 +230,13 @@ int discord_connect(discord_t *d, const char *token){
                 (long long)d->hb_interval_ms);
         d->hb_interval_ms = 5000;
     }
-    if(send_identify(d, token) < 0){
+    {
+        long hb_s = (long)(d->hb_interval_ms / 1000);
+        long fire = hb_s > 3 ? hb_s - 2 : hb_s;
+        long jitter = hb_s > 0 ? (long)(random_u32() % (uint32_t)hb_s) : 0;
+        d->last_heartbeat = orbis_mono_s() + jitter - fire;
+    }
+    if(send_identify(d, token, d->qos_token) < 0){
         log_msg("discord: identify send failed");
         ws_close(&d->ws); d->connected=0;
         return -1;
@@ -226,11 +276,81 @@ int discord_connect(discord_t *d, const char *token){
     return -1;
 }
 
+int discord_take_rotated_token(discord_t *d, char *out, size_t cap){
+    if(!d || !out || cap == 0 || !d->ws.rotated_token[0]) return 0;
+    size_t n = strlen(d->ws.rotated_token);
+    if(n >= cap) return -1;
+    for(size_t i = 0; i < n; i++){
+        unsigned char c = (unsigned char)d->ws.rotated_token[i];
+        if(c <= 0x20 || c > 0x7e){
+            memset(d->ws.rotated_token, 0, sizeof d->ws.rotated_token);
+            return -1;
+        }
+    }
+    memcpy(out, d->ws.rotated_token, n + 1);
+    memset(d->ws.rotated_token, 0, sizeof d->ws.rotated_token);
+    return 1;
+}
+
+int discord_take_qos_token(discord_t *d, char *out, size_t cap){
+    if(!d || !out || cap == 0 || !d->ws.qos_token[0]) return 0;
+    size_t n = strlen(d->ws.qos_token);
+    if(n >= cap) return -1;
+    for(size_t i = 0; i < n; i++){
+        unsigned char c = (unsigned char)d->ws.qos_token[i];
+        if(c <= 0x20 || c > 0x7e){
+            memset(d->ws.qos_token, 0, sizeof d->ws.qos_token);
+            return -1;
+        }
+    }
+    memcpy(out, d->ws.qos_token, n + 1);
+    memset(d->ws.qos_token, 0, sizeof d->ws.qos_token);
+    return 1;
+}
+
 int discord_set_presence(discord_t *d, const char *state, const char *name,
                          const char *application_id, int64_t started_epoch){
     return discord_set_presence_ex(d, state, name, NULL, NULL, NULL,
                                     NULL, application_id, NULL, NULL,
                                     NULL, started_epoch);
+}
+
+static int presence_window_open(const discord_t *d, int64_t now){
+    int recent = 0;
+    for(size_t i = 0; i < sizeof d->presence_sent_at / sizeof d->presence_sent_at[0]; i++){
+        int64_t sent = d->presence_sent_at[i];
+        if(sent > 0 && (now < sent || now - sent < 20)) recent++;
+    }
+    return recent < 5;
+}
+
+static void presence_mark_sent(discord_t *d, int64_t now){
+    d->presence_sent_at[d->presence_next] = now;
+    d->presence_next = (d->presence_next + 1u) %
+        (unsigned)(sizeof d->presence_sent_at / sizeof d->presence_sent_at[0]);
+}
+
+static int presence_send(discord_t *d, const char *json, size_t len){
+    if(!presence_window_open(d, orbis_mono_s())){
+        if(len + 1 > sizeof d->pending_presence) return -1;
+        memcpy(d->pending_presence, json, len);
+        d->pending_presence[len] = 0;
+        d->pending_presence_len = len;
+        log_dbg("presence coalesced by gateway rate limit");
+        return 0;
+    }
+    if(ws_send_text(&d->ws, json, len) < 0) return -1;
+    presence_mark_sent(d, orbis_mono_s());
+    return 0;
+}
+
+static int presence_flush(discord_t *d){
+    if(!d->pending_presence_len || !presence_window_open(d, orbis_mono_s())) return 0;
+    if(ws_send_text(&d->ws, d->pending_presence, d->pending_presence_len) < 0) return -1;
+    presence_mark_sent(d, orbis_mono_s());
+    memset(d->pending_presence, 0, d->pending_presence_len);
+    d->pending_presence_len = 0;
+    return 0;
 }
 
 /* Lowercase titleId into an asset-key buffer. Returns key length. */
@@ -448,8 +568,8 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
     jl_obj_set(root,"d",dd);
     char *s=jl_stringify(root); jl_free(root);
     if(!s) return -1;
-    int r=ws_send_text(&d->ws,s,strlen(s)); free(s);
-    return (r>=0)?0:-1;
+    int r=presence_send(d,s,strlen(s)); free(s);
+    return r;
 }
 
 int discord_clear_presence(discord_t *d){
@@ -465,8 +585,8 @@ int discord_clear_presence(discord_t *d){
     jl_obj_set(root,"d",dd);
     char *s=jl_stringify(root); jl_free(root);
     if(!s) return -1;
-    int r=ws_send_text(&d->ws,s,strlen(s)); free(s);
-    return (r>=0)?0:-1;
+    int r=presence_send(d,s,strlen(s)); free(s);
+    return r;
 }
 
 int discord_tick(discord_t *d){
@@ -483,15 +603,22 @@ int discord_tick(discord_t *d){
      * always inside the gateway's heartbeat window */
     long fire = hb_s>3 ? hb_s-2 : hb_s;
     if(now-d->last_heartbeat >= fire){
-        char hb[64];
-        if(d->seq>0) snprintf(hb,sizeof hb,"{\"op\":1,\"d\":%d}",d->seq);
-        else         snprintf(hb,sizeof hb,"{\"op\":1,\"d\":null}");
-        if(ws_send_text(&d->ws,hb,strlen(hb)) < 0){
+        jl_val_t *hb = discord_build_heartbeat(d->seq);
+        char *payload = hb ? jl_stringify(hb) : NULL;
+        jl_free(hb);
+        if(!payload || ws_send_text(&d->ws,payload,strlen(payload)) < 0){
+            free(payload);
             log_msg("heartbeat send failed; reconnecting");
             d->connected=0;
             return -1;
         }
+        free(payload);
         d->last_heartbeat=now; d->sent_hb=1;
+    }
+    if(presence_flush(d) < 0){
+        log_msg("queued presence send failed; reconnecting");
+        d->connected=0;
+        return -1;
     }
     /* drain pending server frames (non-blocking); 2048 covers the dispatch
      * envelope ({"t":..,"s":N,..) with margin — big payloads are consumed

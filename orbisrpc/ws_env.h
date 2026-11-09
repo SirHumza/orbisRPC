@@ -39,6 +39,19 @@ typedef struct {
     char op[32];
     char s[32];
     char t[64];
+    /* Captured independently while streaming: READY may be much larger than
+     * the retained envelope prefix, and can contain a rotated session token. */
+    int have_auth_token;
+    char auth_token[512];
+    int have_qos_token;
+    char qos_token[512];
+    int json_depth, in_string, escaped;
+    int string_depth, string_overflow;
+    int auth_state; /* 0 scanning, 1 expect ':', 2 expect value, 3 value */
+    int capture_kind; /* 1 auth_token, 2 qos_token */
+    size_t string_len, auth_len;
+    size_t qos_len;
+    char string[32];
 } ws_env_t;
 
 void ws_env_init(ws_env_t *e);

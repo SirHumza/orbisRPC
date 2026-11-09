@@ -8,6 +8,81 @@ void ws_env_init(ws_env_t *e){
     memset(e, 0, sizeof *e);
 }
 
+/* Keep a tiny JSON lexer running across chunks so auth_token can be found
+ * anywhere in an oversized READY without retaining the READY body. */
+static void scan_token(ws_env_t *e, const unsigned char *p, size_t n){
+    for(size_t i = 0; i < n && (!e->have_auth_token || !e->have_qos_token); i++){
+        unsigned char c = p[i];
+        if(e->in_string){
+            if(e->escaped){ e->escaped = 0; e->string_overflow = 1; continue; }
+            if(c == '\\'){ e->escaped = 1; continue; }
+            if(c != '"'){
+                if(e->auth_state == 3){
+                    if(e->capture_kind == 1 && e->auth_len + 1 < sizeof e->auth_token)
+                        e->auth_token[e->auth_len++] = (char)c;
+                    else if(e->capture_kind == 2 && e->qos_len + 1 < sizeof e->qos_token)
+                        e->qos_token[e->qos_len++] = (char)c;
+                    else e->string_overflow = 1;
+                } else if(e->string_len + 1 < sizeof e->string){
+                    e->string[e->string_len++] = (char)c;
+                } else e->string_overflow = 1;
+                continue;
+            }
+            e->in_string = 0;
+            if(e->auth_state == 3){
+                if(e->capture_kind == 1 && !e->string_overflow && e->auth_len){
+                    e->auth_token[e->auth_len] = 0;
+                    e->have_auth_token = 1;
+                } else if(e->capture_kind == 2 && !e->string_overflow && e->qos_len){
+                    e->qos_token[e->qos_len] = 0;
+                    e->have_qos_token = 1;
+                }
+                e->auth_state = 0;
+                e->capture_kind = 0;
+            } else if(e->string_depth >= 2 && !e->string_overflow){
+                if(!e->have_auth_token && e->string_len == 10 &&
+                   !memcmp(e->string, "auth_token", 10)){
+                    e->auth_state = 1; e->capture_kind = 1;
+                } else if(!e->have_qos_token && e->string_len == 9 &&
+                          !memcmp(e->string, "qos_token", 9)){
+                    e->auth_state = 1; e->capture_kind = 2;
+                }
+            }
+            e->string_len = 0;
+            e->string_overflow = 0;
+            continue;
+        }
+
+        if(e->auth_state == 1){
+            if(c == ' ' || c == '\t' || c == '\r' || c == '\n') continue;
+            if(c == ':'){ e->auth_state = 2; continue; }
+            e->auth_state = 0;
+        } else if(e->auth_state == 2){
+            if(c == ' ' || c == '\t' || c == '\r' || c == '\n') continue;
+            if(c == '"'){
+                e->in_string = 1;
+                e->auth_state = 3;
+                if(e->capture_kind == 1) e->auth_len = 0;
+                else e->qos_len = 0;
+                e->string_overflow = 0;
+                continue;
+            }
+            e->auth_state = 0;
+        }
+
+        if(c == '"'){
+            e->in_string = 1;
+            e->string_depth = e->json_depth;
+            e->string_len = 0;
+            e->string_overflow = 0;
+        } else if(c == '{' || c == '['){
+            e->json_depth++;
+        } else if((c == '}' || c == ']') && e->json_depth > 0){
+            e->json_depth--;
+        }
+    }
+}
+
 /* Copy the value of a depth-1 string key out of a JSON prefix.
  *
  * Depth matters: Discord's envelope is {"op":..,"s":..,"t":..,"d":{..}}, and
@@ -78,6 +153,7 @@ static size_t copy_field(const char *w, size_t n, const char *key,
 
 void ws_env_feed(ws_env_t *e, const unsigned char *p, size_t n){
     if(!e || !p || n == 0) return;
+    scan_token(e, p, n);
     /* Retain a bounded prefix. Once saturated, further bytes are discarded,
      * which is the whole point: memory does not track payload size. */
     if(e->winlen < WS_ENV_WINDOW){

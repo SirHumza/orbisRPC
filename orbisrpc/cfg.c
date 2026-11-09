@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 cfg_t g_cfg;
 
@@ -104,6 +105,7 @@ int cfg_load(const char *path, cfg_t *c) {
         } \
     } while(0)
     STR("token", token);
+    STR("qos_token", qos_token);
     STR("application_id", application_id);
     STR("art_base_url", art_base_url);
     STR("home_art", home_art);
@@ -144,8 +146,8 @@ int cfg_load(const char *path, cfg_t *c) {
     }
     o = jl_obj_get(root, "enabled");         if (o && o->type == JL_BOOL)   c->enabled = (int)o->num;
     o = jl_obj_get(root, "pkgzone_enabled"); if (o && o->type == JL_BOOL)   c->pkgzone_enabled = (int)o->num;
-    o = jl_obj_get(root, "retro_enabled");
-    o = jl_obj_get(root, "custom_enabled"); if (o && o->type == JL_BOOL)   c->custom_enabled = (int)o->num; if (o && o->type == JL_BOOL)   c->retro_enabled = (int)o->num;
+    o = jl_obj_get(root, "retro_enabled");  if (o && o->type == JL_BOOL)   c->retro_enabled = (int)o->num;
+    o = jl_obj_get(root, "custom_enabled"); if (o && o->type == JL_BOOL)   c->custom_enabled = (int)o->num;
     o = jl_obj_get(root, "show_firmware"); if (o && o->type == JL_BOOL)   c->show_firmware = (int)o->num;
     o = jl_obj_get(root, "show_idle");     if (o && o->type == JL_BOOL)   c->show_idle = (int)o->num;
     o = jl_obj_get(root, "show_media");    if (o && o->type == JL_BOOL)   c->show_media = (int)o->num;
@@ -214,6 +216,7 @@ int cfg_save(const char *path, const cfg_t *c) {
     if(!r) { log_msg("cfg_save: allocation failed"); return -1; }
     jl_obj_set(r, "schema_version",  jl_new_number((double)CFG_SCHEMA_VERSION));
     jl_obj_set(r, "token",           jl_new_string(c->token));
+    jl_obj_set(r, "qos_token",       jl_new_string(c->qos_token));
     jl_obj_set(r, "application_id",  jl_new_string(c->application_id));
     jl_obj_set(r, "art_base_url",    jl_new_string(c->art_base_url));
     jl_obj_set(r, "enabled",         jl_new_bool(c->enabled));
@@ -253,7 +256,9 @@ int cfg_save(const char *path, const cfg_t *c) {
     FILE *f = fopen(tmp, "wb");
     int ok = 0;
     if (f) {
-        ok = (fputs(s, f) >= 0);
+        int fd = fileno(f);
+        ok = fd >= 0 && fchmod(fd, S_IRUSR | S_IWUSR) == 0;
+        if(ok) ok = (fputs(s, f) >= 0);
         if(fflush(f) != 0) ok = 0;
         /* force bytes to disk before rename */
         if(ok) { int fd = fileno(f); if(fd >= 0 && fsync(fd) != 0) ok = 0; }

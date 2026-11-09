@@ -356,7 +356,12 @@ int Settings::Save() const
 	}
 
 	int ok = 1;
-	if (fputs(text, f) < 0)
+	{
+		const int fd = fileno(f);
+		if (fd < 0 || fchmod(fd, S_IRUSR | S_IWUSR) != 0)
+			ok = 0;
+	}
+	if (ok && fputs(text, f) < 0)
 		ok = 0;
 
 	if (ok)

@@ -344,6 +344,26 @@ static int valid_frame_header(const unsigned char *b, uint64_t plen){
 #include "ws_skip.c"
 #include "ws_env.c"
 
+static void ws_capture_token(ws_t *w){
+    if(!w) return;
+    if(w->env.have_auth_token && !w->rotated_token[0]){
+        memcpy(w->rotated_token, w->env.auth_token, sizeof w->rotated_token);
+        w->rotated_token[sizeof w->rotated_token - 1] = 0;
+    }
+    if(w->env.have_auth_token){
+        memset(w->env.auth_token, 0, sizeof w->env.auth_token);
+        w->env.have_auth_token = 0;
+    }
+    if(w->env.have_qos_token && !w->qos_token[0]){
+        memcpy(w->qos_token, w->env.qos_token, sizeof w->qos_token);
+        w->qos_token[sizeof w->qos_token - 1] = 0;
+    }
+    if(w->env.have_qos_token){
+        memset(w->env.qos_token, 0, sizeof w->env.qos_token);
+        w->env.have_qos_token = 0;
+    }
+}
+
 int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out){
     if(!w || !w->connected || !buf || cap==0) return -1;
     for(;;){
@@ -357,8 +377,10 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
              * envelope scraper first, so op/s/t survive without buffering. */
             size_t have = w->rlen - w->rpos;
             size_t take = have < (size_t)w->skip_left ? have : (size_t)w->skip_left;
-            if(take && w->env_active)
+            if(take && w->env_active){
                 ws_env_feed(&w->env, w->rbuf + w->rpos, take);
+                ws_capture_token(w);
+            }
             w->skip_left -= take; w->rpos += take;
             if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
             /* Hand back the envelope as soon as op/s/t are known instead of
@@ -429,7 +451,6 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
                     size_t h = (hdr < avail) ? hdr : avail;
                     w->rpos += h;                       /* eat the header */
                     size_t payload_here = avail - h;
-                    if(payload_here) ws_env_feed(&w->env, w->rbuf + w->rpos, payload_here);
                     /* skip_left counts EVERY payload byte still to consume,
                      * including the ones already sitting in rbuf. Passing
                      * payload_here here was a double-count: ws_skip_plan()
@@ -441,8 +462,13 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
                     ws_skip_plan(plen, 0, &w->skip_left);
                     w->skip_op = wire_op;
                     w->skip_fin = fin;
+                    ws_env_init(&w->env);
                     w->env_active = 1;
                     w->env_reported = 0;
+                    if(payload_here){
+                        ws_env_feed(&w->env, w->rbuf + w->rpos, payload_here);
+                        ws_capture_token(w);
+                    }
                     if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
                     continue;
                 }
@@ -464,6 +490,11 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
                     }
                 }
                 if((uint64_t)(w->rlen-w->rpos) >= total){
+                    if(wire_op == 1){
+                        ws_env_init(&w->env);
+                        ws_env_feed(&w->env, b + hdr, (size_t)plen);
+                        ws_capture_token(w);
+                    }
                     size_t copy = (size_t)plen;
                     if(copy > cap-1) copy = cap-1;
                     memcpy(buf, b+hdr, copy);
@@ -488,8 +519,10 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
                 if(w->skip_left > 0){
                     size_t take = (size_t)w->skip_left;
                     if(take > w->rlen) take = w->rlen;
-                    if(take && w->env_active)
+                    if(take && w->env_active){
                         ws_env_feed(&w->env, w->rbuf + w->rpos, take);
+                        ws_capture_token(w);
+                    }
                     w->skip_left -= take;
                     w->rpos += take;
                     if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }

@@ -6,6 +6,8 @@ The daemon connects to Discord's gateway as you, using your user session
 token. That string grants **full account access**:
 
 - Never share `config.json`. Never paste a token in Discord, logs, or issues.
+- Daemon and setup-app writes set `config.json` to owner-only mode (`0600`).
+  Keep that mode if you copy or restore the file outside the app.
 - Never commit a token. CI scans shipped files for token-shaped strings
   and fails the build (`ORBISRPC_STRICT_SECRETS=1`).
 - Token stopped working (close `4004`)? It died on Discord's side

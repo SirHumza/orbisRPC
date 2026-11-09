@@ -39,6 +39,8 @@ typedef struct {
     /* Envelope scraped while draining an oversized frame. Bounded: only the
      * first WS_ENV_WINDOW bytes of payload are retained. */
     ws_env_t env;
+    char rotated_token[512]; /* captured only; never logged */
+    char qos_token[512];     /* server-signed QoS state; never logged */
     int env_active;             /* 1 while an oversized frame is being drained */
     int env_reported;          /* envelope already handed back for this frame */
     int grow_warned;            /* rbuf realloc already logged a failure */
