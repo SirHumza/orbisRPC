@@ -29,6 +29,7 @@ This file tracks the next concrete work; completion is based on evidence in
 - [x] Declare C++11/POSIX installer build requirements and use the POSIX page-size query.
 - [x] Reject invalid JSON number syntax and overflow before installer integer conversions; preserve the daemon's last-good config on invalid numeric input.
 - [x] Align installer toggle loading with daemon boolean-only config semantics.
+- [x] Verify installer read-modify-write preserves unknown nested config and newer token state.
 - [x] Make malformed optional title overrides non-fatal again.
 - [x] Rewrite README claims to match the current source and installer flow.
 - [x] Fix macOS package tool selection and gate the setup app's font assets.
