@@ -386,6 +386,8 @@ int daemon_run(void){
      * s_stop is deliberately NOT cleared: a stop requested while the
      * supervisor was backing off must stick. */
     daemon_sess_reset(&s_sess);
+    s_in_settings = s_in_browser = -1;
+    s_settings_posted = s_browser_posted = 0;
     memset(&s_dc, 0, sizeof s_dc);
     s_dc_armed = 1;
 #ifdef SIGTERM
@@ -637,6 +639,8 @@ int daemon_run(void){
          * current state (game via need_post below, home via s_sess.home_posted
          * reset) so a drop can never leave a stale/blank tile behind. */
         s_sess.home_posted = 0;
+        s_settings_posted = 0;
+        s_browser_posted = 0;
         /* Resume window: if the same title vanishes briefly (detection
          * flicker, quick menu hop) and returns within 10 minutes, the
          * timer resumes instead of resetting to 0:00.
@@ -665,10 +669,9 @@ int daemon_run(void){
                                     /* Validate before trusting: 9-char id,
                                      * sane epoch (2020-2100). A corrupt file
                                      * must never seed a bogus timer. */
-                                    int64_t st = (int64_t)s2->num;
-                                    if(strlen(t->str) == 9 &&
-                                       st >= 1577836800LL &&
-                                       st <= 4102444800LL){
+                                    if(daemon_session_restore_valid(t->str, t->strlen,
+                                                                    s2->num)){
+                                        int64_t st = (int64_t)s2->num;
                                         strncpy(s_sess.prev_tid, t->str, sizeof s_sess.prev_tid-1);
                                         s_sess.prev_started = st;
                                         /* Wall saved_at can't mix with the

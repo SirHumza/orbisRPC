@@ -1232,6 +1232,15 @@ static void test_sess_reset_clears_session(void){
     assert(s.last_reconcile == 0);
 }
 
+static void test_session_restore_validation(void){
+    assert(daemon_session_restore_valid("CUSA12345", 9, 1700000000.0));
+    assert(!daemon_session_restore_valid("CUSA12345", 9, 1e300));
+    assert(!daemon_session_restore_valid("CUSA12345", 9, 1700000000.5));
+    assert(!daemon_session_restore_valid("cusa12345", 9, 1700000000.0));
+    assert(!daemon_session_restore_valid("CUSA12345x", 10, 1700000000.0));
+    assert(!daemon_session_restore_valid("CUSA12345\0x", 10, 1700000000.0));
+}
+
 static int stub_body_ok(void){ return 7; }
 
 static void test_supervise_run_returns_body_code(void){
@@ -2081,6 +2090,7 @@ int main(void) {
     test_time_apply_steps_and_zeroes();
     test_time_apply_set_fails_keeps_offset();
     test_sess_reset_clears_session();
+    test_session_restore_validation();
     test_supervise_run_returns_body_code();
     test_fault_delay_progression();
     puts("utility tests passed");

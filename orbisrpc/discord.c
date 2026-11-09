@@ -217,6 +217,8 @@ static int send_identify(discord_t *d, const char *token, const char *qos_token)
     return rc < 0 ? -1 : 0;
 }
 
+static int heartbeat_send(discord_t *d, int64_t now);
+
 int discord_connect(discord_t *d, const char *token, const char *qos_token){
     if(!d) return -1;
     memset(d,0,sizeof(*d));
@@ -252,7 +254,9 @@ int discord_connect(discord_t *d, const char *token, const char *qos_token){
         const jl_val_t *dd=jl_obj_get(h,"d");
         if(dd){
             const jl_val_t *hi=jl_obj_get(dd,"heartbeat_interval");
-            if(hi&&hi->type==JL_NUMBER) d->hb_interval_ms=(int64_t)hi->num;
+            if(hi&&hi->type==JL_NUMBER && hi->num >= 0.0 &&
+               hi->num <= (double)INT_MAX)
+                d->hb_interval_ms=(int64_t)hi->num;
         }
         jl_free(h);
     }
@@ -305,6 +309,13 @@ int discord_connect(discord_t *d, const char *token, const char *qos_token){
             break;
         }
         int go = gw_op(buf, (size_t)nr);
+        if(go==1){
+            if(heartbeat_send(d, orbis_mono_s()) < 0){
+                log_msg("requested heartbeat send failed during auth");
+                ws_close(&d->ws); d->connected=0; return -1;
+            }
+            continue;
+        }
         if(go==11){ d->last_ack=orbis_mono_s(); continue; }
         if(go==0 && is_ready(buf, (size_t)nr)){
             gw_seq(d, buf, (size_t)nr);
@@ -407,6 +418,21 @@ static int presence_flush(discord_t *d){
     presence_mark_sent(d, orbis_mono_s());
     memset(d->pending_presence, 0, d->pending_presence_len);
     d->pending_presence_len = 0;
+    return 0;
+}
+
+static int heartbeat_send(discord_t *d, int64_t now){
+    jl_val_t *hb = discord_build_heartbeat(d->seq);
+    char *payload = hb ? jl_stringify(hb) : NULL;
+    jl_free(hb);
+    if(!payload || ws_send_text(&d->ws, payload, strlen(payload)) < 0){
+        free(payload);
+        return -1;
+    }
+    free(payload);
+    d->last_heartbeat = now;
+    if(!d->sent_hb) d->last_ack = now;
+    d->sent_hb = 1;
     return 0;
 }
 
@@ -660,19 +686,11 @@ int discord_tick(discord_t *d){
      * always inside the gateway's heartbeat window */
     long fire = hb_s>3 ? hb_s-2 : hb_s;
     if(now-d->last_heartbeat >= fire){
-        jl_val_t *hb = discord_build_heartbeat(d->seq);
-        char *payload = hb ? jl_stringify(hb) : NULL;
-        jl_free(hb);
-        if(!payload || ws_send_text(&d->ws,payload,strlen(payload)) < 0){
-            free(payload);
+        if(heartbeat_send(d, now) < 0){
             log_msg("heartbeat send failed; reconnecting");
             d->connected=0;
             return -1;
         }
-        free(payload);
-        d->last_heartbeat=now;
-        if(!d->sent_hb) d->last_ack=now; /* start the first ACK window here */
-        d->sent_hb=1;
     }
     if(presence_flush(d) < 0){
         log_msg("queued presence send failed; reconnecting");
@@ -731,6 +749,13 @@ int discord_tick(discord_t *d){
             return -3;
         case 11:
             d->last_ack=now;
+            break;
+        case 1:
+            if(heartbeat_send(d, now) < 0){
+                log_msg("requested heartbeat send failed; reconnecting");
+                d->connected=0;
+                return -1;
+            }
             break;
         default: break;
         }

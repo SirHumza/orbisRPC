@@ -94,6 +94,8 @@ static void next_mask(unsigned char mk[4]){
 
 int ws_connect(ws_t *w, const char *host, int port, const char *resource, const char *key){
     memset(w,0,sizeof(*w));
+    w->fd = -1;
+    w->sock = -1;
     w->rcap = WS_RBUF_MIN;
     w->rbuf = (unsigned char*)malloc(w->rcap);
     if(!w->rbuf){ log_msg("ws: rbuf alloc fail"); return -1; }
@@ -223,6 +225,10 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
         "Safari/537.36\r\n"
         "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n",
         resource?resource:"/", host, key);
+    if(n < 0 || (size_t)n >= sizeof req){
+        log_msg("ws: handshake request too long");
+        goto fail;
+    }
     if(ws_send_all(w, (const unsigned char*)req, (size_t)n) < 0){ log_msg("hs write fail"); goto fail; }
     log_msg("hs request sent (%dB)", n);
     /* Read response headers; bytes past "\r\n\r\n" are the first websocket
@@ -264,9 +270,9 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
 fail:
     tls_free((tls_ctx_t*)w->tls); w->tls=NULL;
 #ifdef ORBISRPC_SDK_PAYLOAD
-    if(w->fd > 0) close(w->fd);
+    if(w->fd >= 0) close(w->fd);
 #else
-    if(w->fd > 0)  sceNetSocketClose(w->fd);
+    if(w->fd >= 0)  sceNetSocketClose(w->fd);
 #endif
     if(w->rbuf) memset(w->rbuf, 0, w->rcap);
     free(w->rbuf); w->rbuf=NULL; w->rcap=0;
@@ -274,7 +280,7 @@ fail:
     memset(w->qos_token, 0, sizeof w->qos_token);
     memset(&w->env, 0, sizeof w->env);
     ws_frag_reset(&w->fragments);
-    w->connected=0; w->tls=NULL; w->fd=0; w->sock=0;
+    w->connected=0; w->tls=NULL; w->fd=-1; w->sock=-1;
     return -9;
 }
 
@@ -636,7 +642,7 @@ int ws_close(ws_t *w){
     memset(w->qos_token, 0, sizeof w->qos_token);
     memset(&w->env, 0, sizeof w->env);
     ws_frag_reset(&w->fragments);
-    w->connected=0; w->sock=0; w->tls=NULL; w->fd=0; w->rlen=0; w->rpos=0;
+    w->connected=0; w->sock=-1; w->tls=NULL; w->fd=-1; w->rlen=0; w->rpos=0;
     w->skip_left=0;
     return 0;
 }

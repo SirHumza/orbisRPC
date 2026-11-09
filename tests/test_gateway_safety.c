@@ -26,6 +26,8 @@ static const char *scripted_payload;
 static int connect_script;
 static int auth_step;
 static int connect_attempts;
+static const char *script_hello;
+static int auth_heartbeat_script;
 
 int64_t orbis_mono_s(void){ return fake_now; }
 void log_msg(const char *fmt, ...){ (void)fmt; }
@@ -47,12 +49,13 @@ int ws_send_text(ws_t *w, const char *msg, size_t len){
 int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *op, int *fin){
     (void)w;
     if(connect_script){
-        static const char *frames[] = {
-            "{\"op\":10,\"d\":{\"heartbeat_interval\":45000}}",
-            "{\"op\":0,\"s\":42,\"t\":\"READY\",\"d\":{}}"
-        };
-        assert(auth_step < 2);
-        const char *frame = frames[auth_step++];
+        static const char *hello = "{\"op\":10,\"d\":{\"heartbeat_interval\":45000}}";
+        static const char *heartbeat = "{\"op\":1,\"d\":null}";
+        static const char *ready = "{\"op\":0,\"s\":42,\"t\":\"READY\",\"d\":{}}";
+        assert(auth_step < (auth_heartbeat_script ? 3 : 2));
+        const char *frame = auth_step == 0 ? (script_hello ? script_hello : hello)
+            : auth_heartbeat_script && auth_step == 1 ? heartbeat : ready;
+        auth_step++;
         size_t n = strlen(frame);
         assert(n <= cap);
         memcpy(buf, frame, n);
@@ -68,6 +71,7 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *op, int *fin){
     if(scripted_result > 0 && scripted_payload){
         size_t n = (size_t)scripted_result < cap ? (size_t)scripted_result : cap;
         memcpy(buf, scripted_payload, n);
+        if(n < cap) buf[n] = 0;
     }
     return scripted_result;
 }
@@ -184,6 +188,20 @@ static void test_connect_resets_session_state_before_identify(void){
     discord_clear_credentials(&d);
 }
 
+static void test_auth_heartbeat_request_is_answered_before_ready(void){
+    discord_t d;
+    connect_script = 1;
+    auth_step = 0;
+    auth_heartbeat_script = 1;
+    sent = 0;
+    assert(discord_connect(&d, "test-token", NULL) == 0);
+    assert(sent == 2); /* IDENTIFY and the requested heartbeat */
+    assert(d.sent_hb && d.last_heartbeat == fake_now);
+    auth_heartbeat_script = 0;
+    connect_script = 0;
+    discord_clear_credentials(&d);
+}
+
 static void test_connect_rejects_credentials_that_do_not_fit(void){
     discord_t d;
     char long_token[513], long_qos[513];
@@ -219,6 +237,40 @@ static void test_unrelated_dispatch_does_not_ack_heartbeat(void){
     d.last_heartbeat = fake_now;
     assert(discord_tick(&d) == -1);
     assert(!d.connected);
+}
+
+static void test_server_heartbeat_request_is_answered_immediately(void){
+    static const char request[] = "{\"op\":1,\"d\":null}";
+    discord_t d;
+    memset(&d, 0, sizeof d);
+    d.connected = 1;
+    d.hb_interval_ms = 45000;
+    d.last_heartbeat = fake_now;
+    d.last_ack = fake_now;
+    d.sent_hb = 1;
+    scripted_recv = 1;
+    scripted_result = (int)sizeof request - 1;
+    scripted_opcode = 1;
+    scripted_fin = 1;
+    scripted_payload = request;
+    sent = 0;
+    assert(discord_tick(&d) == 0);
+    assert(sent == 1);
+    assert(d.last_heartbeat == fake_now);
+}
+
+static void test_out_of_range_hello_heartbeat_interval_uses_default(void){
+    static const char hello[] =
+        "{\"op\":10,\"d\":{\"heartbeat_interval\":1e300}}";
+    discord_t d;
+    connect_script = 1;
+    auth_step = 0;
+    script_hello = hello;
+    assert(discord_connect(&d, "test-token", NULL) == 0);
+    assert(d.hb_interval_ms == 45000);
+    script_hello = NULL;
+    connect_script = 0;
+    discord_clear_credentials(&d);
 }
 
 static void test_empty_close_frame_disconnects_immediately(void){
@@ -461,8 +513,11 @@ int main(void){
     test_credentials_clear_after_session();
     test_first_heartbeat_ack_window();
     test_connect_resets_session_state_before_identify();
+    test_auth_heartbeat_request_is_answered_before_ready();
     test_connect_rejects_credentials_that_do_not_fit();
     test_unrelated_dispatch_does_not_ack_heartbeat();
+    test_server_heartbeat_request_is_answered_immediately();
+    test_out_of_range_hello_heartbeat_interval_uses_default();
     test_empty_close_frame_disconnects_immediately();
     test_invalid_close_payload_disconnects();
     test_empty_ping_is_answered();

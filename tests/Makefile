@@ -4,7 +4,7 @@ CC ?= cc
 CFLAGS += -std=c11 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -Wall -Wextra -Werror -DHEALTH_TESTABLE -I../orbisrpc -I../third_party/mbedtls/include -I$(SQLITE_DIR)
 
 HDRS := $(wildcard ../orbisrpc/*.h)
-SAFETY := gateway_safety auth_rotation installer_safety
+SAFETY := gateway_safety auth_rotation installer_safety ws_safety
 SAFETY_BINS = $(addprefix $(OBJDIR)/,$(SAFETY))
 ASAN_SAFETY_BINS = $(addprefix $(ASAN_OBJDIR)/,$(SAFETY))
 
@@ -125,3 +125,10 @@ $(OBJDIR)/installer_safety: test_installer_safety.cpp ../installer/settings.cpp 
 	$(CXX) $(SETTINGS_TEST_FLAGS) -o $@ test_installer_safety.cpp ../installer/settings.cpp $(OBJDIR)/inst_jsonlite.o
 $(ASAN_OBJDIR)/installer_safety: test_installer_safety.cpp ../installer/settings.cpp ../installer/settings.h ../orbisrpc/config_lock.h $(ASAN_OBJDIR)/inst_jsonlite.o | $(ASAN_OBJDIR)
 	$(CXX) $(SETTINGS_TEST_FLAGS) $(ASAN_FLAGS) -o $@ test_installer_safety.cpp ../installer/settings.cpp $(ASAN_OBJDIR)/inst_jsonlite.o
+
+$(OBJDIR)/inst_icfg.o $(ASAN_OBJDIR)/inst_icfg.o: ../orbisrpc/config_lock.h
+
+$(OBJDIR)/ws_safety: test_ws_safety.c ../orbisrpc/ws.c ../orbisrpc/ws_env.c ../orbisrpc/ws_frag.c ../orbisrpc/ws_frame.c $(HDRS) | $(OBJDIR)
+	$(CC) $(CFLAGS) -Wno-unused-variable -o $@ $<
+$(ASAN_OBJDIR)/ws_safety: test_ws_safety.c ../orbisrpc/ws.c ../orbisrpc/ws_env.c ../orbisrpc/ws_frag.c ../orbisrpc/ws_frame.c $(HDRS) | $(ASAN_OBJDIR)
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) -Wno-unused-variable -o $@ $<
