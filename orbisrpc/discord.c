@@ -21,6 +21,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+#include <limits.h>
 
 #define GW_HOST "gateway.discord.gg"
 #define GW_PORT 443
@@ -108,7 +109,13 @@ static int gw_op(const char *json, size_t len){
     while(v < json+len && (*v==' '||*v=='\t')) v++;
     if(v >= json+len || *v<'0' || *v>'9') return -1;
     int op = 0;
-    while(v < json+len && *v>='0' && *v<='9'){ op = op*10 + (*v-'0'); v++; }
+    while(v < json+len && *v>='0' && *v<='9'){
+        int digit = *v++ - '0';
+        if(op > (INT_MAX - digit) / 10) return -1;
+        op = op*10 + digit;
+    }
+    if(v < json+len && *v != ',' && *v != '}' && *v != ' ' &&
+       *v != '\t' && *v != '\r' && *v != '\n') return -1;
     return op;
 }
 static void gw_seq(discord_t *d, const char *json, size_t len){
@@ -118,7 +125,13 @@ static void gw_seq(discord_t *d, const char *json, size_t len){
     while(v < json+len && (*v==' '||*v=='\t')) v++;
     if(v >= json+len || *v<'0' || *v>'9') return; /* null or missing: not a seq */
     int s = 0;
-    while(v < json+len && *v>='0' && *v<='9'){ s = s*10 + (*v-'0'); v++; }
+    while(v < json+len && *v>='0' && *v<='9'){
+        int digit = *v++ - '0';
+        if(s > (INT_MAX - digit) / 10) return;
+        s = s*10 + digit;
+    }
+    if(v < json+len && *v != ',' && *v != '}' && *v != ' ' &&
+       *v != '\t' && *v != '\r' && *v != '\n') return;
     d->seq = s;
 }
 static int is_ready(const char *json, size_t len){
@@ -126,6 +139,13 @@ static int is_ready(const char *json, size_t len){
     if(!v) return 0;
     while(v < json+len && (*v==' '||*v=='\t')) v++;
     return (size_t)(json+len-v) >= 7 && !memcmp(v, "\"READY\"", 7);
+}
+
+static int valid_gateway_json(const char *json){
+    jl_val_t *v = jl_parse(json, strlen(json));
+    int valid = v && v->type == JL_OBJECT;
+    jl_free(v);
+    return valid;
 }
 
 /* recv one frame with a deadline; -4 = timed out. Skipped oversized frames
@@ -259,6 +279,10 @@ int discord_connect(discord_t *d, const char *token, const char *qos_token){
         }
         if(op==9){ ws_pong(&d->ws); continue; }
         if(op!=1) continue;
+        if(!valid_gateway_json(buf)){
+            log_msg("malformed gateway JSON during auth");
+            break;
+        }
         int go = gw_op(buf, (size_t)nr);
         if(go==11){ d->last_ack=orbis_mono_s(); continue; }
         if(go==0 && is_ready(buf, (size_t)nr)){
@@ -306,6 +330,18 @@ int discord_take_qos_token(discord_t *d, char *out, size_t cap){
     memcpy(out, d->ws.qos_token, n + 1);
     memset(d->ws.qos_token, 0, sizeof d->ws.qos_token);
     return 1;
+}
+
+void discord_clear_credentials(discord_t *d){
+    if(!d) return;
+    memset(d->token, 0, sizeof d->token);
+    memset(d->qos_token, 0, sizeof d->qos_token);
+    memset(d->ws.rotated_token, 0, sizeof d->ws.rotated_token);
+    memset(d->ws.qos_token, 0, sizeof d->ws.qos_token);
+    memset(d->ws.env.auth_token, 0, sizeof d->ws.env.auth_token);
+    memset(d->ws.env.qos_token, 0, sizeof d->ws.env.qos_token);
+    d->ws.env.have_auth_token = 0;
+    d->ws.env.have_qos_token = 0;
 }
 
 int discord_set_presence(discord_t *d, const char *state, const char *name,
@@ -613,7 +649,9 @@ int discord_tick(discord_t *d){
             return -1;
         }
         free(payload);
-        d->last_heartbeat=now; d->sent_hb=1;
+        d->last_heartbeat=now;
+        if(!d->sent_hb) d->last_ack=now; /* start the first ACK window here */
+        d->sent_hb=1;
     }
     if(presence_flush(d) < 0){
         log_msg("queued presence send failed; reconnecting");
@@ -639,6 +677,10 @@ int discord_tick(discord_t *d){
         }
         if(op==9){ ws_pong(&d->ws); continue; } /* WS PING -> PONG */
         if(op!=1 && op!=0) continue;
+        if(!valid_gateway_json(buf)){
+            log_msg("malformed gateway JSON; ignoring frame");
+            continue;
+        }
         switch(gw_op(buf, (size_t)nr)){
         case 0: /* DISPATCH: only the sequence matters to us */
             gw_seq(d, buf, (size_t)nr);

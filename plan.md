@@ -6,9 +6,9 @@
 
 **Stack:** ps4-payload-sdk built from pinned git source, OpenOrbis installer, vendored mbedTLS and SQLite, existing host tests and GitHub Actions.
 
-**Specifications:** The portable PDF requirement matrix below, the user’s daemon/PKG/QR/auto-update requests, and `AGENTS.md`. The original PDF is a local supporting source; cloud execution must not depend on accessing the laptop.
+**Specifications:** The portable PDF requirement matrix below, the user’s daemon/PKG/QR/auto-update requests, and `AGENTS.md`. Native work is being done on branch `1.1`; code, tests, docs, and build evidence must all match the commit that is pushed.
 
-Implementation is paused for plan review. Existing edits are candidates, not proof of completion. Execute tasks in order; keep the full scope open until its evidence exists.
+Native implementation is authorized and active. Existing edits are candidates, not proof of completion. Execute tasks in order; keep the full scope open until its evidence exists.
 
 ## Non-negotiable constraints
 
@@ -330,7 +330,7 @@ All PDF defects must be resolved or explicitly identified as unsupported with an
 
 ## Master-plan operating rules
 
-Current instruction: **planning only**. Implementation, builds, releases, and external writes remain paused until execution is requested. A living backlog can continue growing while individual releases have finite acceptance gates.
+Current instruction: execute natively on branch `1.1`, without subagents. The user has authorized the branch commit and push after review. Unrelated external changes remain outside scope. A living backlog can continue growing while individual releases have finite acceptance gates.
 
 On each future execution cycle:
 

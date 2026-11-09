@@ -3,11 +3,16 @@ CC ?= cc
 # _DEFAULT_SOURCE re-enables usleep and friends).
 CFLAGS += -std=c11 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -Wall -Wextra -Werror -DHEALTH_TESTABLE -I../orbisrpc -I../third_party/mbedtls/include -I$(SQLITE_DIR)
 
+HDRS := $(wildcard ../orbisrpc/*.h)
+SAFETY := gateway_safety auth_rotation installer_safety
+SAFETY_BINS = $(addprefix $(OBJDIR)/,$(SAFETY))
+ASAN_SAFETY_BINS = $(addprefix $(ASAN_OBJDIR)/,$(SAFETY))
+
 TARGET := test_utils
 OBJDIR := .objs
 ASAN_OBJDIR := .objs-asan
 MBEDTLS_DIR := ../third_party/mbedtls/library
-# Same exclusion set as scripts/build.sh (POSIX-only modules).
+# POSIX-only mbedTLS modules are excluded from the payload-compatible host link.
 MBEDTLS_SRCS := $(filter-out $(MBEDTLS_DIR)/net_sockets.c $(MBEDTLS_DIR)/timing.c $(MBEDTLS_DIR)/entropy_poll.c,$(wildcard $(MBEDTLS_DIR)/*.c))
 
 ORBIS_SRCS := ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c ../orbisrpc/tmdb_crypto.c ../orbisrpc/updater_util.c ../orbisrpc/art.c ../orbisrpc/log.c ../orbisrpc/health.c ../orbisrpc/compat.c ../orbisrpc/cfg.c ../orbisrpc/appdb.c ../orbisrpc/discord.c ../orbisrpc/procwalk.c ../orbisrpc/bigapp.c ../orbisrpc/pkgzone.c ../orbisrpc/gamecache.c ../orbisrpc/fw.c ../orbisrpc/notify.c ../orbisrpc/retro.c ../orbisrpc/custom.c ../orbisrpc/jsonstr.c ../orbisrpc/timesync.c ../orbisrpc/supervise.c
@@ -31,15 +36,19 @@ ASAN_OBJS := $(ASAN_OBJDIR)/test_utils.o $(ASAN_ORBIS_OBJS) $(ASAN_MBEDTLS_OBJS)
 
 all: $(TARGET)
 
-test: $(TARGET) test_icfg
+test: $(TARGET) test_icfg $(SAFETY_BINS)
 	./$(TARGET)
+	./test_icfg
+	@for t in $(SAFETY_BINS); do ./$$t || exit $$?; done
 
 $(TARGET): $(TEST_OBJS)
 	$(CC) $(CFLAGS) -o $@ $(TEST_OBJS) -lm
 
-asan: $(ASAN_OBJS) test_icfg_asan
+asan: $(ASAN_OBJS) test_icfg_asan $(ASAN_SAFETY_BINS)
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) -o test_utils_asan $(ASAN_OBJS) -lm
 	./test_utils_asan
+	./test_icfg_asan
+	@for t in $(ASAN_SAFETY_BINS); do ./$$t || exit $$?; done
 
 $(OBJDIR):
 	mkdir -p $(OBJDIR)
@@ -51,10 +60,10 @@ $(ASAN_OBJDIR):
 # parts of ws.c, which cannot be linked on the host because it owns a
 # tls_ctx_t). They must be listed here or make treats the object as up to date
 # after they change -- which silently tested stale code.
-$(OBJDIR)/test_utils.o: test_utils.c ../orbisrpc/ws_skip.c ../orbisrpc/ws_env.c ../orbisrpc/ws_env.h | $(OBJDIR)
+$(OBJDIR)/test_utils.o: test_utils.c $(HDRS) ../orbisrpc/ws_skip.c ../orbisrpc/ws_env.c ../orbisrpc/ws_env.h | $(OBJDIR)
 	$(CC) $(CFLAGS) -c -o $@ test_utils.c
 
-$(OBJDIR)/orbis_%.o: ../orbisrpc/%.c | $(OBJDIR)
+$(OBJDIR)/orbis_%.o: ../orbisrpc/%.c $(HDRS) | $(OBJDIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(OBJDIR)/orbis_timesync.o: ../orbisrpc/timesync.c | $(OBJDIR)
@@ -72,10 +81,10 @@ $(OBJDIR)/sqlite3.o: $(SQLITE_DIR)/sqlite3.c | $(OBJDIR)
 $(ASAN_OBJDIR)/sqlite3.o: $(SQLITE_DIR)/sqlite3.c | $(ASAN_OBJDIR)
 	$(CC) $(SQLITE_FLAGS) $(ASAN_FLAGS) -c -o $@ $<
 
-$(ASAN_OBJDIR)/test_utils.o: test_utils.c ../orbisrpc/ws_skip.c ../orbisrpc/ws_env.c ../orbisrpc/ws_env.h | $(ASAN_OBJDIR)
+$(ASAN_OBJDIR)/test_utils.o: test_utils.c $(HDRS) ../orbisrpc/ws_skip.c ../orbisrpc/ws_env.c ../orbisrpc/ws_env.h | $(ASAN_OBJDIR)
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) -c -o $@ test_utils.c
 
-$(ASAN_OBJDIR)/orbis_%.o: ../orbisrpc/%.c | $(ASAN_OBJDIR)
+$(ASAN_OBJDIR)/orbis_%.o: ../orbisrpc/%.c $(HDRS) | $(ASAN_OBJDIR)
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) -c -o $@ $<
 
 $(ASAN_OBJDIR)/orbis_timesync.o: ../orbisrpc/timesync.c | $(ASAN_OBJDIR)
@@ -95,11 +104,24 @@ $(ASAN_OBJDIR)/test_icfg.o: test_icfg.c | $(ASAN_OBJDIR)
 
 test_icfg: $(OBJDIR)/test_icfg.o $(INST_OBJS)
 	$(CC) $(CFLAGS) -o $@ $(OBJDIR)/test_icfg.o $(INST_OBJS) -lm
-	./test_icfg
 
 test_icfg_asan: $(ASAN_OBJDIR)/test_icfg.o $(ASAN_INST_OBJS)
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) -o $@ $(ASAN_OBJDIR)/test_icfg.o $(ASAN_INST_OBJS) -lm
-	./test_icfg_asan
 
 clean:
 	rm -rf $(TARGET) test_utils_asan test_icfg test_icfg_asan $(OBJDIR) $(ASAN_OBJDIR) *.o
+
+# Standalone protocol/persistence and installer safety regressions.
+$(OBJDIR)/gateway_safety: test_gateway_safety.c ../orbisrpc/discord.c ../orbisrpc/ws_env.c ../orbisrpc/ws_frag.c $(HDRS) | $(OBJDIR)
+	$(CC) $(CFLAGS) -o $@ $< ../orbisrpc/jsonlite.c ../orbisrpc/b64.c
+$(ASAN_OBJDIR)/gateway_safety: test_gateway_safety.c ../orbisrpc/discord.c ../orbisrpc/ws_env.c ../orbisrpc/ws_frag.c $(HDRS) | $(ASAN_OBJDIR)
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) -o $@ $< ../orbisrpc/jsonlite.c ../orbisrpc/b64.c
+$(OBJDIR)/auth_rotation: test_auth_rotation.c ../orbisrpc/auth_rotation.h | $(OBJDIR)
+	$(CC) $(CFLAGS) -o $@ $<
+$(ASAN_OBJDIR)/auth_rotation: test_auth_rotation.c ../orbisrpc/auth_rotation.h | $(ASAN_OBJDIR)
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) -o $@ $<
+SETTINGS_TEST_FLAGS := -std=c++11 -Wall -Wextra -Werror -I../installer -DSETTINGS_PATH='"./installer-safety-fixture/config.json"' -DSETTINGS_DIR='"./installer-safety-fixture"'
+$(OBJDIR)/installer_safety: test_installer_safety.cpp ../installer/settings.cpp ../installer/settings.h $(OBJDIR)/inst_jsonlite.o | $(OBJDIR)
+	$(CXX) $(SETTINGS_TEST_FLAGS) -o $@ test_installer_safety.cpp ../installer/settings.cpp $(OBJDIR)/inst_jsonlite.o
+$(ASAN_OBJDIR)/installer_safety: test_installer_safety.cpp ../installer/settings.cpp ../installer/settings.h $(ASAN_OBJDIR)/inst_jsonlite.o | $(ASAN_OBJDIR)
+	$(CXX) $(SETTINGS_TEST_FLAGS) $(ASAN_FLAGS) -o $@ test_installer_safety.cpp ../installer/settings.cpp $(ASAN_OBJDIR)/inst_jsonlite.o

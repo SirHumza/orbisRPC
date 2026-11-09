@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "ws_env.h"
+#include "ws_frag.h"
 
 #define WS_RBUF_MIN 65536          /* initial raw socket buffer (READY is big) */
 /* Grow limit. Now a backstop rather than the working size: any frame with a
@@ -39,6 +40,7 @@ typedef struct {
     /* Envelope scraped while draining an oversized frame. Bounded: only the
      * first WS_ENV_WINDOW bytes of payload are retained. */
     ws_env_t env;
+    ws_frag_t fragments;
     char rotated_token[512]; /* captured only; never logged */
     char qos_token[512];     /* server-signed QoS state; never logged */
     int env_active;             /* 1 while an oversized frame is being drained */

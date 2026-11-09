@@ -1,0 +1,224 @@
+/* Standalone gateway regressions. Build from the repo root with:
+ * cc -std=c11 -D_DEFAULT_SOURCE -Iorbisrpc tests/test_gateway_safety.c \
+ *   orbisrpc/jsonlite.c orbisrpc/b64.c -o /tmp/test_gateway_safety
+ * /tmp/test_gateway_safety
+ */
+#include <assert.h>
+#include <stdarg.h>
+#include <stdlib.h>
+#include <string.h>
+#include "../orbisrpc/discord.c"
+#include "../orbisrpc/ws_env.c"
+#include "../orbisrpc/ws_frag.c"
+
+static int64_t fake_now;
+static int sent;
+
+int64_t orbis_mono_s(void){ return fake_now; }
+void log_msg(const char *fmt, ...){ (void)fmt; }
+void log_dbg(const char *fmt, ...){ (void)fmt; }
+int art_resolve_mp(const char *app_id, const char *token, const char *url,
+                   char *out, size_t cap){
+    (void)app_id; (void)token; (void)url; (void)out; (void)cap; return -1;
+}
+int detect_media_type(const char *title){ (void)title; return 0; }
+int ws_connect(ws_t *w, const char *host, int port, const char *resource, const char *key){
+    (void)w; (void)host; (void)port; (void)resource; (void)key; return -1;
+}
+int ws_send_text(ws_t *w, const char *msg, size_t len){
+    (void)w; (void)msg; sent++; return (int)len;
+}
+int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *op, int *fin){
+    (void)w; (void)buf; (void)cap; (void)op; (void)fin; return 0;
+}
+int ws_pong(ws_t *w){ (void)w; return 0; }
+int ws_close(ws_t *w){ (void)w; return 0; }
+
+static void test_malformed_numbers(void){
+    const char overflow[] = "{\"op\":999999999999999999999999,\"d\":{}}";
+    const char suffix[] = "{\"op\":11x,\"d\":{}}";
+    const char seq_overflow[] = "{\"op\":0,\"s\":999999999999999999999999,\"t\":\"READY\"}";
+    discord_t d;
+    memset(&d, 0, sizeof d);
+    d.seq = 17;
+    assert(gw_op(overflow, sizeof overflow - 1) == -1);
+    assert(gw_op(suffix, sizeof suffix - 1) == -1);
+    assert(valid_gateway_json(overflow)); /* JSON-valid, but integer range is not */
+    gw_seq(&d, seq_overflow, sizeof seq_overflow - 1);
+    assert(d.seq == 17);
+    assert(!valid_gateway_json("{\"op\":11,"));
+}
+
+static void test_identify_echoes_qos_only_when_supplied(void){
+    jl_val_t *identify = discord_build_identify("test-token", "signed-qos");
+    assert(identify);
+    const jl_val_t *data = jl_obj_get(identify, "d");
+    assert(data && data->type == JL_OBJECT);
+    const jl_val_t *token = jl_obj_get(data, "token");
+    const jl_val_t *qos = jl_obj_get(data, "qos_token");
+    assert(token && !strcmp(token->str, "test-token"));
+    assert(qos && !strcmp(qos->str, "signed-qos"));
+    assert(jl_obj_get(data, "capabilities") == NULL);
+    jl_free(identify);
+
+    identify = discord_build_identify("test-token", NULL);
+    assert(identify);
+    data = jl_obj_get(identify, "d");
+    assert(jl_obj_get(data, "qos_token") == NULL);
+    jl_free(identify);
+}
+
+static void test_rotation_take_validation(void){
+    discord_t d;
+    char out[32] = {0};
+    memset(&d, 0, sizeof d);
+    strcpy(d.ws.rotated_token, "rotated-B");
+    assert(discord_take_rotated_token(&d, out, 4) == -1);
+    assert(!strcmp(d.ws.rotated_token, "rotated-B"));
+    assert(discord_take_rotated_token(&d, out, sizeof out) == 1);
+    assert(!strcmp(out, "rotated-B") && d.ws.rotated_token[0] == 0);
+    strcpy(d.ws.rotated_token, "bad token");
+    assert(discord_take_rotated_token(&d, out, sizeof out) == -1);
+    assert(d.ws.rotated_token[0] == 0);
+}
+
+static void test_credentials_clear_after_session(void){
+    discord_t d;
+    memset(&d, 0, sizeof d);
+    strcpy(d.token, "session-token");
+    strcpy(d.qos_token, "signed-qos");
+    strcpy(d.ws.rotated_token, "rotated-token");
+    strcpy(d.ws.qos_token, "next-qos");
+    strcpy(d.ws.env.auth_token, "captured-token");
+    strcpy(d.ws.env.qos_token, "captured-qos");
+    d.ws.env.have_auth_token = d.ws.env.have_qos_token = 1;
+    discord_clear_credentials(&d);
+    assert(!d.token[0] && !d.qos_token[0]);
+    assert(!d.ws.rotated_token[0] && !d.ws.qos_token[0]);
+    assert(!d.ws.env.auth_token[0] && !d.ws.env.qos_token[0]);
+    assert(!d.ws.env.have_auth_token && !d.ws.env.have_qos_token);
+}
+
+static void test_first_heartbeat_ack_window(void){
+    discord_t d;
+    memset(&d, 0, sizeof d);
+    d.connected = 1;
+    d.hb_interval_ms = 5000;
+    d.last_heartbeat = 0;
+    d.last_ack = 0; /* connection/HELLO time, long before the first send */
+    fake_now = 100;
+    sent = 0;
+    assert(discord_tick(&d) == 0);
+    assert(sent == 1 && d.sent_hb && d.last_ack == fake_now);
+
+    /* An unacknowledged first heartbeat remains alive until its own timeout. */
+    fake_now += 25;
+    assert(discord_tick(&d) == 0);
+    fake_now++;
+    assert(discord_tick(&d) == -1);
+}
+
+static void test_fragment_reassembly(void){
+    ws_frag_t s = {0};
+    const unsigned char *message = NULL;
+    size_t message_len = 0;
+    assert(ws_frag_feed(&s, 0, 1, (const unsigned char *)"x", 1,
+                        &message, &message_len) == -1);
+    assert(ws_frag_feed(&s, 1, 0, (const unsigned char *)"{\"op\":", 6,
+                        &message, &message_len) == 0);
+    assert(ws_frag_feed(&s, 0, 0, (const unsigned char *)"0,", 2,
+                        &message, &message_len) == 0);
+    assert(ws_frag_feed(&s, 0, 1, (const unsigned char *)"\"t\":\"READY\"}", 12,
+                        &message, &message_len) == 1);
+    assert(message_len == 20);
+    assert(!memcmp(message, "{\"op\":0,\"t\":\"READY\"}", 20));
+    ws_frag_reset(&s);
+
+    size_t too_big = WS_BODY_MAX + 1;
+    unsigned char *large = malloc(too_big);
+    assert(large);
+    memset(large, 'x', too_big);
+    assert(ws_frag_feed(&s, 1, 0, large, too_big, &message, &message_len) == 0);
+    assert(s.discarding && s.active && !s.data);
+    assert(ws_frag_feed(&s, 0, 1, (const unsigned char *)"tail", 4,
+                        &message, &message_len) == -2);
+    assert(!s.active && !s.discarding);
+    free(large);
+}
+
+static void test_bounded_large_envelope(void){
+    char payload[4096];
+    strcpy(payload, "{\"op\":0,\"s\":41,\"t\":\"READY\",\"d\":\"");
+    size_t used = strlen(payload);
+    memset(payload + used, 'x', 3000);
+    used += 3000;
+    strcpy(payload + used, "\"}");
+
+    ws_env_t env;
+    ws_env_init(&env);
+    ws_env_feed(&env, (const unsigned char *)payload, strlen(payload));
+    assert(ws_env_is_ready(&env));
+    char envelope[128];
+    size_t n = ws_env_render(&env, envelope, sizeof envelope);
+    assert(n && !strcmp(envelope, "{\"op\":0,\"s\":41,\"t\":\"READY\"}"));
+}
+
+static void test_token_fields_require_ready_envelope(void){
+    ws_env_t env;
+    ws_env_init(&env);
+    const char *not_ready = "{\"op\":0,\"t\":\"MESSAGE_CREATE\",\"d\":{"
+                            "\"auth_token\":\"should-not-rotate\"}}";
+    ws_env_feed(&env, (const unsigned char *)not_ready, strlen(not_ready));
+    assert(env.have_auth_token);
+    assert(!ws_env_is_ready(&env));
+    char out[64] = {0};
+    assert(ws_env_take_auth_token(&env, out, sizeof out) == 0);
+    assert(out[0] == 0);
+
+    ws_env_init(&env);
+    const char *ready = "{\"op\":0,\"t\":\"READY\",\"d\":{"
+                        "\"meta\":{\"auth_token\":\"nested-decoy\"},"
+                        "\"auth_token\":\"rotated-A\",\"qos_token\":\"signed-qos\"}}";
+    ws_env_feed(&env, (const unsigned char *)ready, strlen(ready));
+    assert(ws_env_take_auth_token(&env, out, 4) == -1); /* retain on short buffer */
+    assert(env.have_auth_token);
+    assert(ws_env_take_auth_token(&env, out, sizeof out) == 1);
+    assert(!strcmp(out, "rotated-A"));
+    memset(out, 0, sizeof out);
+    assert(ws_env_take_qos_token(&env, out, sizeof out) == 1);
+    assert(!strcmp(out, "signed-qos"));
+    assert(ws_env_take_qos_token(&env, out, sizeof out) == 0);
+}
+
+static void test_split_ready_rotation_with_decoys(void){
+    ws_env_t env;
+    ws_env_init(&env);
+    const char *a = "{\"op\":0,\"t\":\"READY\",\"d\":{\"note\":\"auth_token decoy\",";
+    const char *b = "\"auth_token\":\"rotated-";
+    const char *c = "C\",\"qos_token\":\"signed-";
+    const char *d = "qos-C\"}}";
+    ws_env_feed(&env, (const unsigned char *)a, strlen(a));
+    ws_env_feed(&env, (const unsigned char *)b, strlen(b));
+    assert(!env.have_auth_token); /* incomplete value is not promoted */
+    ws_env_feed(&env, (const unsigned char *)c, strlen(c));
+    ws_env_feed(&env, (const unsigned char *)d, strlen(d));
+    char out[64] = {0};
+    assert(ws_env_take_auth_token(&env, out, sizeof out) == 1);
+    assert(!strcmp(out, "rotated-C"));
+    memset(out, 0, sizeof out);
+    assert(ws_env_take_qos_token(&env, out, sizeof out) == 1);
+    assert(!strcmp(out, "signed-qos-C"));
+}
+
+int main(void){
+    test_malformed_numbers();
+    test_identify_echoes_qos_only_when_supplied();
+    test_rotation_take_validation();
+    test_credentials_clear_after_session();
+    test_first_heartbeat_ack_window();
+    test_fragment_reassembly();
+    test_bounded_large_envelope();
+    test_token_fields_require_ready_envelope();
+    test_split_ready_rotation_with_decoys();
+    return 0;
+}

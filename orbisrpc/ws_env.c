@@ -39,7 +39,7 @@ static void scan_token(ws_env_t *e, const unsigned char *p, size_t n){
                 }
                 e->auth_state = 0;
                 e->capture_kind = 0;
-            } else if(e->string_depth >= 2 && !e->string_overflow){
+            } else if(e->string_depth == 2 && !e->string_overflow){
                 if(!e->have_auth_token && e->string_len == 10 &&
                    !memcmp(e->string, "auth_token", 10)){
                     e->auth_state = 1; e->capture_kind = 1;
@@ -183,6 +183,32 @@ int ws_env_complete(const ws_env_t *e){
     /* Window saturated: nothing further can ever match, so waiting out the
      * rest of the frame would not change the result. */
     return e->winlen >= WS_ENV_WINDOW;
+}
+
+int ws_env_is_ready(const ws_env_t *e){
+    return e && e->have_op && e->have_t &&
+           !strcmp(e->op, "0") && !strcmp(e->t, "READY");
+}
+
+static int take_ready_token(ws_env_t *e, int qos, char *out, size_t cap){
+    if(!e || !out || cap == 0 || !ws_env_is_ready(e)) return 0;
+    char *src = qos ? e->qos_token : e->auth_token;
+    int *have = qos ? &e->have_qos_token : &e->have_auth_token;
+    if(!*have) return 0;
+    size_t n = strlen(src);
+    if(n >= cap) return -1;
+    memcpy(out, src, n + 1);
+    memset(src, 0, qos ? sizeof e->qos_token : sizeof e->auth_token);
+    *have = 0;
+    return 1;
+}
+
+int ws_env_take_auth_token(ws_env_t *e, char *out, size_t cap){
+    return take_ready_token(e, 0, out, cap);
+}
+
+int ws_env_take_qos_token(ws_env_t *e, char *out, size_t cap){
+    return take_ready_token(e, 1, out, cap);
 }
 
 size_t ws_env_render(const ws_env_t *e, char *out, size_t cap){

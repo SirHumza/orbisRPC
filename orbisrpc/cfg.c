@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
+#include <math.h>
 #include <unistd.h>
 #include <sys/stat.h>
 
@@ -81,13 +83,12 @@ static void clamp_cfg(cfg_t *c){
 
 int cfg_load(const char *path, cfg_t *c) {
     if(!path || !c) return -1;
-    cfg_defaults(c);
     FILE *f = fopen(path, "rb");
-    if (!f) { log_msg("config not found at %s; defaults applied", path); return -1; }
+    if (!f) { cfg_defaults(c); log_msg("config not found at %s; defaults applied", path); return -1; }
     if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return -1; }
     long sz = ftell(f);
     if (sz < 0 || fseek(f, 0, SEEK_SET) != 0) { fclose(f); return -1; }
-    if (sz <= 0 || sz > 1<<20) { fclose(f); return -1; }
+    if (sz <= 0 || sz > (1<<20)) { fclose(f); return -1; }
     char *buf = (char *)malloc((size_t)sz + 1);
     if (!buf) { fclose(f); return -1; }
     size_t n = fread(buf, 1, (size_t)sz, f); fclose(f);
@@ -95,13 +96,24 @@ int cfg_load(const char *path, cfg_t *c) {
     buf[n] = 0;
     jl_val_t *root = jl_parse(buf, n);
     free(buf);
-    if (!root) { log_msg("config parse failed; using defaults"); return -1; }
+    if (!root) { log_msg("config parse failed; keeping current config"); return -1; }
+    if (root->type != JL_OBJECT) {
+        jl_free(root);
+        log_msg("config root is not an object; keeping current config");
+        return -1;
+    }
+    /* Parse transactionally: any rejected known string leaves the caller's
+     * last-good configuration intact. */
+    cfg_t next;
+    cfg_defaults(&next);
     const jl_val_t *o;
 #define STR(k,f) do { \
         o=jl_obj_get(root,k); \
         if(o&&o->type==JL_STRING){ \
-            strncpy(c->f,o->str,sizeof(c->f)-1); \
-            c->f[sizeof(c->f)-1]=0; \
+            if (!o->str || o->strlen >= sizeof(next.f) || memchr(o->str, 0, o->strlen)) { \
+                jl_free(root); log_msg("config field %s is invalid or too long", k); return -1; \
+            } \
+            memcpy(next.f,o->str,o->strlen); next.f[o->strlen]=0; \
         } \
     } while(0)
     STR("token", token);
@@ -122,13 +134,16 @@ int cfg_load(const char *path, cfg_t *c) {
     /* User-local title overrides: {"CUSA11995": "Marvel's Spider-Man"}.
      * Defensive: wrong types, overlong keys/names, and overflow past
      * CFG_MAX_TITLES are ignored, never fatal. */
-    c->n_titles = 0;
+    next.n_titles = 0;
     o = jl_obj_get(root, "titles");
     if(o && o->type == JL_OBJECT){
-        for(jl_val_t *p = o->child; p && c->n_titles < CFG_MAX_TITLES; p = p->next){
+        for(jl_val_t *p = o->child; p && next.n_titles < CFG_MAX_TITLES; p = p->next){
             const jl_val_t *v = p->child ? p->child : p;
             if(!p->str || !v || v->type != JL_STRING || !v->str) continue;
-            size_t kl = strlen(p->str), vl = strlen(v->str);
+            size_t kl = p->strlen, vl = v->strlen;
+            if (memchr(p->str, 0, kl) || memchr(v->str, 0, vl) ||
+                kl >= (size_t)CFG_TITLEID_LEN || vl >= (size_t)CFG_TITLENAME_LEN)
+                continue;
             if(kl == 0 || kl >= (size_t)CFG_TITLEID_LEN) continue;
             if(vl < 2 || vl >= (size_t)CFG_TITLENAME_LEN) continue;
             int ok = 1;
@@ -137,30 +152,41 @@ int cfg_load(const char *path, cfg_t *c) {
                 if(!((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_')){ ok = 0; break; }
             }
             if(!ok) continue;
-            strncpy(c->title_ids[c->n_titles], p->str, CFG_TITLEID_LEN - 1);
-            c->title_ids[c->n_titles][CFG_TITLEID_LEN - 1] = 0;
-            strncpy(c->title_names[c->n_titles], v->str, CFG_TITLENAME_LEN - 1);
-            c->title_names[c->n_titles][CFG_TITLENAME_LEN - 1] = 0;
-            c->n_titles++;
+            memcpy(next.title_ids[next.n_titles], p->str, kl + 1);
+            memcpy(next.title_names[next.n_titles], v->str, vl + 1);
+            next.n_titles++;
         }
     }
-    o = jl_obj_get(root, "enabled");         if (o && o->type == JL_BOOL)   c->enabled = (int)o->num;
-    o = jl_obj_get(root, "pkgzone_enabled"); if (o && o->type == JL_BOOL)   c->pkgzone_enabled = (int)o->num;
-    o = jl_obj_get(root, "retro_enabled");  if (o && o->type == JL_BOOL)   c->retro_enabled = (int)o->num;
-    o = jl_obj_get(root, "custom_enabled"); if (o && o->type == JL_BOOL)   c->custom_enabled = (int)o->num;
-    o = jl_obj_get(root, "show_firmware"); if (o && o->type == JL_BOOL)   c->show_firmware = (int)o->num;
-    o = jl_obj_get(root, "show_idle");     if (o && o->type == JL_BOOL)   c->show_idle = (int)o->num;
-    o = jl_obj_get(root, "show_media");    if (o && o->type == JL_BOOL)   c->show_media = (int)o->num;
-    o = jl_obj_get(root, "show_homebrew"); if (o && o->type == JL_BOOL)   c->show_homebrew = (int)o->num;
-    o = jl_obj_get(root, "auto_update");     if (o && o->type == JL_BOOL)   c->auto_update = (int)o->num;
-    o = jl_obj_get(root, "debug");           if (o && o->type == JL_BOOL)   c->debug = (int)o->num;
-    o = jl_obj_get(root, "poll_interval_s"); if (o && o->type == JL_NUMBER) c->poll_interval_s = (int)o->num;
-    o = jl_obj_get(root, "schema_version");  if (o && o->type == JL_NUMBER) c->schema_version = (int)o->num;
+    o = jl_obj_get(root, "enabled");         if (o && o->type == JL_BOOL)   next.enabled = (int)o->num;
+    o = jl_obj_get(root, "pkgzone_enabled"); if (o && o->type == JL_BOOL)   next.pkgzone_enabled = (int)o->num;
+    o = jl_obj_get(root, "retro_enabled");  if (o && o->type == JL_BOOL)   next.retro_enabled = (int)o->num;
+    o = jl_obj_get(root, "custom_enabled"); if (o && o->type == JL_BOOL)   next.custom_enabled = (int)o->num;
+    o = jl_obj_get(root, "show_firmware"); if (o && o->type == JL_BOOL)   next.show_firmware = (int)o->num;
+    o = jl_obj_get(root, "show_idle");     if (o && o->type == JL_BOOL)   next.show_idle = (int)o->num;
+    o = jl_obj_get(root, "show_media");    if (o && o->type == JL_BOOL)   next.show_media = (int)o->num;
+    o = jl_obj_get(root, "show_homebrew"); if (o && o->type == JL_BOOL)   next.show_homebrew = (int)o->num;
+    o = jl_obj_get(root, "auto_update");     if (o && o->type == JL_BOOL)   next.auto_update = (int)o->num;
+    o = jl_obj_get(root, "debug");           if (o && o->type == JL_BOOL)   next.debug = (int)o->num;
+    o = jl_obj_get(root, "poll_interval_s");
+    if (o && o->type == JL_NUMBER) {
+        if (!isfinite(o->num) || o->num < INT_MIN || o->num > INT_MAX) {
+            jl_free(root); log_msg("config poll_interval_s is out of range"); return -1;
+        }
+        next.poll_interval_s = (int)o->num;
+    }
+    o = jl_obj_get(root, "schema_version");
+    if (o && o->type == JL_NUMBER) {
+        if (!isfinite(o->num) || o->num < INT_MIN || o->num > INT_MAX) {
+            jl_free(root); log_msg("config schema_version is out of range"); return -1;
+        }
+        next.schema_version = (int)o->num;
+    }
     jl_free(root);
-    clamp_cfg(c);
+    clamp_cfg(&next);
     /* Migration: stamp current schema so re-saves converge.
      * v0 (no key): identical layout, adopt as-is. */
-    c->schema_version = CFG_SCHEMA_VERSION;
+    next.schema_version = CFG_SCHEMA_VERSION;
+    *c = next;
     return 0;
 }
 
@@ -252,7 +278,12 @@ int cfg_save(const char *path, const cfg_t *c) {
     if(!s){ log_msg("cfg_save: serialization failed"); jl_free(r); return -1; }
     /* write tmp + fsync + rename so a power loss can't corrupt the config */
     char tmp[160];
-    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    int tmp_len = snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    if (tmp_len < 0 || (size_t)tmp_len >= sizeof tmp) {
+        free(s); jl_free(r);
+        log_msg("cfg_save: config path too long");
+        return -1;
+    }
     FILE *f = fopen(tmp, "wb");
     int ok = 0;
     if (f) {

@@ -131,7 +131,16 @@ _unused     := $(shell mkdir -p $(INTDIR))
 CC          := clang
 CCX         := clang++
 LD          := ld.lld
+HOST_OS     := $(shell uname -s)
+ifeq ($(HOST_OS),Darwin)
+CDIR        := macos
+FSELF       := create-fself-macos
+else ifeq ($(HOST_OS),Linux)
 CDIR        := linux
+FSELF       := create-fself
+else
+$(error Unsupported host OS '$(HOST_OS)' for OpenOrbis package tools)
+endif
 
 # Assets: .gitkeep files keep empty folders in git but must not ship.
 #
@@ -173,7 +182,7 @@ ASSET_FILES = $(filter-out %.gitkeep,$(shell find $(SOURCEDIR)/assets -type f))
 #   - all five directories must exist, kept by .gitkeep markers (filtered out of
 #     ASSET_FILES above, so they package as empty)
 #   - artwork must live in one of them. It ships in images/.
-ASSET_DIRS  := audio images misc videos
+ASSET_DIRS  := audio fonts images misc videos
 ASSET_MK    := $(foreach d,$(ASSET_DIRS),$(SOURCEDIR)/assets/$(d)/.gitkeep)
 LIBMODULES  := $(wildcard $(SOURCEDIR)/sce_module/*)
 
@@ -191,7 +200,7 @@ LOGO        := $(wildcard $(SOURCEDIR)/assets/logo.png)
 # Hence the hard error below rather than a warning -- an empty PAYLOAD_NAME is
 # never a valid state, and it fails quietly in ways that only show up on the
 # console as "This install is missing its payload."
-PAYLOAD_NAME := $(shell sed -n 's/^#define[[:space:]]\+PAYLOAD_NAME[[:space:]]\+"\([^"]*\)".*$$/\1/p' $(SOURCEDIR)/paths.h)
+PAYLOAD_NAME := $(shell grep '^\#define PAYLOAD_NAME' installer/paths.h | cut -d '"' -f 2)
 ifeq ($(strip $(PAYLOAD_NAME)),)
 $(error PAYLOAD_NAME is empty -- expected '#define PAYLOAD_NAME "orbisRPC.elf"' in $(SOURCEDIR)/paths.h)
 endif
@@ -224,7 +233,8 @@ PKG_OUT     := $(OUTDIR)/orbisRPC-$(VERSION).pkg
 # when the file is missing, so looping over it checks nothing at exactly the
 # moment there is something to check. That is the blind spot this guard was
 # written to close, reproduced by the obvious way of writing it.
-REQUIRED_PKG_FILES := $(PAYLOAD_NAME) logo.png
+REQUIRED_PKG_FILES := $(PAYLOAD_NAME) logo.png \
+	fonts/Bebas-Regular.ttf fonts/SegUIVar.ttf fonts/VeraMono.ttf
 else
 $(warning No payload ELFs in $(SOURCEDIR)/assets -- the app will build and run, \
 but the install step has nothing to send. Copy orbisRPC.elf \
@@ -412,7 +422,7 @@ $(SOURCEDIR)/sce_sys/param.sfo: Makefile
 
 $(SOURCEDIR)/eboot.bin: $(INTDIR) $(OBJS)
 	$(LD) $(OBJS) -o $(INTDIR)/$(TARGET).elf $(LDFLAGS)
-	$(TOOLCHAIN)/bin/$(CDIR)/create-fself -in=$(INTDIR)/$(TARGET).elf -out=$(INTDIR)/$(TARGET).oelf --eboot "$(SOURCEDIR)/eboot.bin" --paid 0x3800000000000011
+	$(TOOLCHAIN)/bin/$(CDIR)/$(FSELF) -in=$(INTDIR)/$(TARGET).elf -out=$(INTDIR)/$(TARGET).oelf --eboot "$(SOURCEDIR)/eboot.bin" --paid 0x3800000000000011
 	@echo "==> built $(SOURCEDIR)/eboot.bin"
 
 # Every header this app compiles against, as an order-only-free prerequisite on

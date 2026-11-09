@@ -15,8 +15,12 @@
 // The daemon's own config, not a copy. This was deliberately a scratch path --
 // /data/orbispkg_test/settings.json -- while the page was a mockup, which is
 // exactly why nothing it did had any effect: the daemon never read that file.
+#ifndef SETTINGS_PATH
 #define SETTINGS_PATH ICFG_PATH
+#endif
+#ifndef SETTINGS_DIR
 #define SETTINGS_DIR  INST_DIR
+#endif
 #define SETTINGS_MAX  (16u * 1024u)
 
 namespace {
@@ -91,7 +95,9 @@ int EnsureDir(const char *path)
 } // namespace
 
 Settings::Settings()
-	: showFirmware_(kDefaultShowFirmware)
+	: available_(false)
+	, tokenModified_(false)
+	, showFirmware_(kDefaultShowFirmware)
 	, showMediaApps_(kDefaultShowMediaApps)
 	, showHomeScreen_(kDefaultHomeScreen)
 	, showHomebrew_(kDefaultHomebrew)
@@ -216,6 +222,7 @@ void Settings::Load()
 	showHomebrew_ = kDefaultHomebrew;
 	customMessage_.clear();
 	token_.clear();
+	tokenModified_ = false;
 
 	char *buf = ReadWholeFile(SETTINGS_PATH);
 	if (!buf)
@@ -275,7 +282,7 @@ void Settings::Load()
 	jl_free(root);
 }
 
-int Settings::Save() const
+int Settings::Save()
 {
 	if (EnsureDir(SETTINGS_DIR) != 0)
 		return -1;
@@ -289,32 +296,26 @@ int Settings::Save() const
 	// them on the first toggle press. So the existing document is parsed, the five
 	// keys are set on *that*, and the whole thing is written back.
 	//
-	// A missing or unparseable file falls back to a fresh object rather than
-	// failing: losing a settings page is better than losing the config, and the
-	// installer can put the config back.
+	// The page is only available for an existing config. If it becomes unreadable
+	// or malformed between Load() and Save(), fail closed instead of replacing it
+	// with a settings-only object and discarding the daemon's other keys.
 	jl_val_t *root = nullptr;
 	{
 		char *buf = ReadWholeFile(SETTINGS_PATH);
-
-		if (buf)
-		{
-			root = jl_parse(buf, strlen(buf));
-			free(buf);
-		}
+		if (!buf)
+			return -1;
+		root = jl_parse(buf, strlen(buf));
+		free(buf);
 
 		if (root && root->type != JL_OBJECT)
 		{
 			jl_free(root);
-			root = nullptr;
+			return -1;
 		}
 	}
 
 	if (!root)
-	{
-		root = jl_new_object();
-		if (!root)
-			return -1;
-	}
+		return -1;
 
 	// Real booleans, so the daemon can read them without parsing.
 	jl_obj_set(root, kShowFirmwareKey, jl_new_bool(showFirmware_));
@@ -329,10 +330,11 @@ int Settings::Save() const
 	           jl_new_string(customMessage_.empty() ? kDefaultCustomMsg
 	                                               : customMessage_.c_str()));
 
-	// Written back exactly as loaded. Validated when it is edited, not here --
-	// see Load(). Writing an empty token over a working one because the field
-	// happened to be left blank would lock the user out of their own presence.
-	jl_obj_set(root, kTokenKey, jl_new_string(token_.c_str()));
+	// Preserve the current file value during unrelated settings saves. Only an
+	// explicit edit replaces it, so stale in-memory state cannot undo a newer
+	// daemon-side token change.
+	if (tokenModified_)
+		jl_obj_set(root, kTokenKey, jl_new_string(token_.c_str()));
 
 	char *text = jl_stringify(root);
 	jl_free(root);
@@ -371,7 +373,7 @@ int Settings::Save() const
 			ok = 0;
 	}
 
-	if (ok && fclose(f) != 0)
+	if (fclose(f) != 0)
 		ok = 0;
 
 	free(text);
@@ -387,6 +389,8 @@ int Settings::Save() const
 		remove(tmp);
 		return -1;
 	}
+
+	tokenModified_ = false;
 
 	return 0;
 }

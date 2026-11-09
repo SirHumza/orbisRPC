@@ -53,7 +53,7 @@ App internals: [INSTALLER.md](INSTALLER.md).
 | `gfx2bmp.py` | Artwork PNG → BMP, used by `make gfx`. |
 | `gen_icon_header.py` | Regenerates `orbisrpc/icon_embedded.h` from the notification icon. |
 | `add_custom_title.py` | Adds/removes entries in `config/custom.json`. |
-| `build.sh` | Legacy OpenOrbis flavor of the payload build. Not the shipping path. |
+| `build.sh` | Deprecated compatibility wrapper that runs `build_sdk.sh`. |
 | `make_ca_bundle.py` | Regenerates the curated CA bundle the daemon pins TLS against. |
 
 ## The one rule

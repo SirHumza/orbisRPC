@@ -267,7 +267,7 @@ int ui_input(const char *title, const char *placeholder, char *out, size_t cap){
     size_t i;
     /* Bound first, before anything is opened. Over it, nothing is shown at all,
      * which is a silent failure for the caller -- hence ui.h's UI_INPUT_MAX. */
-    if(!out || cap == 0 || cap > UI_INPUT_MAX) return -1;
+    if(!ui_ready || !out || cap == 0 || cap > UI_INPUT_MAX) return -1;
     /* Prefill with current value (ASCII round-trip). */
     for(i = 0; i < cap - 1 && out[i]; i++) wbuf[i] = (wchar_t)(unsigned char)out[i];
     wbuf[i] = 0;

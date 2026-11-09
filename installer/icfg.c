@@ -70,7 +70,7 @@ static int icfg_write(const char *path, jl_val_t *r){
         int fd = fileno(f);
         if(fd >= 0 && fsync(fd) != 0) ok = 0;
     }
-    if(ok && fclose(f) != 0) ok = 0;
+    if(fclose(f) != 0) ok = 0;
     free(s);
     if(!ok){ remove(tmp); return -1; }
     if(rename(tmp, path) != 0){ remove(tmp); return -1; }

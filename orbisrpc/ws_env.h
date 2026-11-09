@@ -64,6 +64,12 @@ void ws_env_feed(ws_env_t *e, const unsigned char *p, size_t n);
  * reads "t". "s" is optional -- gw_seq() returns quietly when it is missing,
  * and requiring it here meant one unmatched field stalled the whole report. */
 int ws_env_complete(const ws_env_t *e);
+/* Token fields are accepted only from the gateway READY dispatch. */
+int ws_env_is_ready(const ws_env_t *e);
+/* Copy and consume a captured READY credential. Returns 1 if copied, 0 if
+ * absent or the envelope is not READY, and -1 if the output is too small. */
+int ws_env_take_auth_token(ws_env_t *e, char *out, size_t cap);
+int ws_env_take_qos_token(ws_env_t *e, char *out, size_t cap);
 /* Render a minimal JSON envelope holding only the fields that were found,
  * shaped so discord.c's existing top_val() reads it unchanged.
  * Returns bytes written (excluding NUL), or 0 if nothing was captured. */

@@ -18,8 +18,8 @@ typedef struct {
     size_t pending_presence_len;
     char pending_presence[16385];
 } discord_t;
-/* Returns 0 on READY, -1 net/proto error, -2 auth-fatal (close 4004: don't
- * retry — the token is wrong and Discord bans IPs that hammer it). */
+/* Returns 0 on READY, -1 network/protocol error, -2 explicit auth rejection
+ * (close 4004). */
 int discord_connect(discord_t *d, const char *token, const char *qos_token);
 /* Pure Identify payload builder, exposed for host regression tests. */
 jl_val_t *discord_build_identify(const char *token, const char *qos_token);
@@ -53,4 +53,6 @@ int discord_tick(discord_t *d);             /* 0 ok; -1 drop/reconnect; -2 auth-
  * Returns 1 when copied, 0 when none is pending, -1 if the output is too small. */
 int discord_take_rotated_token(discord_t *d, char *out, size_t cap);
 int discord_take_qos_token(discord_t *d, char *out, size_t cap);
+/* Clear credential copies after a session ends. */
+void discord_clear_credentials(discord_t *d);
 #endif

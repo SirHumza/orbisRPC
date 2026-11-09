@@ -36,19 +36,17 @@ All paths from [`installer/paths.h`](../installer/paths.h). The payload name is
 
 ## Install flow
 
-```
-already installed?  -> yes: report and stop (uninstall first)
-                  \-> no:
-GitHub release newer than local?  -> yes: download payload + config to /data/temp/
-preflight: /app0/assets/orbisRPC.elf present?  -> no: stop with "missing its payload"
-copy payload    -> /data/payloads/orbisRPC.elf
-copy icon       -> /data/payloads/orbisRPC.elf.png
-write config    -> /data/orbisRPC/config.json   (atomic: tmp + fsync + rename)
-write version   -> /data/orbisRPC/version
-ask: GoldHEN present?  -> add /user/data/payloads entry + payloads.ini
-ask: nanoDNS present?  -> add tmdb.np.dl.playstation.net exception
-restart prompt if an update replaced a running payload
-```
+The flow checks for a newer GitHub release first. When one is available and
+accepted, it downloads the payload and config into `/data/temp/` and installs
+both together. Otherwise it uses the copies packaged in the PKG. It checks the
+payload before copying, preserves selected user settings from the existing
+config, verifies file copies by byte count and hash, and records the installed
+version. An installed payload is replaced only through the accepted update
+path; a second fresh install stops and asks the user to uninstall first.
+
+After the files are in place, the app offers to add a GoldHEN auto-run entry
+and, when nanoDNS is present, the Sony TMDB exception. Replacing a running
+payload or adding auto-run may require a restart.
 
 Both the GoldHEN and nanoDNS prompts are **opt-in**, **idempotent** (an entry
 that is already present reports "Nothing was changed"), and **skipped silently**
@@ -71,9 +69,8 @@ them.
   OpenOrbis's `YESNO_FOCUS_NO` default puts the console's confirm button on No,
   which inverts the whole wizard.
 - No branch returns to start; cancel and skip always move forward.
-- `updatecheck` hits the GitHub releases API. It reports a newer version and
-  downloads to `/data/temp/`; the daemon separately only *notifies* and never
-  replaces itself.
+- The setup app checks GitHub releases and can download an accepted update.
+  The daemon only notifies about a newer release; it does not replace itself.
 
 ## Building
 

@@ -267,7 +267,12 @@ fail:
 #else
     if(w->fd > 0)  sceNetSocketClose(w->fd);
 #endif
+    if(w->rbuf) memset(w->rbuf, 0, w->rcap);
     free(w->rbuf); w->rbuf=NULL; w->rcap=0;
+    memset(w->rotated_token, 0, sizeof w->rotated_token);
+    memset(w->qos_token, 0, sizeof w->qos_token);
+    memset(&w->env, 0, sizeof w->env);
+    ws_frag_reset(&w->fragments);
     w->connected=0; w->tls=NULL; w->fd=0; w->sock=0;
     return -9;
 }
@@ -343,22 +348,30 @@ static int valid_frame_header(const unsigned char *b, uint64_t plen){
  * the host tests can compile both without the socket/TLS half of this file. */
 #include "ws_skip.c"
 #include "ws_env.c"
+#include "ws_frag.c"
 
 static void ws_capture_token(ws_t *w){
     if(!w) return;
-    if(w->env.have_auth_token && !w->rotated_token[0]){
-        memcpy(w->rotated_token, w->env.auth_token, sizeof w->rotated_token);
-        w->rotated_token[sizeof w->rotated_token - 1] = 0;
+    /* A matching field name elsewhere in a dispatch is not a credential
+     * rotation. Wait for the envelope to identify READY before publishing
+     * either server-issued value; discard them once another event is known. */
+    if(!ws_env_is_ready(&w->env)){
+        if(w->env.have_op && w->env.have_t){
+            memset(w->env.auth_token, 0, sizeof w->env.auth_token);
+            memset(w->env.qos_token, 0, sizeof w->env.qos_token);
+            w->env.have_auth_token = w->env.have_qos_token = 0;
+        }
+        return;
     }
-    if(w->env.have_auth_token){
+    if(!w->rotated_token[0])
+        ws_env_take_auth_token(&w->env, w->rotated_token, sizeof w->rotated_token);
+    else {
         memset(w->env.auth_token, 0, sizeof w->env.auth_token);
         w->env.have_auth_token = 0;
     }
-    if(w->env.have_qos_token && !w->qos_token[0]){
-        memcpy(w->qos_token, w->env.qos_token, sizeof w->qos_token);
-        w->qos_token[sizeof w->qos_token - 1] = 0;
-    }
-    if(w->env.have_qos_token){
+    if(!w->qos_token[0])
+        ws_env_take_qos_token(&w->env, w->qos_token, sizeof w->qos_token);
+    else {
         memset(w->env.qos_token, 0, sizeof w->env.qos_token);
         w->env.have_qos_token = 0;
     }
@@ -445,6 +458,10 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
                  * Size checked BEFORE arithmetic: hdr+plen could overflow
                  * uint64 and smuggle a tiny "total" past the cap. */
                 if(plen > WS_BODY_MAX){
+                    if(wire_op == 0 || (wire_op == 1 && !fin)){
+                        log_msg("ws: oversized fragmented data frame; reconnecting");
+                        return -2;
+                    }
                     log_msg("ws: oversized frame op=%d fin=%d plen=%llu (streamed, body cap %u)",
                         b[0]&0x0f, (b[0]&0x80)!=0, (unsigned long long)plen, WS_BODY_MAX);
                     size_t avail = w->rlen - w->rpos;
@@ -490,10 +507,49 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
                     }
                 }
                 if((uint64_t)(w->rlen-w->rpos) >= total){
-                    if(wire_op == 1){
-                        ws_env_init(&w->env);
-                        ws_env_feed(&w->env, b + hdr, (size_t)plen);
-                        ws_capture_token(w);
+                    if(plen > WS_BODY_MAX &&
+                       (wire_op == 0 || (wire_op == 1 && !fin))){
+                        log_msg("ws: oversized fragmented data frame; reconnecting");
+                        return -2;
+                    }
+                    if(wire_op == 0 || wire_op == 1){
+                        const unsigned char *message = NULL;
+                        size_t message_len = 0;
+                        int fr = ws_frag_feed(&w->fragments, wire_op, fin,
+                                              b + hdr, (size_t)plen,
+                                              &message, &message_len);
+                        w->rpos += (size_t)total;
+                        if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
+                        if(fr < 0){
+                            if(fr == -2){
+                                log_msg("ws: oversized fragmented message skipped");
+                                return -3;
+                            }
+                            log_msg("ws: invalid text fragment sequence");
+                            return -2;
+                        }
+                        if(fr == 0) continue;
+                        if(message_len == 0){
+                            ws_frag_reset(&w->fragments);
+                            return -3;
+                        }
+                        if(message_len >= cap){
+                            ws_env_init(&w->env);
+                            ws_env_feed(&w->env, message, message_len);
+                            ws_capture_token(w);
+                            size_t n = ws_env_render(&w->env, buf, cap);
+                            ws_frag_reset(&w->fragments);
+                            if(opcode_out)*opcode_out=1;
+                            if(fin_out)*fin_out=1;
+                            if(n) return (int)n;
+                            return -3; /* never expose a truncated JSON envelope */
+                        }
+                        memcpy(buf, message, message_len);
+                        buf[message_len] = 0;
+                        ws_frag_reset(&w->fragments);
+                        if(opcode_out)*opcode_out=1;
+                        if(fin_out)*fin_out=1;
+                        return (int)message_len;
                     }
                     size_t copy = (size_t)plen;
                     if(copy > cap-1) copy = cap-1;
@@ -566,7 +622,12 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
 int ws_close(ws_t *w){
     if(!w) return -1;
     if(!w->connected){
+        if(w->rbuf) memset(w->rbuf, 0, w->rcap);
         free(w->rbuf); w->rbuf=NULL; w->rcap=0; w->rlen=0; w->rpos=0;
+        memset(w->rotated_token, 0, sizeof w->rotated_token);
+        memset(w->qos_token, 0, sizeof w->qos_token);
+        memset(&w->env, 0, sizeof w->env);
+        ws_frag_reset(&w->fragments);
         return 0;
     }
     ws_send_control(w, 0x8); /* best-effort masked CLOSE */
@@ -576,7 +637,12 @@ int ws_close(ws_t *w){
 #else
     sceNetSocketClose(w->fd);
 #endif
+    if(w->rbuf) memset(w->rbuf, 0, w->rcap);
     free(w->rbuf); w->rbuf=NULL; w->rcap=0;
+    memset(w->rotated_token, 0, sizeof w->rotated_token);
+    memset(w->qos_token, 0, sizeof w->qos_token);
+    memset(&w->env, 0, sizeof w->env);
+    ws_frag_reset(&w->fragments);
     w->connected=0; w->sock=0; w->tls=NULL; w->fd=0; w->rlen=0; w->rpos=0;
     w->skip_left=0;
     return 0;

@@ -515,25 +515,31 @@ static void test_ws_env(void) {
  * identical to the retro indexes so the same streaming scanner serves both. */
 static void test_custom_extract(void) {
     char name[CUSTOM_MAX_NAME], url[CUSTOM_MAX_URL];
-
-    /* Spacing is not cosmetic. custom_resolve() matches on the literal byte
-     * run "id":"<TITLEID>", so a space after the colon -- what a normal JSON
-     * pretty-printer emits -- makes every lookup miss silently, and the
-     * payload falls back to the raw TITLEID with nothing logged. config/custom.json
-     * is compact for exactly this reason, and add_custom_title.py writes it
-     * with separators=(',', ':') to keep it that way. This case pins the
-     * failure so a "just pretty-print the file" change cannot pass unnoticed;
-     * when the matcher is loosened to tolerate whitespace, flip the assert to
-     * ==1 and check the name -- that is the point the spaced form turns safe. */
     {
-        const char *spaced =
-            "[{\n  {\"id\": \"ORPC00009\", \"name\": \"Spaced Entry\"}\n]";
-        assert(custom_extract(spaced, strlen(spaced), "\"id\":\"ORPC00009\"",
+        const char body[] = "[{\"id\":\"ORPC00003\",\"name\":\"No Art\"},"
+                            "{\"id\":\"ORPC00004\",\"name\":\"Other\",\"cover\":\"https://x/other.png\"}]";
+        assert(custom_extract(body, sizeof body - 1, "\"id\":\"ORPC00003\"",
+                              name, sizeof name, url, sizeof url) == 1);
+        assert(!strcmp(name, "No Art"));
+        assert(url[0] == 0);
+        char *bounded = malloc(sizeof body - 1);
+        assert(bounded);
+        memcpy(bounded, body, sizeof body - 1);
+        assert(custom_extract(bounded, sizeof body - 1, "\"id\":\"ORPC00003\"",
+                              name, sizeof name, url, sizeof url) == 1);
+        assert(url[0] == 0);
+        free(bounded);
+        const char truncated[] = "{\"id\":\"ORPC00003\",\"name\":\"Partial";
+        assert(custom_extract(truncated, sizeof truncated - 1, "\"id\":\"ORPC00003\"",
                               name, sizeof name, url, sizeof url) == 0);
-        assert(name[0] == 0);            /* buffers still cleared on the miss */
-        /* The id is present and findable without the colon -- which is what a
-         * whitespace-tolerant matcher would key on instead. */
-        assert(strstr(spaced, "\"ORPC00009\"") != NULL);
+    }
+
+    /* Pretty-printed entries and reordered fields are valid JSON too. */
+    {
+        const char *spaced = "[{\"name\": \"Spaced Entry\", \"id\": \"ORPC00009\"}]";
+        assert(custom_extract(spaced, strlen(spaced), "\"id\":\"ORPC00009\"",
+                              name, sizeof name, url, sizeof url) == 1);
+        assert(!strcmp(name, "Spaced Entry"));
     }
 
     /* Real shape, as written by scripts/add_custom_title.py -- compact. */

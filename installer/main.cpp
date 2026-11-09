@@ -97,8 +97,6 @@ int main()
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
 
-	SDL_Log("orbisRPC starting");
-
 	/* Hide the PS4 splash first, before anything else. Two reasons, both
 	 * learned the hard way in the original wizard: dialogs opened while the
 	 * splash is still up get auto-dismissed or never surface, and loading the
@@ -106,27 +104,30 @@ int main()
 	 * forever. Must be the first statement. */
 	sceSystemServiceHideSplashScreen();
 
+	// Start persistent diagnostics before graphics and module setup.
+	dbglog::Begin();
+	dbglog::Write("main: starting");
+
 	if (SDL_Init(SDL_INIT_VIDEO) != 0)
 	{
-		SDL_Log("Failed to initialize SDL: %s", SDL_GetError());
-		for (;;)
-			;
+		dbglog::Write("main: SDL initialization failed: %s", SDL_GetError());
+		return 1;
 	}
 
 	// FreeType has to be force-loaded or its NIDs stay unresolved.
 	if (sceSysmoduleLoadModule(ORBIS_SYSMODULE_FREETYPE_OL) < 0)
 	{
-		SDL_Log("Failed to load the freetype module");
-		for (;;)
-			;
+		dbglog::Write("main: failed to load the freetype module");
+		SDL_Quit();
+		return 1;
 	}
 
 	FT_Library ftLib = NULL;
 	if (FT_Init_FreeType(&ftLib) != 0)
 	{
-		SDL_Log("Failed to initialize freetype");
-		for (;;)
-			;
+		dbglog::Write("main: failed to initialize freetype");
+		SDL_Quit();
+		return 1;
 	}
 
 	SDL_Window *window = SDL_CreateWindow("orbisRPC",
@@ -135,9 +136,10 @@ int main()
 
 	if (!window)
 	{
-		SDL_Log("Failed to create window: %s", SDL_GetError());
-		for (;;)
-			;
+		dbglog::Write("main: failed to create window: %s", SDL_GetError());
+		FT_Done_FreeType(ftLib);
+		SDL_Quit();
+		return 1;
 	}
 
 	Console console(window, ftLib, kBodyFontPath, kBodyFontSize,
@@ -145,16 +147,13 @@ int main()
 
 	if (!console.Ready())
 	{
-		SDL_Log("Console failed to initialise");
-		for (;;)
-			;
+		dbglog::Write("main: console initialization failed");
+		return 1;
 	}
 
 	console.SetBodyColor(kBody);
 
-	// Diagnostics to a file, before anything else can fail.
-	dbglog::Begin();
-	dbglog::Write("main: starting, screen %dx%d", kWidth, kHeight);
+	dbglog::Write("main: graphics initialized, screen %dx%d", kWidth, kHeight);
 
 	paint::SetLibrary(ftLib);
 
@@ -167,7 +166,7 @@ int main()
 
 	Menu menu;
 	if (!windowSurface || !menu.Init(windowSurface, ftLib))
-		SDL_Log("Menu failed to initialise; the home page will be blank");
+		dbglog::Write("Menu failed to initialise; the home page will be blank");
 
 	// Settings shares the same surface. Written before it, so the last thing drawn
 	// on a given frame is whichever page is on top.
@@ -177,12 +176,14 @@ int main()
 
 	Input input;
 	if (!input.Init())
-		SDL_Log("No controller yet, will keep retrying");
+		dbglog::Write("No controller yet, will keep retrying");
 
 	// Dialog modules have to be up before ui_input() can be used, and the
 	// installer's reap_stale() runs inside ui_init().
 	if (ui_init() != 0)
-		SDL_Log("ui_init failed; text entry will be unavailable");
+	{
+		dbglog::Write("main: ui_init failed; text entry will be unavailable");
+	}
 
 	Settings settings;
 	settings.Load();
@@ -230,8 +231,13 @@ int main()
 			char buf[UI_INPUT_MAX];
 			snprintf(buf, sizeof buf, "%s", settings.Token().c_str());
 
-			if (ui_input("Discord token", "text", buf, sizeof buf) != 1)
+			const int rc = ui_input("Discord token", "text", buf, sizeof buf);
+			if (rc != 1)
+			{
+				if (rc < 0)
+					view->SetStatus("text input unavailable");
 				return;
+			}
 
 			// Clearing the field restores the placeholder rather than saving an
 			// empty credential. An empty token is not a way to run without one;
@@ -416,11 +422,16 @@ int main()
 						snprintf(buf, sizeof buf, "%s",
 						         settings.CustomMessage().c_str());
 
-						if (ui_input("Custom Message", "text", buf, sizeof buf) == 1)
+						const int rc = ui_input("Custom Message", "text", buf, sizeof buf);
+						if (rc == 1)
 						{
 							settings.SetCustomMessage(buf);
 							settingsView.SetStatus(settings.Save() == 0
 								? "saved" : "could not save");
+						}
+						else if (rc < 0)
+						{
+							settingsView.SetStatus("text input unavailable");
 						}
 					}
 				}

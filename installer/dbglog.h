@@ -14,8 +14,9 @@
 #ifndef INSTALLER_DBGLOG_H
 #define INSTALLER_DBGLOG_H
 
-// Where the log lands. /data is writable from a pkg; /app0 is not.
-#define kLogPath "/data/orbispkg_test/menu.log"
+// Prefer the install directory; fall back to /data when it is not present yet.
+#define kLogPath "/data/orbisRPC/menu.log"
+#define kFallbackLogPath "/data/menu.log"
 
 namespace dbglog
 {
@@ -24,8 +25,7 @@ namespace dbglog
 // id. Call once, early.
 void Begin();
 
-// Appends one line. Also echoed to SDL_Log, which costs nothing and helps if the
-// log file is ever unreachable.
+// Appends one line to the file selected by Begin().
 void Write(const char *fmt, ...);
 
 } // namespace dbglog
