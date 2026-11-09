@@ -77,6 +77,23 @@ int main()
 	free(saved);
 	(void)remove(kConfig);
 
+	// Boolean settings are JSON booleans in both readers. Numeric values are
+	// ignored by the UI, matching the daemon's typed boolean handling.
+	Write("{\"show_firmware\":0,\"show_media\":2.5}");
+	Settings numericToggles;
+	numericToggles.Load();
+	assert(numericToggles.Save() == 0);
+	saved = Read();
+	jl_val_t *normalizedToggles = jl_parse(saved, strlen(saved));
+	assert(normalizedToggles);
+	jl_val_t *firmwareToggle = jl_obj_get(normalizedToggles, "show_firmware");
+	jl_val_t *mediaToggle = jl_obj_get(normalizedToggles, "show_media");
+	assert(firmwareToggle && firmwareToggle->type == JL_BOOL && firmwareToggle->boolean == 1);
+	assert(mediaToggle && mediaToggle->type == JL_BOOL && mediaToggle->boolean == 1);
+	jl_free(normalizedToggles);
+	free(saved);
+	(void)remove(kConfig);
+
 	// An unrelated settings save keeps nested/unknown fields and a token that
 	// changed on disk after this Settings object was loaded.
 	Write("{\"token\":\"old.token.value\",\"unknown\":{\"nested\":7},\"show_firmware\":true}");

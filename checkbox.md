@@ -41,6 +41,8 @@
   compiles the complete Setup app and package.
 - [x] Reject wrong config roots, malformed/non-finite JSON numbers, integer
   overflow, out-of-range numeric conversions, and fractional integer settings.
+- [x] Keep toggle settings consistent: only JSON booleans override defaults in
+  either reader; installer saves encode booleans, never numeric substitutes.
 - [x] Offline tests cover READY-only promotion, auth/QoS extraction, nested
   decoys, and IDENTIFY QoS presence/absence. Full exact wire acceptance remains
   unverified against Discord.

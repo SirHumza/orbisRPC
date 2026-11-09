@@ -272,8 +272,8 @@ void Settings::Load()
 		return;
 	}
 
-	// Toggles are read as JSON booleans. A numeric 0/1 is accepted too, since
-	// that is an easy thing to write by hand.
+	// Toggles are JSON booleans in both the daemon and installer. Ignore values
+	// with another JSON type so the preview never disagrees with runtime behavior.
 	struct ToggleField { const char *key; bool *target; };
 	const ToggleField toggles[] = {
 		{ kShowFirmwareKey, &showFirmware_ },
@@ -288,8 +288,6 @@ void Settings::Load()
 
 		if (v && v->type == JL_BOOL)
 			*toggles[i].target = (v->boolean != 0);
-		else if (v && v->type == JL_NUMBER)
-			*toggles[i].target = (v->num_is_int ? v->inum != 0 : v->num != 0.0);
 	}
 
 	jl_val_t *msg = jl_obj_get(root, kCustomMsgKey);

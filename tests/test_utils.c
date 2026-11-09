@@ -868,6 +868,12 @@ static void test_cfg_titles(void) {
     assert(c.retro_enabled == 1 && c.custom_enabled == 0);
     f = fopen(path, "wb");
     assert(f);
+    fputs("{\"token\":\"t\",\"show_firmware\":0}", f);
+    fclose(f);
+    assert(cfg_load(path, &c) == 0);
+    assert(c.show_firmware == 1); /* only JSON booleans override defaults */
+    f = fopen(path, "wb");
+    assert(f);
     fputs("{\"token\":\"t\",\"titles\":{\"CUSA11995\":\"Marvel's Spider-Man\","
           "\"BAD KEY!\": \"junk\", \"CUSA00001\": \"x\", \"TOOLONGTITLEID12345\": \"y\","
           "\"CUSA00002\": 42}}", f);
