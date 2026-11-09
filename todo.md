@@ -21,6 +21,7 @@ This file tracks the next concrete work; completion is based on evidence in
 - [x] Validate WebSocket CLOSE status codes and UTF-8 reasons before applying
   Discord's invalid-token handling.
 - [x] Keep heartbeat timeout independent of unrelated Gateway traffic.
+- [x] Verify fresh IDENTIFY resets prior Discord session and parser state.
 - [x] Make malformed optional title overrides non-fatal again.
 - [x] Rewrite README claims to match the current source and installer flow.
 - [x] Fix macOS package tool selection and gate the setup app's font assets.

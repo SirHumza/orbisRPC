@@ -49,6 +49,10 @@ Base commit: `e5dd5b8` on branch `1.1`.
   for invalid-token handling.
 - Added a heartbeat regression proving unrelated Gateway dispatches do not
   reset the ACK timer and a missing ACK still closes the session after grace.
+- Added a scripted reconnect regression: a fresh HELLO/READY sequence replaces
+  the old sequence and clears heartbeat and queued-presence state. The client
+  does not negotiate Gateway compression; transport fragments and capture
+  state are zeroed by the fresh WebSocket initialization.
 - Added offline gateway, token-lineage, and installer settings regression
   programs to the host test Makefile. The test target now runs the installer
   config test every time, even when its binary is already built.

@@ -216,7 +216,7 @@ These are failure cases to investigate, not claims that each bug currently exist
 - [ ] B20 Ensure a peer that sends partial data forever cannot extend a deadline indefinitely.
 - [x] B21 Validate CLOSE payload lengths, status codes, and UTF-8 reasons; offline tests cover empty, one-byte, reserved/invalid codes, malformed UTF-8, oversized payloads, and Discord 4004. Console behavior remains unverified.
 - [x] B22 Only Gateway opcode 11 refreshes the heartbeat ACK timestamp; an offline test sends unrelated dispatch traffic and verifies the session still expires at the ACK deadline.
-- [ ] B23 Reset connection-specific heartbeat, sequence, compression, and parser state on each new socket.
+- [x] B23 `discord_connect()` clears the session object before each fresh IDENTIFY and `ws_connect()` clears transport/parser state; an offline scripted HELLO/READY test verifies stale sequence, heartbeat, and presence-queue state does not carry across reconnects. Compression is not enabled in this client.
 - [ ] B24 Ensure resume failure transitions to identify only when allowed and does not form a tight retry loop.
 - [ ] B25 Validate gateway-provided URLs and session resume endpoints before use.
 - [ ] B26 Bound retry-after values and avoid integer overflow or negative sleep intervals.

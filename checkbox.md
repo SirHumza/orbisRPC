@@ -38,6 +38,8 @@
   empty CLOSE and Discord 4004 remain valid cases.
 - [x] An unrelated Gateway dispatch does not refresh the heartbeat ACK timer;
   the session expires after the configured ACK grace window.
+- [x] A scripted fresh HELLO/READY reconnect starts with cleared sequence,
+  heartbeat ACK, and queued presence state.
 - [x] Offline decision-helper test covers retry while disk retains the origin,
   repeated rotations, and manual edits taking precedence. Actual filesystem
   write-failure injection remains unverified.

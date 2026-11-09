@@ -23,6 +23,8 @@ static int scripted_result;
 static int scripted_opcode;
 static int scripted_fin;
 static const char *scripted_payload;
+static int connect_script;
+static int auth_step;
 
 int64_t orbis_mono_s(void){ return fake_now; }
 void log_msg(const char *fmt, ...){ (void)fmt; }
@@ -33,13 +35,30 @@ int art_resolve_mp(const char *app_id, const char *token, const char *url,
 }
 int detect_media_type(const char *title){ (void)title; return 0; }
 int ws_connect(ws_t *w, const char *host, int port, const char *resource, const char *key){
-    (void)w; (void)host; (void)port; (void)resource; (void)key; return -1;
+    (void)host; (void)port; (void)resource; (void)key;
+    if(connect_script){ w->connected = 1; return 0; }
+    return -1;
 }
 int ws_send_text(ws_t *w, const char *msg, size_t len){
     (void)w; (void)msg; sent++; return (int)len;
 }
 int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *op, int *fin){
     (void)w;
+    if(connect_script){
+        static const char *frames[] = {
+            "{\"op\":10,\"d\":{\"heartbeat_interval\":45000}}",
+            "{\"op\":0,\"s\":42,\"t\":\"READY\",\"d\":{}}"
+        };
+        assert(auth_step < 2);
+        const char *frame = frames[auth_step++];
+        size_t n = strlen(frame);
+        assert(n <= cap);
+        memcpy(buf, frame, n);
+        if(n < cap) buf[n] = 0;
+        if(op) *op = 1;
+        if(fin) *fin = 1;
+        return (int)n;
+    }
     if(!scripted_recv) return 0;
     scripted_recv = 0;
     if(op) *op = scripted_opcode;
@@ -142,6 +161,25 @@ static void test_first_heartbeat_ack_window(void){
     assert(discord_tick(&d) == 0);
     fake_now++;
     assert(discord_tick(&d) == -1);
+}
+
+static void test_connect_resets_session_state_before_identify(void){
+    discord_t d;
+    memset(&d, 0, sizeof d);
+    d.seq = 99;
+    d.sent_hb = 1;
+    d.presence_next = 4;
+    d.presence_sent_at[0] = 456;
+    d.pending_presence_len = 3;
+    memcpy(d.pending_presence, "old", 3);
+    connect_script = 1;
+    auth_step = 0;
+    assert(discord_connect(&d, "test-token", NULL) == 0);
+    assert(d.connected && d.seq == 42);
+    assert(!d.sent_hb && d.presence_next == 0);
+    assert(d.presence_sent_at[0] == 0 && d.pending_presence_len == 0);
+    connect_script = 0;
+    discord_clear_credentials(&d);
 }
 
 static void test_unrelated_dispatch_does_not_ack_heartbeat(void){
@@ -406,6 +444,7 @@ int main(void){
     test_rotation_take_validation();
     test_credentials_clear_after_session();
     test_first_heartbeat_ack_window();
+    test_connect_resets_session_state_before_identify();
     test_unrelated_dispatch_does_not_ack_heartbeat();
     test_empty_close_frame_disconnects_immediately();
     test_invalid_close_payload_disconnects();
