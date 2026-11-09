@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "../installer/jsonlite.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -40,6 +41,11 @@ char *Read()
 
 int main()
 {
+	const char embedded_nul[] = "{\"token\":\"prefix.valid.token\\u0000suffix\"}";
+	jl_val_t *with_nul = jl_parse(embedded_nul, sizeof embedded_nul - 1);
+	assert(with_nul == nullptr);
+	jl_free(with_nul);
+
 	(void)mkdir(kDir, 0700);
 	(void)remove(kConfig);
 

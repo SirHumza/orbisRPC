@@ -820,6 +820,12 @@ static void test_cfg_titles(void) {
     /* The independent metadata switches must not overwrite each other. */
     f = fopen(path, "wb");
     assert(f);
+    fputs("{\"token\":\"prefix.valid.token\\u0000suffix\"}", f);
+    fclose(f);
+    assert(cfg_load(path, &c) == -1);
+    assert(!strcmp(c.token, "t")); /* malformed credential preserves last-good config */
+    f = fopen(path, "wb");
+    assert(f);
     fputs("{\"token\":\"t\",\"retro_enabled\":false,\"custom_enabled\":true}", f);
     fclose(f);
     assert(cfg_load(path, &c) == 0);

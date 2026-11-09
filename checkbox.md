@@ -25,6 +25,9 @@
 
 ## Discord and PS4 evidence
 
+- [x] Daemon config loading rejects an escaped NUL token and retains the last
+  good config; installer parsing rejects `\u0000` instead of exposing a valid
+  C-string prefix. Offline tests cover both paths.
 - [x] Offline tests cover READY-only promotion, auth/QoS extraction, nested
   decoys, and IDENTIFY QoS presence/absence. Full exact wire acceptance remains
   unverified against Discord.

@@ -22,6 +22,7 @@ This file tracks the next concrete work; completion is based on evidence in
   Discord's invalid-token handling.
 - [x] Keep heartbeat timeout independent of unrelated Gateway traffic.
 - [x] Verify fresh IDENTIFY resets prior Discord session and parser state.
+- [x] Reject escaped NULs at daemon and installer config parsing boundaries.
 - [x] Make malformed optional title overrides non-fatal again.
 - [x] Rewrite README claims to match the current source and installer flow.
 - [x] Fix macOS package tool selection and gate the setup app's font assets.

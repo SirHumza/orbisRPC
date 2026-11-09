@@ -53,6 +53,9 @@ Base commit: `e5dd5b8` on branch `1.1`.
   the old sequence and clears heartbeat and queued-presence state. The client
   does not negotiate Gateway compression; transport fragments and capture
   state are zeroed by the fresh WebSocket initialization.
+- Closed the embedded-NUL credential ambiguity: daemon config parsing rejects
+  it transactionally, and the installer parser now rejects escaped NUL code
+  points rather than silently presenting a truncated token prefix.
 - Added offline gateway, token-lineage, and installer settings regression
   programs to the host test Makefile. The test target now runs the installer
   config test every time, even when its binary is already built.

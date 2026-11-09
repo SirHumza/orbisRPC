@@ -356,6 +356,14 @@ static char *parse_string_raw(jl_parser *ps)
 					}
 				}
 
+				/* jl_val_t stores strings as NUL-terminated C strings, so an
+				 * escaped NUL cannot be represented without truncating the value. */
+				if (cp == 0)
+				{
+					free(buf);
+					return NULL;
+				}
+
 				append_utf8(&buf, &len, &cap, cp);
 				break;
 			}
