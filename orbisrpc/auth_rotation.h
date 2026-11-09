@@ -3,6 +3,17 @@
 #include <string.h>
 /* Pending server credential plus its original on-disk generation. */
 typedef struct { char value[512]; char origin[512]; } auth_rotation_t;
+typedef enum {
+    AUTH_ROTATION_NONE,
+    AUTH_ROTATION_APPLY,
+    AUTH_ROTATION_DISCARD
+} auth_rotation_action_t;
+static inline auth_rotation_action_t auth_rotation_disk_action(
+    const auth_rotation_t *pending, const char *disk){
+    if(!pending || !pending->value[0] || !disk) return AUTH_ROTATION_NONE;
+    return strcmp(disk, pending->origin) == 0 ?
+           AUTH_ROTATION_APPLY : AUTH_ROTATION_DISCARD;
+}
 static inline int auth_rotation_matches(const auth_rotation_t *pending,
                                         const char *disk, const char *live){
     if(!disk || !live) return 0;

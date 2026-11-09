@@ -28,8 +28,9 @@
 - [x] Offline tests cover READY-only promotion, auth/QoS extraction, nested
   decoys, and IDENTIFY QoS presence/absence. Full exact wire acceptance remains
   unverified against Discord.
-- [ ] Offline test covers repeated credential rotation while config writes fail,
-  manual edits taking precedence, and recovery once storage works.
+- [x] Offline decision-helper test covers retry while disk retains the origin,
+  repeated rotations, and manual edits taking precedence. Actual filesystem
+  write-failure injection remains unverified.
 - [x] Tests and docs make no claim that undocumented gateway fields are
   accepted or that token rotation prevents account challenges.
 - [ ] Gateway reconnect, heartbeat timeout, presence republish, and timer

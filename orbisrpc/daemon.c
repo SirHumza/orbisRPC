@@ -224,7 +224,7 @@ static void persist_qos_token(void){
         disk.qos_token[sizeof disk.qos_token - 1] = 0;
         if(cfg_save(CFG_PATH, &disk) == 0){
             g_cfg = disk;
-            s_token_rotation.value[0] = s_token_rotation.origin[0] = 0;
+            memset(&s_token_rotation, 0, sizeof s_token_rotation);
             s_pending_qos[0] = s_pending_qos_owner[0] = 0;
             log_msg("Discord QoS token saved");
         } else {
@@ -274,7 +274,7 @@ static void persist_rotated_token(void){
             g_cfg = disk;
             strncpy(s_dc.token, rotated, sizeof s_dc.token - 1);
             s_dc.token[sizeof s_dc.token - 1] = 0;
-            s_token_rotation.value[0] = s_token_rotation.origin[0] = 0;
+            memset(&s_token_rotation, 0, sizeof s_token_rotation);
             s_pending_qos[0] = s_pending_qos_owner[0] = 0;
             log_msg("Discord token rotation saved");
         } else {
@@ -517,21 +517,21 @@ int daemon_run(void){
         {
             cfg_t next = g_cfg;
             if(cfg_load(CFG_PATH, &next) == 0){
-                if(s_token_rotation.value[0]){
-                    if(strcmp(next.token, s_token_rotation.origin) == 0){
-                        strncpy(next.token, s_token_rotation.value, sizeof next.token - 1);
-                        next.token[sizeof next.token - 1] = 0;
-                        next.qos_token[0] = 0;
-                        if(cfg_save(CFG_PATH, &next) == 0){
-                            s_token_rotation.value[0] = s_token_rotation.origin[0] = 0;
-                            log_msg("pending Discord token rotation saved");
-                        } else {
-                            log_msg("WARN: pending token rotation still cannot be saved");
-                        }
+                auth_rotation_action_t rotation_action =
+                    auth_rotation_disk_action(&s_token_rotation, next.token);
+                if(rotation_action == AUTH_ROTATION_APPLY){
+                    strncpy(next.token, s_token_rotation.value, sizeof next.token - 1);
+                    next.token[sizeof next.token - 1] = 0;
+                    next.qos_token[0] = 0;
+                    if(cfg_save(CFG_PATH, &next) == 0){
+                        memset(&s_token_rotation, 0, sizeof s_token_rotation);
+                        log_msg("pending Discord token rotation saved");
                     } else {
-                        s_token_rotation.value[0] = s_token_rotation.origin[0] = 0;
-                        log_msg("pending token rotation discarded after config token changed");
+                        log_msg("WARN: pending token rotation still cannot be saved");
                     }
+                } else if(rotation_action == AUTH_ROTATION_DISCARD){
+                    memset(&s_token_rotation, 0, sizeof s_token_rotation);
+                    log_msg("pending Discord token rotation discarded after config token changed");
                 }
                 if(s_pending_qos[0]){
                     if(strcmp(next.token, s_pending_qos_owner) == 0){

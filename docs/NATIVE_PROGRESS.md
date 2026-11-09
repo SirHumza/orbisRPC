@@ -18,6 +18,10 @@ Base commit: `e5dd5b8` on branch `1.1`.
 - Kept a failed token rotation's original disk-token lineage across repeated
   READY rotations. A later QoS save can persist the newest token and matching
   QoS token together without restoring an obsolete credential.
+- Factored pending-rotation reconciliation into the daemon's tested decision
+  helper: a failed-save poll retries while disk still has the original token,
+  and a manual disk edit discards the pending server value. The test does not
+  inject real filesystem write failures.
 - After an explicit gateway 4004 rejection, the daemon waits for the configured
   token to change instead of repeatedly identifying with the rejected value.
   Credential copies and gateway capture buffers are cleared when a session
@@ -37,13 +41,14 @@ Base commit: `e5dd5b8` on branch `1.1`.
 
 - `make -C tests test`: passed after correcting optional title override
   handling. Includes existing utility tests and the new gateway, token lineage,
-  and installer safety tests.
+  persistence-decision, and installer safety tests.
 - `make -C tests asan`: passed with ASan/UBSan, including the new standalone
   fragment, gateway, token-lineage, and installer safety tests.
 - `ORBISRPC_STRICT_SECRETS=1 python3 tests/e2e_consumer.py`: passed, including
   the built ELF linkage gate and forbidden app-world library check.
 - SDK `573b4a0` built from source and passed its 13.50/13.52 source gate.
-  `make all` produced the daemon ELF and a 10 MiB setup PKG. The generated GP4
+  `make all` produced the daemon ELF and a 10 MiB setup PKG, including the
+  pending-rotation follow-up. The generated GP4
   manifest includes `orbisRPC.elf`, config, and all three FreeType fonts.
 - `git diff --check`: passed.
 - No console test was run. Build success does not prove the PKG launches or that
