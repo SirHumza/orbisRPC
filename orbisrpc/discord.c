@@ -9,6 +9,7 @@
  * (close 4004) is reported as fatal instead of looping forever.
  */
 #include "discord.h"
+#include "ws_frame.h"
 #include "clock.h"
 #include "b64.h"
 #include "log.h"
@@ -160,6 +161,11 @@ static int rx_frame(discord_t *d, char *buf, size_t cap, int *op, int *fin, int6
     }
 }
 
+static int close_status_payload(const char *buf, int len, unsigned *code){
+    return ws_close_payload_valid((const unsigned char *)buf, (size_t)len,
+                                  code);
+}
+
 jl_val_t *discord_build_identify(const char *token, const char *qos_token){
     if(!token || !token[0]) return NULL;
     jl_val_t *root=jl_new_object();
@@ -271,8 +277,11 @@ int discord_connect(discord_t *d, const char *token, const char *qos_token){
         if(nr<=0){ log_msg("no READY after identify (nr=%d)",nr); break; }
         if(op==8){
             if(!fin){ log_msg("fragmented close; reconnecting"); ws_close(&d->ws); d->connected=0; return -1; }
-            if(nr<2){ log_msg("malformed close (len %d); reconnecting", nr); ws_close(&d->ws); d->connected=0; return -1; }
-            unsigned code = (((unsigned char)buf[0]<<8)|((unsigned char)buf[1]));
+            unsigned code = 0;
+            if(!close_status_payload(buf, nr, &code)){
+                log_msg("malformed close payload (len %d); reconnecting", nr);
+                ws_close(&d->ws); d->connected=0; return -1;
+            }
             log_msg("gateway closed during auth: %u",code);
             ws_close(&d->ws); d->connected=0;
             return code==4004 ? -2 : -1;
@@ -677,8 +686,11 @@ int discord_tick(discord_t *d){
         if(op==8){ /* WS CLOSE: payload starts with a 2-byte big-endian code */
             if(!fin){ log_msg("fragmented close; reconnecting"); d->connected=0; return -1; }
             if(nr==0){ log_msg("gateway closed without a status code"); d->connected=0; return -1; }
-            if(nr<2){ log_msg("malformed close (len %d); reconnecting", nr); d->connected=0; return -1; }
-            unsigned code = (((unsigned char)buf[0]<<8)|((unsigned char)buf[1]));
+            unsigned code = 0;
+            if(!close_status_payload(buf, nr, &code)){
+                log_msg("malformed close payload (len %d); reconnecting", nr);
+                d->connected=0; return -1;
+            }
             log_msg("gateway closed: code=%u",code);
             d->connected=0;
             return code==4004 ? -2 : -1;

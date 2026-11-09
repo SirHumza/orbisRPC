@@ -43,6 +43,10 @@ Base commit: `e5dd5b8` on branch `1.1`.
   reconnect. PONG replies now echo the PING payload and use an offline-tested
   masked control-frame encoder; auth-time PONG write failures also close the
   session cleanly.
+- Validated CLOSE payload lengths, status-code ranges/reserved values, and
+  UTF-8 reasons in both authentication and active-session dispatch. Empty
+  CLOSE remains valid and disconnects without a status; code 4004 is preserved
+  for invalid-token handling.
 - Added offline gateway, token-lineage, and installer settings regression
   programs to the host test Makefile. The test target now runs the installer
   config test every time, even when its binary is already built.

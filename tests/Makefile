@@ -60,7 +60,7 @@ $(ASAN_OBJDIR):
 # parts of ws.c, which cannot be linked on the host because it owns a
 # tls_ctx_t). They must be listed here or make treats the object as up to date
 # after they change -- which silently tested stale code.
-$(OBJDIR)/test_utils.o: test_utils.c $(HDRS) ../orbisrpc/ws_skip.c ../orbisrpc/ws_env.c ../orbisrpc/ws_env.h | $(OBJDIR)
+$(OBJDIR)/test_utils.o: test_utils.c $(HDRS) ../orbisrpc/ws_skip.c ../orbisrpc/ws_env.c ../orbisrpc/ws_env.h ../orbisrpc/ws_frame.c | $(OBJDIR)
 	$(CC) $(CFLAGS) -c -o $@ test_utils.c
 
 $(OBJDIR)/orbis_%.o: ../orbisrpc/%.c $(HDRS) | $(OBJDIR)
@@ -81,7 +81,7 @@ $(OBJDIR)/sqlite3.o: $(SQLITE_DIR)/sqlite3.c | $(OBJDIR)
 $(ASAN_OBJDIR)/sqlite3.o: $(SQLITE_DIR)/sqlite3.c | $(ASAN_OBJDIR)
 	$(CC) $(SQLITE_FLAGS) $(ASAN_FLAGS) -c -o $@ $<
 
-$(ASAN_OBJDIR)/test_utils.o: test_utils.c $(HDRS) ../orbisrpc/ws_skip.c ../orbisrpc/ws_env.c ../orbisrpc/ws_env.h | $(ASAN_OBJDIR)
+$(ASAN_OBJDIR)/test_utils.o: test_utils.c $(HDRS) ../orbisrpc/ws_skip.c ../orbisrpc/ws_env.c ../orbisrpc/ws_env.h ../orbisrpc/ws_frame.c | $(ASAN_OBJDIR)
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) -c -o $@ test_utils.c
 
 $(ASAN_OBJDIR)/orbis_%.o: ../orbisrpc/%.c $(HDRS) | $(ASAN_OBJDIR)

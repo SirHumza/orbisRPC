@@ -54,6 +54,7 @@ int ws_close(ws_t *w){ (void)w; return -1; }
  * real code compiled from the real source, not a copy. */
 #include "../orbisrpc/ws_skip.c"
 #include "../orbisrpc/ws_env.c"
+#include "../orbisrpc/ws_frame.c"
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/ecp.h>
 #include <mbedtls/ctr_drbg.h>

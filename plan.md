@@ -214,7 +214,7 @@ These are failure cases to investigate, not claims that each bug currently exist
 - [x] B18 Reject invalid RSV bits, opcodes, continuation ordering, control-frame lengths, and length overflows. Offline tests cover the shared validator and fragment assembler; arbitrary socket chunk-boundary integration remains in B16/B17.
 - [ ] B19 Handle short writes, TLS WANT_READ/WANT_WRITE, EINTR, peer EOF, and close during a write without spinning.
 - [ ] B20 Ensure a peer that sends partial data forever cannot extend a deadline indefinitely.
-- [ ] B21 Verify close-code parsing with empty, one-byte, malformed, and oversized close payloads. Empty CLOSE now disconnects immediately; detailed status-code/reason validation remains open.
+- [x] B21 Validate CLOSE payload lengths, status codes, and UTF-8 reasons; offline tests cover empty, one-byte, reserved/invalid codes, malformed UTF-8, oversized payloads, and Discord 4004. Console behavior remains unverified.
 - [ ] B22 Treat missing heartbeat ACKs independently of unrelated incoming traffic.
 - [ ] B23 Reset connection-specific heartbeat, sequence, compression, and parser state on each new socket.
 - [ ] B24 Ensure resume failure transitions to identify only when allowed and does not form a tight retry loop.

@@ -33,6 +33,9 @@
 - [x] Verify PING payload forwarding and masked PONG frame encoding offline.
 - [x] Dispatcher tests verify immediate empty-CLOSE handling and exactly one
   PONG for an empty PING, including a subsequent no-data poll.
+- [x] CLOSE payload validation rejects one-byte payloads, reserved/out-of-range
+  codes, malformed UTF-8 reasons, and payloads over the control-frame limit;
+  empty CLOSE and Discord 4004 remain valid cases.
 - [x] Offline decision-helper test covers retry while disk retains the origin,
   repeated rotations, and manual edits taking precedence. Actual filesystem
   write-failure injection remains unverified.

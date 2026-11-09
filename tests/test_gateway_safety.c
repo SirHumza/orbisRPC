@@ -161,6 +161,24 @@ static void test_empty_close_frame_disconnects_immediately(void){
     assert(!d.connected);
 }
 
+static void test_invalid_close_payload_disconnects(void){
+    static const char reserved_code[] = { 0x03, (char)0xED };
+    discord_t d;
+    memset(&d, 0, sizeof d);
+    d.connected = 1;
+    d.hb_interval_ms = 5000;
+    d.last_heartbeat = fake_now;
+    d.last_ack = fake_now;
+    d.sent_hb = 1;
+    scripted_recv = 1;
+    scripted_result = (int)sizeof reserved_code;
+    scripted_opcode = 8;
+    scripted_fin = 1;
+    scripted_payload = reserved_code;
+    assert(discord_tick(&d) == -1);
+    assert(!d.connected);
+}
+
 static void test_empty_ping_is_answered(void){
     discord_t d;
     memset(&d, 0, sizeof d);
@@ -276,6 +294,25 @@ static void test_masked_control_frame_echo_encoding(void){
                                    frame, sizeof frame) == 0);
 }
 
+static void test_close_payload_validation(void){
+    const unsigned char valid[] = { 0x03, 0xE8, 'o', 'k' };
+    const unsigned char rotated[] = { 0x0F, 0xA4 };
+    const unsigned char one_byte[] = { 0x03 };
+    const unsigned char zero_code[] = { 0x00, 0x00 };
+    const unsigned char reserved[] = { 0x03, 0xED };
+    const unsigned char invalid_utf8[] = { 0x03, 0xE8, 0xC0, 0xAF };
+    unsigned code = 123;
+    assert(ws_close_payload_valid(NULL, 0, &code) && code == 0);
+    assert(ws_close_payload_valid(valid, sizeof valid, &code) && code == 1000);
+    assert(ws_close_payload_valid(rotated, sizeof rotated, &code) && code == 4004);
+    assert(!ws_close_payload_valid(one_byte, sizeof one_byte, &code));
+    assert(!ws_close_payload_valid(zero_code, sizeof zero_code, &code));
+    assert(!ws_close_payload_valid(reserved, sizeof reserved, &code));
+    assert(!ws_close_payload_valid(invalid_utf8, sizeof invalid_utf8, &code));
+    unsigned char oversized[126] = { 0x03, 0xE8 };
+    assert(!ws_close_payload_valid(oversized, sizeof oversized, &code));
+}
+
 static void test_bounded_large_envelope(void){
     char payload[4096];
     strcpy(payload, "{\"op\":0,\"s\":41,\"t\":\"READY\",\"d\":\"");
@@ -347,11 +384,13 @@ int main(void){
     test_credentials_clear_after_session();
     test_first_heartbeat_ack_window();
     test_empty_close_frame_disconnects_immediately();
+    test_invalid_close_payload_disconnects();
     test_empty_ping_is_answered();
     test_ping_payload_reaches_pong();
     test_fragment_reassembly();
     test_websocket_frame_headers();
     test_masked_control_frame_echo_encoding();
+    test_close_payload_validation();
     test_bounded_large_envelope();
     test_token_fields_require_ready_envelope();
     test_split_ready_rotation_with_decoys();

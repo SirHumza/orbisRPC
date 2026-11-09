@@ -18,6 +18,8 @@ This file tracks the next concrete work; completion is based on evidence in
   reset frame outputs per poll to prevent stale-opcode loops.
 - [x] Echo WebSocket PING payloads in masked PONG replies and reconnect if the
   reply cannot be sent.
+- [x] Validate WebSocket CLOSE status codes and UTF-8 reasons before applying
+  Discord's invalid-token handling.
 - [x] Make malformed optional title overrides non-fatal again.
 - [x] Rewrite README claims to match the current source and installer flow.
 - [x] Fix macOS package tool selection and gate the setup app's font assets.
