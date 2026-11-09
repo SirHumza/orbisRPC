@@ -46,6 +46,10 @@ static jl_val_t *icfg_read(const char *path){
     r = jl_parse(buf, (size_t)sz);
     free(buf);
     if(!r || r->type != JL_OBJECT){ if(r) jl_free(r); return NULL; }
+    if(jl_obj_count(r, "token") > 1 || jl_obj_count(r, "qos_token") > 1){
+        jl_free(r);
+        return NULL;
+    }
     return r;
 }
 

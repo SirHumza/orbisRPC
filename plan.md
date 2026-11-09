@@ -194,7 +194,7 @@ These are failure cases to investigate, not claims that each bug currently exist
 - [x] B01 Reject embedded NULs in credential/config strings rather than validating only a prefix. Daemon config loading rejects decoded NULs transactionally; the installer JSON parser rejects `\u0000` because its string values are NUL-terminated. Host tests cover both boundaries.
 - [ ] B02 Reject overlong credentials without silently truncating them into different credentials.
 - [ ] B03 Handle CRLF, UTF-8 BOM, pasted whitespace, and outer quote normalization consistently at input boundaries.
-- [ ] B04 Reject ambiguous duplicate security-sensitive JSON keys or define one consistent interpretation across daemon and installer.
+- [x] B04 Reject duplicate `token` and `qos_token` config keys in daemon and installer readers. Ordinary installer saves fail closed on ambiguity; an explicit token edit can replace duplicate credentials with one token and clears stale/ambiguous QoS state. Host tests cover both.
 - [ ] B05 Reject wrong JSON root types and non-finite/out-of-range numbers before conversion to integers.
 - [ ] B06 Verify boolean handling agrees across the two JSON implementations and the settings UI.
 - [ ] B07 Preserve unknown config keys and nested settings when the installer saves one field.

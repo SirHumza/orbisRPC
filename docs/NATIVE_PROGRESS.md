@@ -56,6 +56,10 @@ Base commit: `e5dd5b8` on branch `1.1`.
 - Closed the embedded-NUL credential ambiguity: daemon config parsing rejects
   it transactionally, and the installer parser now rejects escaped NUL code
   points rather than silently presenting a truncated token prefix.
+- Rejected duplicate top-level `token` and `qos_token` keys across daemon and
+  installer config readers. Unrelated settings saves fail closed; explicitly
+  editing the token repairs duplicate credential entries and clears stale QoS
+  state whenever the account token changes.
 - Added offline gateway, token-lineage, and installer settings regression
   programs to the host test Makefile. The test target now runs the installer
   config test every time, even when its binary is already built.

@@ -141,6 +141,17 @@ jl_val_t *jl_obj_get(const jl_val_t *object, const char *key)
 	return NULL;
 }
 
+size_t jl_obj_count(const jl_val_t *object, const char *key)
+{
+	size_t count = 0;
+	if (!object || object->type != JL_OBJECT || !key)
+		return 0;
+	for (const jl_val_t *p = object->child; p; p = p->next)
+		if (p->key && strcmp(p->key, key) == 0)
+			++count;
+	return count;
+}
+
 void jl_obj_set(jl_val_t *object, const char *key, jl_val_t *value)
 {
 	jl_val_t *p, *last = NULL;

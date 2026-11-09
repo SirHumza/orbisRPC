@@ -25,6 +25,32 @@
 
 namespace {
 
+void RemoveDuplicateKey(jl_val_t *object, const char *key)
+{
+	bool kept = false;
+	jl_val_t **link = &object->child;
+	while (*link)
+	{
+		jl_val_t *p = *link;
+		if (p->key && strcmp(p->key, key) == 0)
+		{
+			if (!kept)
+			{
+				kept = true;
+				link = &p->next;
+			}
+			else
+			{
+				*link = p->next;
+				p->next = nullptr;
+				jl_free(p);
+			}
+		}
+		else
+			link = &p->next;
+	}
+}
+
 // Field labels, in display order.
 const char *const kLabels[kSettingCount] = {
 	"Token",
@@ -276,7 +302,8 @@ void Settings::Load()
 	// shipped placeholder is deliberately not valid input, and refusing to load
 	// because of it would grey the whole page out on a fresh install.
 	jl_val_t *tok = jl_obj_get(root, kTokenKey);
-	if (tok && tok->type == JL_STRING && tok->str)
+	if (jl_obj_count(root, kTokenKey) == 1 &&
+	    tok && tok->type == JL_STRING && tok->str)
 		token_ = tok->str;
 
 	jl_free(root);
@@ -316,6 +343,17 @@ int Settings::Save()
 
 	if (!root)
 		return -1;
+	const size_t tokenCount = jl_obj_count(root, kTokenKey);
+	const size_t qosCount = jl_obj_count(root, "qos_token");
+	if ((qosCount > 1 || tokenCount > 1) && !tokenModified_)
+	{
+		jl_free(root);
+		return -1;
+	}
+	jl_val_t *oldToken = jl_obj_get(root, kTokenKey);
+	const bool tokenChanged = tokenModified_ &&
+		(tokenCount != 1 || !oldToken || oldToken->type != JL_STRING ||
+		 !oldToken->str || strcmp(oldToken->str, token_.c_str()) != 0);
 
 	// Real booleans, so the daemon can read them without parsing.
 	jl_obj_set(root, kShowFirmwareKey, jl_new_bool(showFirmware_));
@@ -334,7 +372,43 @@ int Settings::Save()
 	// explicit edit replaces it, so stale in-memory state cannot undo a newer
 	// daemon-side token change.
 	if (tokenModified_)
-		jl_obj_set(root, kTokenKey, jl_new_string(token_.c_str()));
+	{
+		jl_val_t *replacement = jl_new_string(token_.c_str());
+		if (!replacement)
+		{
+			jl_free(root);
+			return -1;
+		}
+		jl_obj_set(root, kTokenKey, replacement);
+		RemoveDuplicateKey(root, kTokenKey);
+		jl_val_t *storedToken = jl_obj_get(root, kTokenKey);
+		if (jl_obj_count(root, kTokenKey) != 1 || !storedToken ||
+		    storedToken->type != JL_STRING || !storedToken->str ||
+		    strcmp(storedToken->str, token_.c_str()) != 0)
+		{
+			jl_free(root);
+			return -1;
+		}
+		if (tokenChanged || qosCount > 1)
+		{
+			jl_val_t *emptyQos = jl_new_string("");
+			if (!emptyQos)
+			{
+				jl_free(root);
+				return -1;
+			}
+			jl_obj_set(root, "qos_token", emptyQos);
+			RemoveDuplicateKey(root, "qos_token");
+			jl_val_t *storedQos = jl_obj_get(root, "qos_token");
+			if (jl_obj_count(root, "qos_token") != 1 || !storedQos ||
+			    storedQos->type != JL_STRING || !storedQos->str ||
+			    storedQos->str[0] != 0)
+			{
+				jl_free(root);
+				return -1;
+			}
+		}
+	}
 
 	char *text = jl_stringify(root);
 	jl_free(root);

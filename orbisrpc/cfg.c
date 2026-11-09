@@ -81,6 +81,16 @@ static void clamp_cfg(cfg_t *c){
         log_msg("config: token is still the SET_ME placeholder");
 }
 
+static int duplicate_credential_key(const jl_val_t *root){
+    static const char *const keys[] = { "token", "qos_token" };
+    for(size_t i = 0; i < sizeof keys / sizeof keys[0]; i++){
+        unsigned count = 0;
+        for(const jl_val_t *p = root->child; p; p = p->next)
+            if(p->str && !strcmp(p->str, keys[i]) && ++count > 1) return 1;
+    }
+    return 0;
+}
+
 int cfg_load(const char *path, cfg_t *c) {
     if(!path || !c) return -1;
     FILE *f = fopen(path, "rb");
@@ -100,6 +110,11 @@ int cfg_load(const char *path, cfg_t *c) {
     if (root->type != JL_OBJECT) {
         jl_free(root);
         log_msg("config root is not an object; keeping current config");
+        return -1;
+    }
+    if(duplicate_credential_key(root)){
+        jl_free(root);
+        log_msg("config contains duplicate credential fields; keeping current config");
         return -1;
     }
     /* Parse transactionally: any rejected known string leaves the caller's

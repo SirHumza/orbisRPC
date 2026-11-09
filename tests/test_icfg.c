@@ -68,6 +68,17 @@ static void test_installer_cfg(void) {
     assert(icfg_get_str(path2, "qos_token", st, sizeof st) == 0);
     assert(!strcmp(st, "server-signed-qos"));
     assert(icfg_get_int(path2, "poll_interval_s", &n) == 0 && n == 12);
+    FILE *dup = fopen(path2, "wb");
+    assert(dup);
+    fputs("{\"token\":\"first.token.value\",\"token\":\"second.token.value\"}", dup);
+    fclose(dup);
+    assert(icfg_token_load(path2, tok, sizeof tok) != 0);
+    dup = fopen(path2, "wb");
+    assert(dup);
+    fputs("{\"token\":\"single.token.value\",\"qos_token\":\"old-a\","
+          "\"qos_token\":\"old-b\"}", dup);
+    fclose(dup);
+    assert(icfg_token_load(path2, tok, sizeof tok) != 0);
     /* corrupt source: capture yields all-absent, never garbage */
     FILE *h = fopen(path, "wb");
     assert(h);

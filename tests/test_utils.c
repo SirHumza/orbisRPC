@@ -826,6 +826,18 @@ static void test_cfg_titles(void) {
     assert(!strcmp(c.token, "t")); /* malformed credential preserves last-good config */
     f = fopen(path, "wb");
     assert(f);
+    fputs("{\"token\":\"first.token.value\",\"token\":\"second.token.value\"}", f);
+    fclose(f);
+    assert(cfg_load(path, &c) == -1);
+    assert(!strcmp(c.token, "t"));
+    f = fopen(path, "wb");
+    assert(f);
+    fputs("{\"token\":\"t\",\"qos_token\":\"first\",\"qos_token\":\"second\"}", f);
+    fclose(f);
+    assert(cfg_load(path, &c) == -1);
+    assert(!strcmp(c.token, "t"));
+    f = fopen(path, "wb");
+    assert(f);
     fputs("{\"token\":\"t\",\"retro_enabled\":false,\"custom_enabled\":true}", f);
     fclose(f);
     assert(cfg_load(path, &c) == 0);

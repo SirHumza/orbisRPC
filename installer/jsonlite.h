@@ -66,6 +66,7 @@ jl_val_t *jl_new_bool(int value);
 /* Object access. jl_obj_get returns NULL when absent. jl_obj_set takes
  * ownership of `value` and frees any previous value for the same key. */
 jl_val_t *jl_obj_get(const jl_val_t *object, const char *key);
+size_t   jl_obj_count(const jl_val_t *object, const char *key);
 void     jl_obj_set(jl_val_t *object, const char *key, jl_val_t *value);
 
 /* Arrays are parsed and freed but never built by hand: nothing in the installer
