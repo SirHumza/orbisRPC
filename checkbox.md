@@ -30,6 +30,9 @@
   unverified against Discord.
 - [x] Frame-header tests reject reserved opcodes, invalid RSV/masking bits,
   fragmented or oversized control frames, and invalid fragment ordering.
+- [x] Verify PING payload forwarding and masked PONG frame encoding offline.
+- [x] Dispatcher tests verify immediate empty-CLOSE handling and exactly one
+  PONG for an empty PING, including a subsequent no-data poll.
 - [x] Offline decision-helper test covers retry while disk retains the origin,
   repeated rotations, and manual edits taking precedence. Actual filesystem
   write-failure injection remains unverified.

@@ -10,10 +10,19 @@
 #include "../orbisrpc/discord.c"
 #include "../orbisrpc/ws_env.c"
 #include "../orbisrpc/ws_frag.c"
+#include "../orbisrpc/ws_frame.h"
 #include "../orbisrpc/ws_frame.c"
 
 static int64_t fake_now;
 static int sent;
+static int pongs;
+static size_t last_pong_len;
+static unsigned char last_pong[125];
+static int scripted_recv;
+static int scripted_result;
+static int scripted_opcode;
+static int scripted_fin;
+static const char *scripted_payload;
 
 int64_t orbis_mono_s(void){ return fake_now; }
 void log_msg(const char *fmt, ...){ (void)fmt; }
@@ -30,9 +39,25 @@ int ws_send_text(ws_t *w, const char *msg, size_t len){
     (void)w; (void)msg; sent++; return (int)len;
 }
 int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *op, int *fin){
-    (void)w; (void)buf; (void)cap; (void)op; (void)fin; return 0;
+    (void)w;
+    if(!scripted_recv) return 0;
+    scripted_recv = 0;
+    if(op) *op = scripted_opcode;
+    if(fin) *fin = scripted_fin;
+    if(scripted_result > 0 && scripted_payload){
+        size_t n = (size_t)scripted_result < cap ? (size_t)scripted_result : cap;
+        memcpy(buf, scripted_payload, n);
+    }
+    return scripted_result;
 }
-int ws_pong(ws_t *w){ (void)w; return 0; }
+int ws_pong(ws_t *w, const unsigned char *payload, size_t len){
+    (void)w;
+    assert(len <= sizeof last_pong);
+    if(len) memcpy(last_pong, payload, len);
+    last_pong_len = len;
+    pongs++;
+    return 0;
+}
 int ws_close(ws_t *w){ (void)w; return 0; }
 
 static void test_malformed_numbers(void){
@@ -119,6 +144,63 @@ static void test_first_heartbeat_ack_window(void){
     assert(discord_tick(&d) == -1);
 }
 
+static void test_empty_close_frame_disconnects_immediately(void){
+    discord_t d;
+    memset(&d, 0, sizeof d);
+    d.connected = 1;
+    d.hb_interval_ms = 5000;
+    d.last_heartbeat = fake_now;
+    d.last_ack = fake_now;
+    d.sent_hb = 1;
+    scripted_recv = 1;
+    scripted_result = 0;
+    scripted_opcode = 8;
+    scripted_fin = 1;
+    scripted_payload = NULL;
+    assert(discord_tick(&d) == -1);
+    assert(!d.connected);
+}
+
+static void test_empty_ping_is_answered(void){
+    discord_t d;
+    memset(&d, 0, sizeof d);
+    d.connected = 1;
+    d.hb_interval_ms = 5000;
+    d.last_heartbeat = fake_now;
+    d.last_ack = fake_now;
+    d.sent_hb = 1;
+    scripted_recv = 1;
+    scripted_result = 0;
+    scripted_opcode = 9;
+    scripted_fin = 1;
+    scripted_payload = NULL;
+    pongs = 0;
+    assert(discord_tick(&d) == 0);
+    assert(!scripted_recv);
+    assert(pongs == 1);
+    assert(d.connected);
+}
+
+static void test_ping_payload_reaches_pong(void){
+    discord_t d;
+    memset(&d, 0, sizeof d);
+    d.connected = 1;
+    d.hb_interval_ms = 5000;
+    d.last_heartbeat = fake_now;
+    d.last_ack = fake_now;
+    d.sent_hb = 1;
+    scripted_recv = 1;
+    scripted_result = 5;
+    scripted_opcode = 9;
+    scripted_fin = 1;
+    scripted_payload = "probe";
+    pongs = 0;
+    last_pong_len = 0;
+    assert(discord_tick(&d) == 0);
+    assert(pongs == 1 && last_pong_len == 5);
+    assert(!memcmp(last_pong, "probe", 5));
+}
+
 static void test_fragment_reassembly(void){
     ws_frag_t s = {0};
     const unsigned char *message = NULL;
@@ -176,6 +258,22 @@ static void test_websocket_frame_headers(void){
     assert(!ws_frame_header_valid(reserved_bits, 0));
     assert(!ws_frame_header_valid(masked_server_frame, 0));
     assert(!ws_frame_header_valid(overflowing_length, UINT64_MAX));
+}
+
+static void test_masked_control_frame_echo_encoding(void){
+    const unsigned char payload[] = "probe";
+    const unsigned char mask[] = {0x12, 0x34, 0x56, 0x78};
+    unsigned char frame[131];
+    size_t n = ws_control_frame_encode(0x0a, payload, sizeof payload - 1,
+                                       mask, frame, sizeof frame);
+    assert(n == 11 && frame[0] == 0x8a && frame[1] == 0x85);
+    assert(!memcmp(frame + 2, mask, sizeof mask));
+    for(size_t i = 0; i < sizeof payload - 1; ++i)
+        assert((unsigned char)(frame[6 + i] ^ mask[i % 4]) == payload[i]);
+    assert(ws_control_frame_encode(0x0a, payload, 126, mask,
+                                   frame, sizeof frame) == 0);
+    assert(ws_control_frame_encode(0x0b, payload, sizeof payload - 1, mask,
+                                   frame, sizeof frame) == 0);
 }
 
 static void test_bounded_large_envelope(void){
@@ -248,8 +346,12 @@ int main(void){
     test_rotation_take_validation();
     test_credentials_clear_after_session();
     test_first_heartbeat_ack_window();
+    test_empty_close_frame_disconnects_immediately();
+    test_empty_ping_is_answered();
+    test_ping_payload_reaches_pong();
     test_fragment_reassembly();
     test_websocket_frame_headers();
+    test_masked_control_frame_echo_encoding();
     test_bounded_large_envelope();
     test_token_fields_require_ready_envelope();
     test_split_ready_rotation_with_decoys();

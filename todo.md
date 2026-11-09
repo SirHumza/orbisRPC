@@ -14,6 +14,10 @@ This file tracks the next concrete work; completion is based on evidence in
 - [x] Add offline READY/IDENTIFY and token-lineage tests.
 - [x] Reject reserved WebSocket control opcodes through the shared tested frame
   validator; RFC-level frame tests cover sequencing and bounds.
+- [x] Process empty CLOSE/PING control frames before the no-data sentinel and
+  reset frame outputs per poll to prevent stale-opcode loops.
+- [x] Echo WebSocket PING payloads in masked PONG replies and reconnect if the
+  reply cannot be sent.
 - [x] Make malformed optional title overrides non-fatal again.
 - [x] Rewrite README claims to match the current source and installer flow.
 - [x] Fix macOS package tool selection and gate the setup app's font assets.

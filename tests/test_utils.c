@@ -45,7 +45,9 @@ int ws_recv_frame(ws_t *w, char *b, size_t c, int *o, int *f){
     (void)w; (void)b; (void)c; (void)o; (void)f;
     return test_ws_recv_idle ? 0 : -1;
 }
-int ws_pong(ws_t *w){ (void)w; return -1; }
+int ws_pong(ws_t *w, const unsigned char *payload, size_t len){
+    (void)w; (void)payload; (void)len; return -1;
+}
 int ws_close(ws_t *w){ (void)w; return -1; }
 /* ws.c itself is not linked on the host (it owns a tls_ctx_t), so the pure
  * drain arithmetic comes in directly. Only ws_skip_plan is needed, and it is

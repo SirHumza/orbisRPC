@@ -37,6 +37,12 @@ Base commit: `e5dd5b8` on branch `1.1`.
   [discord.py gateway implementation](https://github.com/Rapptz/discord.py/blob/master/discord/gateway.py).
   Discord's documented Resume flow uses application Gateway session metadata;
   it is not assumed to support this console user-token connection.
+- Fixed control-frame dispatch for zero-length frames: empty CLOSE now tears
+  down immediately, empty PING gets one PONG, and a no-data poll cannot reuse
+  the previous opcode and send PONG repeatedly. PONG write failure now forces
+  reconnect. PONG replies now echo the PING payload and use an offline-tested
+  masked control-frame encoder; auth-time PONG write failures also close the
+  session cleanly.
 - Added offline gateway, token-lineage, and installer settings regression
   programs to the host test Makefile. The test target now runs the installer
   config test every time, even when its binary is already built.

@@ -5,6 +5,7 @@
  * All client->server frames are masked per RFC 6455 5.3, control frames too.
  */
 #include "ws.h"
+#include "ws_frame.h"
 #include "clock.h"
 #include "tls.h"
 #include "log.h"
@@ -302,16 +303,19 @@ int ws_send_text(ws_t *w, const char *msg, size_t len){
 }
 
 /* RFC 6455: client control frames (close/ping/pong) are masked too. */
-static int ws_send_control(ws_t *w, unsigned char op){
-    if(!w->connected) return -1;
+static int ws_send_control(ws_t *w, unsigned char op,
+                           const unsigned char *payload, size_t len){
+    if(!w || !w->connected || (!payload && len) || len > 125) return -1;
     unsigned char mk[4]; next_mask(mk);
-    unsigned char f[6] = { (unsigned char)(0x80|op), 0x80, mk[0], mk[1], mk[2], mk[3] };
-    return ws_send_all(w, f, 6);
+    unsigned char f[131];
+    size_t n = ws_control_frame_encode(op, payload, len, mk, f, sizeof f);
+    if(!n) return -1;
+    return ws_send_all(w, f, n);
 }
 
-/* Answer a server PING with an (empty) PONG so the gateway keeps us. */
-int ws_pong(ws_t *w){
-    return ws_send_control(w, 0xA);
+/* RFC 6455 requires the PONG Application data to echo the PING payload. */
+int ws_pong(ws_t *w, const unsigned char *payload, size_t len){
+    return ws_send_control(w, 0xA, payload, len);
 }
 
 /* Peek at the pending frame header without consuming. 1 = full header ready. */
@@ -619,7 +623,7 @@ int ws_close(ws_t *w){
         ws_frag_reset(&w->fragments);
         return 0;
     }
-    ws_send_control(w, 0x8); /* best-effort masked CLOSE */
+    ws_send_control(w, 0x8, NULL, 0); /* best-effort masked CLOSE */
     tls_free((tls_ctx_t*)w->tls);
 #ifdef ORBISRPC_SDK_PAYLOAD
     close(w->fd);

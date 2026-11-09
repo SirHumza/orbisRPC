@@ -277,7 +277,13 @@ int discord_connect(discord_t *d, const char *token, const char *qos_token){
             ws_close(&d->ws); d->connected=0;
             return code==4004 ? -2 : -1;
         }
-        if(op==9){ ws_pong(&d->ws); continue; }
+        if(op==9){
+            if(ws_pong(&d->ws, (const unsigned char *)buf, (size_t)nr) < 0){
+                log_msg("websocket PONG send failed during auth");
+                ws_close(&d->ws); d->connected=0; return -1;
+            }
+            continue;
+        }
         if(op!=1) continue;
         if(!valid_gateway_json(buf)){
             log_msg("malformed gateway JSON during auth");
@@ -663,19 +669,29 @@ int discord_tick(discord_t *d){
      * inside ws_recv_frame regardless of this cap */
     char buf[2048]; int op=0,fin=0;
     for(int i=0;i<32;i++){
+        op=0;
+        fin=0;
         int nr=ws_recv_frame(&d->ws,buf,sizeof buf,&op,&fin);
         if(nr==-3){ log_msg("skipped oversized frame"); continue; }
-        if(nr==0) break;
         if(nr<0){ d->connected=0; return -1; }
         if(op==8){ /* WS CLOSE: payload starts with a 2-byte big-endian code */
             if(!fin){ log_msg("fragmented close; reconnecting"); d->connected=0; return -1; }
+            if(nr==0){ log_msg("gateway closed without a status code"); d->connected=0; return -1; }
             if(nr<2){ log_msg("malformed close (len %d); reconnecting", nr); d->connected=0; return -1; }
             unsigned code = (((unsigned char)buf[0]<<8)|((unsigned char)buf[1]));
             log_msg("gateway closed: code=%u",code);
             d->connected=0;
             return code==4004 ? -2 : -1;
         }
-        if(op==9){ ws_pong(&d->ws); continue; } /* WS PING -> PONG */
+        if(op==9){
+            if(ws_pong(&d->ws, (const unsigned char *)buf, (size_t)nr) < 0){
+                log_msg("websocket PONG send failed; reconnecting");
+                d->connected=0;
+                return -1;
+            }
+            continue;
+        }
+        if(nr==0) break;
         if(op!=1 && op!=0) continue;
         if(!valid_gateway_json(buf)){
             log_msg("malformed gateway JSON; ignoring frame");

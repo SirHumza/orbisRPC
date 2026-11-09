@@ -53,7 +53,7 @@ int ws_send_text(ws_t *w, const char *msg, size_t len);
 /* Returns frame payload length (>0), 0 if no complete frame yet, <0 on error,
  * or -3 if an oversized frame was drained and skipped (payload lost). */
 int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out);
-int ws_pong(ws_t *w); /* answer a server PING (call when recv gives opcode 9) */
+int ws_pong(ws_t *w, const unsigned char *payload, size_t len);
 int ws_close(ws_t *w);
 /* How many payload bytes remain to discard after an oversized frame's header
  * has been consumed. Saturates at 0 rather than wrapping when payload_here
