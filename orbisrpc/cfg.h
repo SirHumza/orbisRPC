@@ -63,6 +63,7 @@ typedef struct {
     char browser_art[256];   /* large image while the web browser is up */
 } cfg_t;
 extern cfg_t g_cfg;
+/* Failed loads leave c unchanged; initialize defaults before the first load. */
 int cfg_load(const char *path, cfg_t *c);
 /* Cross-process transaction lock for read/modify/save; release with cfg_unlock. */
 int cfg_lock(const char *path);

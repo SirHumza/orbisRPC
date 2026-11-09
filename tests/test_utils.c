@@ -817,6 +817,20 @@ static void test_cfg_titles(void) {
     fclose(f);
     cfg_t c;
     assert(cfg_load(path, &c) == 0);
+    cfg_t last_good = c;
+    assert(remove(path) == 0);
+    assert(cfg_load(path, &c) == -1);
+    assert(memcmp(&c, &last_good, sizeof c) == 0);
+    f = fopen(path, "wb");
+    assert(f && fclose(f) == 0);
+    assert(cfg_load(path, &c) == -1);
+    assert(memcmp(&c, &last_good, sizeof c) == 0);
+    f = fopen(path, "wb");
+    assert(f);
+    fputs("{", f);
+    fclose(f);
+    assert(cfg_load(path, &c) == -1);
+    assert(memcmp(&c, &last_good, sizeof c) == 0);
     /* The independent metadata switches must not overwrite each other. */
     f = fopen(path, "wb");
     assert(f);

@@ -103,7 +103,7 @@ static int duplicate_credential_key(const jl_val_t *root){
 int cfg_load(const char *path, cfg_t *c) {
     if(!path || !c) return -1;
     FILE *f = fopen(path, "rb");
-    if (!f) { cfg_defaults(c); log_msg("config not found at %s; defaults applied", path); return -1; }
+    if (!f) { log_msg("config unavailable at %s; keeping current config", path); return -1; }
     if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return -1; }
     long sz = ftell(f);
     if (sz < 0 || fseek(f, 0, SEEK_SET) != 0) { fclose(f); return -1; }

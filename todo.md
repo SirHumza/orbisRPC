@@ -4,6 +4,10 @@ The acceptance criteria and full issue/feature backlog live in [`plan.md`](plan.
 This file tracks the next concrete work; completion is based on evidence in
 [`checkbox.md`](checkbox.md), not on code being present.
 
+Release focus: Discord credential persistence/reconnect, daemon reliability,
+and installer behavior. Optional features and unconfirmed bug-hunting ideas in
+the master plan are backlog, not release blockers.
+
 ## Current pass
 
 - [x] Inspect the current `1.1` branch and preserve its dirty work.
@@ -31,6 +35,8 @@ This file tracks the next concrete work; completion is based on evidence in
 - [x] Align installer toggle loading with daemon boolean-only config semantics.
 - [x] Verify installer read-modify-write preserves unknown nested config and newer token state.
 - [x] Serialize daemon and installer config updates with a shared transaction lock; cover concurrent token rotation.
+- [x] Preserve the complete last-good config after missing, empty, or malformed reload input.
+- [x] Rebuild the Setup PKG when the staged daemon or packaged assets change.
 - [x] Make malformed optional title overrides non-fatal again.
 - [x] Rewrite README claims to match the current source and installer flow.
 - [x] Fix macOS package tool selection and gate the setup app's font assets.

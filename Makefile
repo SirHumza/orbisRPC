@@ -306,7 +306,7 @@ elf: $(SOURCEDIR)/eboot.bin
 # Artwork only, for when a PNG changes and you want to eyeball it.
 gfx: $(GFX)
 
-$(CONTENT_ID).pkg: $(SOURCEDIR)/pkg.gp4
+$(CONTENT_ID).pkg: $(SOURCEDIR)/pkg.gp4 $(ASSET_FILES) $(STAGED_PAYLOAD)
 	cd $(SOURCEDIR) && $(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core pkg_build pkg.gp4 . && mv $(CONTENT_ID).pkg ../
 
 $(ASSET_MK):

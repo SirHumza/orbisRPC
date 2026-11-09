@@ -18,6 +18,8 @@
 - [x] SDK source revision `573b4a0` and 13.50/13.52 firmware gates are recorded.
 - [x] `make all` produced daemon ELF and setup PKG from the current working tree.
 - [x] ELF dependencies contain only the four supported daemon-world libraries.
+- [x] Rebuilt PKG after a payload-only change; extracted daemon matches the
+  current SDK build and staged asset by SHA-256.
 - [x] PKG manifest lists all required assets, fonts, and the newly built daemon
   ELF; `create-gp4` and PkgTool completed successfully.
 - [ ] Installer install, update, settings save, cancellation, failure recovery,
@@ -47,6 +49,8 @@
   the current on-disk token rather than stale values loaded into the UI.
 - [x] Serialize daemon and installer config transactions with a shared sidecar
   lock; a cross-process regression verifies a concurrent token rotation survives.
+- [x] Preserve every last-good config field when a reload fails, including when
+  the config file is missing; startup initializes defaults explicitly.
 - [x] Offline tests cover READY-only promotion, auth/QoS extraction, nested
   decoys, and IDENTIFY QoS presence/absence. Full exact wire acceptance remains
   unverified against Discord.

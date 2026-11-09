@@ -108,6 +108,13 @@ Base commit: `e5dd5b8` on branch `1.1`.
   arriving while the installer saves. This protects app-managed writers; direct
   external FTP edits do not participate in the lock.
 - `git diff --check`: passed.
+- Missing, empty, and malformed config reload tests compare the entire loaded
+  struct with its last-good snapshot. A missing file now returns an error
+  without replacing working credentials or settings with defaults; initial boot
+  still initializes defaults before loading.
+- Fixed a reproduced package dependency bug: a newer staged daemon could leave
+  the previous PKG untouched. The package now depends on its asset files and
+  staged daemon, so payload-only updates trigger packaging.
 - No console test was run. Build success does not prove the PKG launches or that
   Discord accepts the account token on PS4.
 - The gateway comparison is source-level only. Issue #56's claim that
