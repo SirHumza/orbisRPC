@@ -12,6 +12,8 @@ This file tracks the next concrete work; completion is based on evidence in
 - [x] Stop reconnecting with an unchanged credential after explicit 4004.
 - [x] Clear gateway token captures and live credential copies when a session ends.
 - [x] Add offline READY/IDENTIFY and token-lineage tests.
+- [x] Reject reserved WebSocket control opcodes through the shared tested frame
+  validator; RFC-level frame tests cover sequencing and bounds.
 - [x] Make malformed optional title overrides non-fatal again.
 - [x] Rewrite README claims to match the current source and installer flow.
 - [x] Fix macOS package tool selection and gate the setup app's font assets.

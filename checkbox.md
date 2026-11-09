@@ -28,6 +28,8 @@
 - [x] Offline tests cover READY-only promotion, auth/QoS extraction, nested
   decoys, and IDENTIFY QoS presence/absence. Full exact wire acceptance remains
   unverified against Discord.
+- [x] Frame-header tests reject reserved opcodes, invalid RSV/masking bits,
+  fragmented or oversized control frames, and invalid fragment ordering.
 - [x] Offline decision-helper test covers retry while disk retains the origin,
   repeated rotations, and manual edits taking precedence. Actual filesystem
   write-failure injection remains unverified.

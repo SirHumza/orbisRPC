@@ -211,7 +211,7 @@ These are failure cases to investigate, not claims that each bug currently exist
 
 - [ ] B16 Test upgrade headers split at every byte boundary, repeated headers, case variations, and oversized headers.
 - [ ] B17 Test fragmented text messages with interleaved ping/pong frames and multiple messages in one read.
-- [ ] B18 Reject invalid RSV bits, opcodes, continuation ordering, control-frame lengths, and length overflows.
+- [x] B18 Reject invalid RSV bits, opcodes, continuation ordering, control-frame lengths, and length overflows. Offline tests cover the shared validator and fragment assembler; arbitrary socket chunk-boundary integration remains in B16/B17.
 - [ ] B19 Handle short writes, TLS WANT_READ/WANT_WRITE, EINTR, peer EOF, and close during a write without spinning.
 - [ ] B20 Ensure a peer that sends partial data forever cannot extend a deadline indefinitely.
 - [ ] B21 Verify close-code parsing with empty, one-byte, malformed, and oversized close payloads.

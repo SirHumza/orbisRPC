@@ -332,23 +332,12 @@ static int peek_frame(ws_t *w, size_t *hdr_out, uint64_t *plen_out){
     return 1;
 }
 
-static int valid_frame_header(const unsigned char *b, uint64_t plen){
-    int fin = (b[0] & 0x80) != 0;
-    int rsv = b[0] & 0x70;
-    int op = b[0] & 0x0f;
-    int masked = (b[1] & 0x80) != 0;
-    if (rsv || masked) return 0;
-    if (op >= 3 && op <= 7) return 0; /* reserved opcodes */
-    if (op >= 8 && (!fin || plen > 125)) return 0; /* control: final, <=125 */
-    if ((b[1] & 0x7f) == 127 && (b[2] & 0x80)) return 0; /* absurd 64-bit length */
-    return 1;
-}
-
 /* ws_skip_plan() lives in ws_skip.c and the envelope scraper in ws_env.c, so
  * the host tests can compile both without the socket/TLS half of this file. */
 #include "ws_skip.c"
 #include "ws_env.c"
 #include "ws_frag.c"
+#include "ws_frame.c"
 
 static void ws_capture_token(ws_t *w){
     if(!w) return;
@@ -446,7 +435,7 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
             if(peek_frame(w,&hdr,&plen)){
                 const unsigned char *b = w->rbuf + w->rpos;
                 int fin=(b[0]&0x80)!=0, wire_op=b[0]&0x0f;
-                if(!valid_frame_header(b, plen)){
+                if(!ws_frame_header_valid(b, plen)){
                     log_msg("ws: protocol violation op=%d fin=%d plen=%llu b1=0x%02x b2=0x%02x",
                         b[0]&0x0f, (b[0]&0x80)!=0, (unsigned long long)plen, b[0], b[1]);
                     return -2;

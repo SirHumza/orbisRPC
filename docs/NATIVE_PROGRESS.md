@@ -30,6 +30,13 @@ Base commit: `e5dd5b8` on branch `1.1`.
   handling, and first-heartbeat ACK timing. READY is the only event that can
   promote captured auth and QoS values. IDENTIFY includes QoS only when one is
   present; no undocumented client fingerprint fields were added.
+- Rejected all undefined WebSocket opcodes, including reserved control opcodes
+  `0xB` through `0xF`, with offline checks for RSV bits, masking, fragmentation,
+  control-frame limits, and 64-bit length overflow. Compared this path against
+  [RFC 6455](https://www.rfc-editor.org/rfc/rfc6455) and the current
+  [discord.py gateway implementation](https://github.com/Rapptz/discord.py/blob/master/discord/gateway.py).
+  Discord's documented Resume flow uses application Gateway session metadata;
+  it is not assumed to support this console user-token connection.
 - Added offline gateway, token-lineage, and installer settings regression
   programs to the host test Makefile. The test target now runs the installer
   config test every time, even when its binary is already built.
@@ -41,7 +48,7 @@ Base commit: `e5dd5b8` on branch `1.1`.
 
 - `make -C tests test`: passed after correcting optional title override
   handling. Includes existing utility tests and the new gateway, token lineage,
-  persistence-decision, and installer safety tests.
+  persistence-decision, frame-header, and installer safety tests.
 - `make -C tests asan`: passed with ASan/UBSan, including the new standalone
   fragment, gateway, token-lineage, and installer safety tests.
 - `ORBISRPC_STRICT_SECRETS=1 python3 tests/e2e_consumer.py`: passed, including
@@ -67,6 +74,7 @@ Base commit: `e5dd5b8` on branch `1.1`.
 - Test install, update, settings save, daemon reconnect, and uninstall on
   hardware. Firmware claims require recorded console evidence.
 - Exercise normal and oversized fragmented gateway frames on a scripted
-  transport; current tests cover the pure bounded assembler, not socket framing.
+  transport; current tests cover the pure bounded assembler and frame-header
+  validator, not socket framing or chunk-boundary integration.
 - Work through the remaining accepted items and issue matrix in `plan.md`;
   none should be described as shipped based only on the plan.

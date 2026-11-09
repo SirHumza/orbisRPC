@@ -112,9 +112,9 @@ clean:
 	rm -rf $(TARGET) test_utils_asan test_icfg test_icfg_asan $(OBJDIR) $(ASAN_OBJDIR) *.o
 
 # Standalone protocol/persistence and installer safety regressions.
-$(OBJDIR)/gateway_safety: test_gateway_safety.c ../orbisrpc/discord.c ../orbisrpc/ws_env.c ../orbisrpc/ws_frag.c $(HDRS) | $(OBJDIR)
+$(OBJDIR)/gateway_safety: test_gateway_safety.c ../orbisrpc/discord.c ../orbisrpc/ws_env.c ../orbisrpc/ws_frag.c ../orbisrpc/ws_frame.c $(HDRS) | $(OBJDIR)
 	$(CC) $(CFLAGS) -o $@ $< ../orbisrpc/jsonlite.c ../orbisrpc/b64.c
-$(ASAN_OBJDIR)/gateway_safety: test_gateway_safety.c ../orbisrpc/discord.c ../orbisrpc/ws_env.c ../orbisrpc/ws_frag.c $(HDRS) | $(ASAN_OBJDIR)
+$(ASAN_OBJDIR)/gateway_safety: test_gateway_safety.c ../orbisrpc/discord.c ../orbisrpc/ws_env.c ../orbisrpc/ws_frag.c ../orbisrpc/ws_frame.c $(HDRS) | $(ASAN_OBJDIR)
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) -o $@ $< ../orbisrpc/jsonlite.c ../orbisrpc/b64.c
 $(OBJDIR)/auth_rotation: test_auth_rotation.c ../orbisrpc/auth_rotation.h | $(OBJDIR)
 	$(CC) $(CFLAGS) -o $@ $<

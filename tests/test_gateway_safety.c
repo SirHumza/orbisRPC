@@ -10,6 +10,7 @@
 #include "../orbisrpc/discord.c"
 #include "../orbisrpc/ws_env.c"
 #include "../orbisrpc/ws_frag.c"
+#include "../orbisrpc/ws_frame.c"
 
 static int64_t fake_now;
 static int sent;
@@ -144,6 +145,37 @@ static void test_fragment_reassembly(void){
                         &message, &message_len) == -2);
     assert(!s.active && !s.discarding);
     free(large);
+
+    assert(ws_frag_feed(&s, 1, 0, (const unsigned char *)"part", 4,
+                        &message, &message_len) == 0);
+    assert(ws_frag_feed(&s, 1, 1, (const unsigned char *)"new", 3,
+                        &message, &message_len) == -1);
+    ws_frag_reset(&s);
+}
+
+static void test_websocket_frame_headers(void){
+    const unsigned char text[] = {0x81, 0x00};
+    const unsigned char reserved_control[] = {0x8b, 0x00};
+    const unsigned char reserved_control2[] = {0x8c, 0x00};
+    const unsigned char reserved_control3[] = {0x8f, 0x00};
+    const unsigned char reserved_data[] = {0x83, 0x00};
+    const unsigned char fragmented_ping[] = {0x09, 0x00};
+    const unsigned char oversized_ping[] = {0x89, 0x7e};
+    const unsigned char reserved_bits[] = {0xc1, 0x00};
+    const unsigned char masked_server_frame[] = {0x81, 0x80};
+    const unsigned char overflowing_length[] = {
+        0x81, 0x7f, 0x80, 0, 0, 0, 0, 0, 0, 0
+    };
+    assert(ws_frame_header_valid(text, 0));
+    assert(!ws_frame_header_valid(reserved_control, 0));
+    assert(!ws_frame_header_valid(reserved_control2, 0));
+    assert(!ws_frame_header_valid(reserved_control3, 0));
+    assert(!ws_frame_header_valid(reserved_data, 0));
+    assert(!ws_frame_header_valid(fragmented_ping, 0));
+    assert(!ws_frame_header_valid(oversized_ping, 126));
+    assert(!ws_frame_header_valid(reserved_bits, 0));
+    assert(!ws_frame_header_valid(masked_server_frame, 0));
+    assert(!ws_frame_header_valid(overflowing_length, UINT64_MAX));
 }
 
 static void test_bounded_large_envelope(void){
@@ -217,6 +249,7 @@ int main(void){
     test_credentials_clear_after_session();
     test_first_heartbeat_ack_window();
     test_fragment_reassembly();
+    test_websocket_frame_headers();
     test_bounded_large_envelope();
     test_token_fields_require_ready_envelope();
     test_split_ready_rotation_with_decoys();
