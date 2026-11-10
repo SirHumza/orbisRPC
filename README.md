@@ -13,12 +13,11 @@
   <img src="https://img.shields.io/badge/Discord-Rich%20Presence-5865F2?style=flat-square" alt="Discord">
   <img src="https://img.shields.io/badge/PC%20needed-none-brightgreen?style=flat-square" alt="No PC needed">
   <a href="https://discord.gg/BWEyfcT7ZQ"><img src="https://img.shields.io/badge/Discord-Join%20the%20server-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Join the Discord"></a>
-  <img src="https://img.shields.io/badge/tables-none-brightgreen?style=flat-square" alt="no tables">
 </p>
 
 <p align="center">by <b>SirHumza & CyberMask367</b> · <a href="https://sirhumza.github.io/orbisRPC/">website</a> · <a href="https://discord.gg/BWEyfcT7ZQ">discord.gg/BWEyfcT7ZQ</a></p>
 
-<p align="center"><b>Discord Rich Presence for the jailbroken PS4 — every game, zero setup.</b><br>
+<p align="center"><b>Discord Rich Presence for the jailbroken PS4 — game, cover art and timer on your profile.</b><br>
 A background daemon that lives entirely on your console and posts what you're
 playing to Discord: name, cover art, timer. No PC at runtime.</p>
 
@@ -29,6 +28,10 @@ PS4 operating system. <a href="https://sirhumza.github.io/orbisRPC/about-orbisrp
 
 ---
 
+## See it working
+
+The project site shows an example Discord activity card with game art and a timer: [open the demo](https://sirhumza.github.io/orbisRPC/#demo). The card is a presentation mock-up; it is not a live console feed.
+
 ## At a glance
 
 - **What it is:** a free, open-source Discord Rich Presence daemon for jailbroken
@@ -38,7 +41,7 @@ PS4 operating system. <a href="https://sirhumza.github.io/orbisRPC/about-orbisrp
 - **The difference:** it runs entirely on the console. **No PC, script, or FTP
   bridge is needed at runtime** — unlike every other PS4 rich-presence tool, which
   is a PC-side script.
-- **Platform:** jailbroken PS4 + GoldHEN, firmware **5.05–13.52**.
+- **Platform:** jailbroken PS4 + GoldHEN. The project reports hardware testing on **9.00–13.52**; 5.05–8.52 are intended support, not confirmed in the published test record.
 - **Connection:** direct TLS 1.2 WebSocket to the Discord gateway. Nothing sits in
   between.
 - **Coverage:** every retail PS4 title (Sony TMDB), homebrew (pkg-zone), and
@@ -111,7 +114,7 @@ Details: [`docs/DAEMON.md`](docs/DAEMON.md) · full index at [`docs/`](docs/)
 
 ## Requirements
 
-- Jailbroken PS4 on firmware **from 5.05 upto 13.52**, GoldHEN running.
+- Jailbroken PS4 on firmware **5.05–13.52** (hardware-tested 9.00–13.52), GoldHEN running.
 - A way to send the payload (elfldr on port 9021, or GoldHEN BinLoader
   on 9090).
 - A Discord account + your user token (see Install).
@@ -161,7 +164,7 @@ settings.
 
 </details>
 
-✅ Firmware: confirmed working on 9.00 through 13.52 but older fimwares should work.
+**Firmware testing:** confirmed on retail hardware from 9.00 through 13.52. Firmware 5.05–8.52 is not confirmed in the published hardware test record.
 
 ### What's new in 1.0.0
 
@@ -388,8 +391,7 @@ API). If you don't want a PC on while you game, orbisRPC is the only option.
 **Does orbisRPC need a PC?** No. It runs entirely on the PS4 and connects to
 Discord itself.
 
-**What firmware does it support?** Jailbroken firmware 5.05 through 13.52
-(9.00–13.52 confirmed on hardware).
+**What firmware does it support?** Intended for jailbroken firmware 5.05 through 13.52. Hardware testing is confirmed on 9.00–13.52; 5.05–8.52 remain unverified.
 
 **Does it show homebrew and retro games?** Yes — homebrew via pkg-zone, and
 PS1/PS2/PSP via a curated list, with cover art.
@@ -410,7 +412,7 @@ running while you play.
 **Does it need PSN or a PlayStation account?** No. It only needs internet so the
 console can reach Discord.
 
-**Does it work on PS5?** No — PS4 only, firmware 5.05–13.52.
+**Does it work on PS5?** No — PS4 only, intended firmware 5.05–13.52 (hardware-tested 9.00–13.52).
 
 **Is it the same as Discord's official PlayStation integration?** No. The official
 link shows a basic PSN status; orbisRPC shows the exact game, cover art and a live
@@ -433,4 +435,4 @@ that polls about every 12 seconds and never hooks games.
 
 ## License
 
-To be finalized (MIT vs GPL). No GPL source is copied into this tree.
+The repository does not currently contain a project license file. Do not assume that the source is licensed for redistribution. See the licenses alongside third-party components for their terms.
