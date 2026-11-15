@@ -4,6 +4,8 @@
 
 # orbisRPC — Discord Rich Presence for PS4 (GoldHEN RPC)
 
+<p align="right"><a href="https://github.com/SirHumza"><img src="https://raw.githubusercontent.com/SirHumza/portfolio/main/avatar-clean.png" width="64" alt="SirHumza’s ink-sketch cat mascot with a gold monocle" /></a><br /><a href="https://github.com/SirHumza"><img src="https://img.shields.io/badge/by-SirHumza-C8A63A?style=flat-square&labelColor=111111" alt="by SirHumza" /></a></p>
+
 <p align="center">
   <a href="https://github.com/SirHumza/orbisRPC/releases"><img src="https://img.shields.io/badge/version-1.0.0-ffd800?style=flat-square" alt="version"></a>
   <a href="https://github.com/SirHumza/orbisRPC/actions/workflows/ci.yml"><img src="https://github.com/SirHumza/orbisRPC/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
