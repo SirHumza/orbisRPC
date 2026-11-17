@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="420" viewBox="0 0 1120 420" role="img" aria-labelledby="title desc">
+  <title id="title">Example orbisRPC Discord activity</title>
+  <desc id="desc">A dark Discord-style profile card showing a PS4 game, cover art placeholder and elapsed play timer.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#151c2b"/><stop offset="1" stop-color="#0b0e15"/></linearGradient>
+    <linearGradient id="art" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#6b8cff"/><stop offset=".55" stop-color="#344879"/><stop offset="1" stop-color="#39b8ba"/></linearGradient>
+    <linearGradient id="glow" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#6c83ff" stop-opacity=".22"/><stop offset="1" stop-color="#6c83ff" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect width="1120" height="420" rx="24" fill="#090b12"/>
+  <circle cx="875" cy="30" r="310" fill="url(#glow)"/>
+  <text x="54" y="70" fill="#8d9ab2" font-family="Inter,Arial,sans-serif" font-size="14" font-weight="700" letter-spacing="2">YOUR DISCORD PROFILE</text>
+  <rect x="54" y="98" width="1012" height="266" rx="20" fill="url(#bg)" stroke="#30394c"/>
+  <circle cx="142" cy="187" r="43" fill="#5e78e8"/>
+  <text x="142" y="199" text-anchor="middle" fill="#fff" font-family="Arial,sans-serif" font-size="33" font-weight="700">P</text>
+  <circle cx="174" cy="217" r="12" fill="#4ad27c" stroke="#141a25" stroke-width="4"/>
+  <text x="207" y="175" fill="#f5f6f9" font-family="Inter,Arial,sans-serif" font-size="25" font-weight="700">player</text>
+  <text x="207" y="204" fill="#b8c0ce" font-family="Inter,Arial,sans-serif" font-size="16">Playing a game</text>
+  <rect x="207" y="220" width="100" height="25" rx="12" fill="#232b3b"/>
+  <text x="257" y="237" text-anchor="middle" fill="#c5d0ea" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="700">PLAYSTATION</text>
+  <rect x="604" y="129" width="411" height="197" rx="15" fill="#111824" stroke="#30394c"/>
+  <text x="632" y="164" fill="#9eabc3" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="700" letter-spacing="1.4">NOW PLAYING</text>
+  <rect x="632" y="185" width="90" height="90" rx="12" fill="url(#art)"/>
+  <path d="M660 250l18-42 20 42z" fill="#fff" fill-opacity=".8"/>
+  <circle cx="691" cy="218" r="5" fill="#fff" fill-opacity=".65"/>
+  <text x="744" y="220" fill="#f3f5f9" font-family="Inter,Arial,sans-serif" font-size="19" font-weight="700">Your current game</text>
+  <text x="744" y="247" fill="#9aa6bb" font-family="Inter,Arial,sans-serif" font-size="14">PlayStation 4</text>
+  <path d="M632 292h355" stroke="#30394c"/>
+  <text x="632" y="314" fill="#9aa6bb" font-family="Inter,Arial,sans-serif" font-size="13">Elapsed time</text>
+  <text x="987" y="314" text-anchor="end" fill="#eff2f7" font-family="ui-monospace,Menlo,monospace" font-size="14" font-weight="700">02:14:07</text>
+  <text x="54" y="397" fill="#707b90" font-family="Inter,Arial,sans-serif" font-size="12">Illustration only · game name and artwork depend on the detected title</text>
+</svg>

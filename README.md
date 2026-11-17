@@ -1,86 +1,66 @@
 <p align="center">
-  <img src="config/images/icons/logo.png" width="320" alt="orbisRPC">
+  <img src="config/images/icons/logo.png" width="112" alt="orbisRPC logo">
 </p>
 
-<h1 align="center">orbisRPC</h1>
+<h1 align="center">orbisRPC <sup>1.1</sup></h1>
 
-<p align="center"><strong>Show your PS4 game, cover art, and play timer on Discord.</strong><br>
-Runs on a jailbroken PS4 with GoldHEN. No PC or companion script needed.</p>
+<p align="center">Your PS4 game, cover art and play timer on Discord.<br>Runs on the console with GoldHEN. No PC left running.</p>
 
 <p align="center">
-  <a href="https://github.com/SirHumza/orbisRPC/releases"><img src="https://img.shields.io/badge/version-1.1-ffd800?style=flat-square" alt="Version 1.1"></a>
-  <a href="https://github.com/SirHumza/orbisRPC/actions/workflows/ci.yml"><img src="https://github.com/SirHumza/orbisRPC/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <a href="https://discord.gg/BWEyfcT7ZQ"><img src="https://img.shields.io/badge/Discord-join%20the%20community-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Join the orbisRPC Discord"></a>
+  <a href="https://github.com/SirHumza/orbisRPC/releases/tag/v1.1"><img src="https://img.shields.io/badge/release-1.1-687fff?style=for-the-badge" alt="Release 1.1"></a>
+  <a href="https://github.com/SirHumza/orbisRPC/releases/tag/v1.1"><img src="https://img.shields.io/badge/download-ELF%20%7C%20PKG-252a38?style=for-the-badge" alt="Download ELF or Setup PKG"></a>
+  <a href="https://discord.gg/BWEyfcT7ZQ"><img src="https://img.shields.io/badge/community-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join Discord"></a>
 </p>
 
-<p align="center">By SirHumza and CyberMask367 · <a href="https://sirhumza.github.io/orbisRPC/">Project site</a></p>
+<p align="center"><a href="https://github.com/SirHumza/orbisRPC/releases/tag/v1.1">Release</a> · <a href="https://sirhumza.github.io/orbisRPC/guide.html">Setup guide</a> · <a href="https://discord.gg/BWEyfcT7ZQ">Discord</a></p>
 
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=J3kjfGJ-HYk">
-    <img src="docs/orbisrpc-demo-thumbnail.jpg" width="720" alt="Watch the orbisRPC demo on YouTube">
-  </a>
-</p>
+<p align="center"><a href="https://www.youtube.com/watch?v=J3kjfGJ-HYk"><img src="docs/orbisrpc-demo-thumbnail.jpg" width="760" alt="Watch the orbisRPC demo on YouTube"></a></p>
+
+## What you see
+
+<p align="center"><img src="docs/orbisrpc-activity-card.svg" width="760" alt="Illustration of a Discord profile showing a PS4 game, cover art and elapsed play time"></p>
+
+orbisRPC detects the foreground title and updates your Discord activity from the PS4 itself. It can resolve title information and artwork for supported retail, homebrew and retro games.
+
+## 1.1 — connection fixes
+
+Version 1.1 fixes Discord gateway connection issues that made earlier builds unusable. It improves heartbeat and reconnect handling, WebSocket and credential validation, config reload safety, and installer reliability.
 
 ## Install
 
-Download the current release from [GitHub Releases](https://github.com/SirHumza/orbisRPC/releases/latest). The standalone `.elf` is the recommended option: it installs only the daemon and keeps setup simple. The Setup PKG remains available for users who prefer its graphical installer and settings app.
+Both downloads are on the [1.1 release page](https://github.com/SirHumza/orbisRPC/releases/tag/v1.1). **The standalone ELF is recommended** for a straightforward setup.
 
-### Recommended: standalone payload
+| Recommended: standalone ELF | Optional: Setup PKG |
+| --- | --- |
+| Download `orbisRPC.elf`, copy it to `/data/payloads/orbisRPC.elf`, then launch it with your GoldHEN payload loader. | Download `orbisRPC-setup-1.1.pkg` and use the on-console setup app to install, update, configure or uninstall. |
 
-1. Download `orbisRPC.elf` from the release assets.
-2. Copy it to `/data/payloads/orbisRPC.elf` on the PS4.
-3. Launch it from your GoldHEN payload loader. The first run creates `/data/orbisRPC/config.json`.
-4. Follow [Token setup](docs/TOKEN_SETUP.md) to add your Discord token, then launch the payload again.
+For the first run, follow [Token setup](docs/TOKEN_SETUP.md). For updates, replace the ELF and keep `/data/orbisRPC/config.json` so your settings remain in place.
 
-To update, replace the `.elf` and keep your existing `/data/orbisRPC/config.json`. Do not share that file; it contains your Discord token.
+## Requirements
 
-### Optional: Setup PKG
+- Jailbroken PS4 running GoldHEN.
+- Firmware support: **5.05–13.52**. Hardware testing: **9.00–13.52**.
+- Internet access from the console to Discord and title metadata services.
 
-Download `orbisRPC-setup-1.1.pkg` from the release assets, install it, and open **orbisRPC Setup**. Choose **INSTALL / UPDATE** to install the payload and configure it from the console. The app also provides settings and uninstall options. It can offer to add a GoldHEN auto-run entry and a nanoDNS exception; both are optional.
+> **Account note:** orbisRPC uses a Discord user session token to set Rich Presence. Discord prohibits automating normal user accounts this way and may invalidate the token or challenge the account. Read [the security notes](SECURITY.md) before use. Never share your token or `config.json`.
 
-## What it does
+## Build and checks
 
-- Shows the foreground game's title, cover art, and elapsed play time on your Discord profile.
-- Runs as a background payload on the PS4, so Discord activity continues while a game is in front.
-- Resolves retail, homebrew, and supported retro titles from local and online metadata.
-- Reconnects after gateway or network interruptions and preserves session timing across daemon restarts.
-- Lets you choose which idle, media, homebrew, and firmware activity appears.
-
-The supported firmware range is **5.05–13.52**. Published hardware testing covers **9.00–13.52**.
-
-## Important token note
-
-orbisRPC uses a Discord user session token to set Rich Presence. Discord's Terms of Service prohibit automating normal user accounts this way, and Discord may invalidate the token or challenge the account. Use a separate account if you choose to run it. Never post your token or attach `config.json` to an issue or chat.
-
-## Help and documentation
-
-- [Setup guide](https://sirhumza.github.io/orbisRPC/guide.html)
-- [Troubleshooting](docs/TROUBLESHOOTING.md)
-- [Installer details](docs/INSTALLER.md)
-- [Configuration reference](docs/CONFIG.md)
-- [Discord community](https://discord.gg/BWEyfcT7ZQ)
-- [Report a bug](https://github.com/SirHumza/orbisRPC/issues)
-
-## Build and verify
-
-See [Building](docs/BUILDING.md) for the toolchains and firmware SDK setup. `make all` builds the payload and optional Setup PKG.
+See [Building](docs/BUILDING.md) for the PS4 toolchains and firmware SDK setup.
 
 ```sh
+make all
 make -C tests test
 make -C tests asan
 ORBISRPC_STRICT_SECRETS=1 python3 tests/e2e_consumer.py
 ```
 
-The host checks do not require a PS4. Do not distribute a build until its package and payload have been checked on target hardware.
+## Docs
 
-## Contributing
+[Setup guide](https://sirhumza.github.io/orbisRPC/guide.html) · [Token setup](docs/TOKEN_SETUP.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Installer](docs/INSTALLER.md) · [Daemon](docs/DAEMON.md)
 
-Add title metadata with `python3 scripts/add_custom_title.py`. Include firmware details and relevant redacted logs in bug reports. Never include account tokens or other private data.
+## Contributing and credits
 
-## Credits and license
+Use `python3 scripts/add_custom_title.py` to add title metadata. Include firmware details and relevant redacted logs in bug reports; never include account tokens or other private data. orbisRPC is maintained by SirHumza and CyberMask367, with testing and title metadata contributions from the community.
 
-SirHumza and CyberMask367 maintain orbisRPC. Thanks to the testers who supplied logs and title fixes, and to the OpenOrbis, pkg-zone, and PSX Data Center projects that support its development.
-
-The repository has no project license file. Check with the maintainers before redistributing modified builds; third-party components retain their own terms.
-
-<sub>orbisRPC is a PlayStation 4 homebrew project. It is unrelated to Orbis Protocol, Orbis Corporation, and other projects that share the name.</sub>
+The repository does not currently declare a project license. Check with the maintainers before redistributing modified builds.
