@@ -18,13 +18,11 @@
 
 <p align="center"><a href="https://www.youtube.com/watch?v=J3kjfGJ-HYk"><img src="docs/orbisrpc-demo-thumbnail.jpg" width="760" alt="Watch the orbisRPC demo on YouTube"></a></p>
 
-<p align="center"><img src="site/sirhumza-discord-profile.png" width="420" alt="SirHumza's Discord profile showing orbisRPC activity for Marvel's Spider-Man: Miles Morales on PS4 firmware 9.00"></p>
+## Your Discord profile
 
-## What you see
+<p align="center"><img src="docs/sirhumza-discord-preview.gif" width="760" alt="Animated Discord-style profile card for SirHumza showing Spider-Man Miles Morales on PS4, with the elapsed timer advancing"></p>
 
-<p align="center"><img src="site/orbisrpc-activity-card.svg" width="760" alt="Illustration of a Discord profile showing a PS4 game, cover art and elapsed play time"></p>
-
-orbisRPC detects the foreground title and updates your Discord activity from the PS4 itself. It can resolve title information and artwork for supported retail, homebrew and retro games.
+<p align="center"><sub>Discord-style mockup based on your profile. The timer loops from 9:15 to 9:30 as a demo.</sub></p>
 
 ## 1.1 — connection fixes
 
