@@ -15,7 +15,11 @@ Runs on a jailbroken PS4 with GoldHEN. No PC or companion script needed.</p>
 
 <p align="center">By SirHumza and CyberMask367 · <a href="https://sirhumza.github.io/orbisRPC/">Project site</a></p>
 
-[![Watch the orbisRPC demo on YouTube](https://img.youtube.com/vi/J3kjfGJ-HYk/hqdefault.jpg)](https://www.youtube.com/watch?v=J3kjfGJ-HYk)
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=J3kjfGJ-HYk">
+    <img src="https://img.youtube.com/vi/J3kjfGJ-HYk/maxresdefault.jpg" width="720" alt="▶ Watch the orbisRPC demo on YouTube">
+  </a>
+</p>
 
 ## Install
 
