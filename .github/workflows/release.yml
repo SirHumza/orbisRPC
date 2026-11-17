@@ -47,20 +47,45 @@ jobs:
           echo "$NEEDED" | grep -q libSceSystemService.sprx || { echo "missing libSceSystemService (foreground detection)"; exit 1; }
           if echo "$NEEDED" | grep -q 'libkernel\.so'; then echo "FORBIDDEN: app-world libkernel.so"; exit 1; fi
           echo "linkage OK"
-      - name: attach ELF to release
+      - name: install OpenOrbis packaging toolchain
+        run: |
+          mkdir -p "$HOME/OpenOrbis-PS4-Toolchain"
+          curl -fsSL --retry 3 \
+            https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/download/v0.5.4/toolchain-llvm-18.tar.gz \
+            | tar -xz --strip-components=2 -C "$HOME/OpenOrbis-PS4-Toolchain"
+          ./scripts/setup-pkgtool-openssl.sh
+      - name: build Setup PKG
+        run: |
+          export OO_PS4_TOOLCHAIN="$HOME/OpenOrbis-PS4-Toolchain"
+          export PS4_PAYLOAD_SDK="$HOME/ps4-payload-sdk"
+          export PS4_SDK_SRC="$GITHUB_WORKSPACE/sdk"
+          make installer
+          cp build-sdk/orbisrpc_sdk.elf orbisRPC.elf
+          cp output/orbisRPC-1.1.pkg orbisRPC-setup-1.1.pkg
+          test -s orbisRPC.elf
+          test -s orbisRPC-setup-1.1.pkg
+      - name: publish release assets
         uses: softprops/action-gh-release@v3
         with:
-          files: build-sdk/orbisrpc_sdk.elf
+          files: |
+            orbisRPC.elf
+            orbisRPC-setup-1.1.pkg
           generate_release_notes: true
           body: |
-            ## Install
+            ## Recommended install: standalone payload
 
-            Test build `.elf` — no PKG yet.
+            Download `orbisRPC.elf` and copy it to `/data/payloads/orbisRPC.elf` on your jailbroken PS4. Launch it with your GoldHEN payload loader. On first launch, follow the [token setup guide](https://github.com/SirHumza/orbisRPC/blob/main/docs/TOKEN_SETUP.md).
 
-            1. Delete the `/data/orbisRPC` folder from your PS4 first.
-            2. Put the `.elf` at `/data/payloads/` and launch it from the payload list.
-            3. First run creates the config, then waits (no token yet).
-            3. Open `/data/orbisRPC/config.json`, put your token in the `"token": "SET_ME"` slot.
-            4. Re-run the payload. Launch a game, watch Discord.
+            For updates, replace the `.elf` and keep `/data/orbisRPC/config.json` so your settings and token remain in place.
 
-            Firmware 9.00 through 13.52. Issues → Discord: https://discord.gg/BWEyfcT7ZQ (`testers-chat`).
+            ## Optional Setup PKG
+
+            `orbisRPC-setup-1.1.pkg` installs the graphical Setup app, which can install, configure, update, and uninstall the payload.
+
+            ## Version 1.1
+
+            Improves gateway heartbeats and reconnect recovery, hardens WebSocket frame and credential validation, protects configuration during reloads and updates, and adds broader installer and daemon regression coverage.
+
+            Firmware support: 5.05–13.52; hardware testing: 9.00–13.52. See the [troubleshooting guide](https://github.com/SirHumza/orbisRPC/blob/main/docs/TROUBLESHOOTING.md) or [join the Discord](https://discord.gg/BWEyfcT7ZQ).
+
+            orbisRPC uses a Discord user session token. Review [the security notes](https://github.com/SirHumza/orbisRPC/blob/main/SECURITY.md) before use; never share the token or config file.

@@ -33,41 +33,99 @@ static void test_installer_cfg(void) {
     assert(token_valid("has space.in.it.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") == 0);
     assert(token_valid("nodots") == 0);
     assert(token_valid(NULL) == 0);
+    char normalized[160];
+    assert(token_normalize(normalized, sizeof normalized,
+        "  \"MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz\"\r\n") == 0);
+    assert(!strcmp(normalized, "MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz"));
+    assert(token_valid(normalized));
+    assert(token_normalize(normalized, sizeof normalized,
+        "\xEF\xBB\xBF 'MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz' \n") == 0);
+    assert(token_valid(normalized));
+    assert(token_normalize(normalized, sizeof normalized,
+        "MTIz.ABCdef_0123456789-xYz ABCDEFGHijklmnopQRSTUVwxyz") == 0);
+    assert(!token_valid(normalized)); /* never remove internal whitespace */
+    char tiny[4] = "old";
+    assert(token_normalize(tiny, sizeof tiny, "longer") != 0 && tiny[0] == 0);
     /* fixture via stdio: no C write API exists anymore (the C++ settings
      * page owns writes); these tests pin the read + carry API it relies on */
     FILE *f = fopen(path, "wb");
     assert(f);
-    fputs("{\"token\":\"MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz\","
-          "\"presence_state\":\"On PS4\",\"poll_interval_s\":12}", f);
+    fputs("\xEF\xBB\xBF\r\n{\"token\":\"MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz\","
+          "\"qos_token\":\"server-signed-qos\",\"presence_state\":\"On PS4\","
+          "\"poll_interval_s\":12}", f);
     fclose(f);
     char tok[160], st[64];
     long n = 0;
     assert(icfg_token_load(path, tok, sizeof tok) == 0);
     assert(!strcmp(tok, "MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz"));
+    char short_tok[8] = "stale";
+    assert(icfg_token_load(path, short_tok, sizeof short_tok) != 0);
+    assert(short_tok[0] == 0);
     assert(icfg_get_str(path, "presence_state", st, sizeof st) == 0);
     assert(!strcmp(st, "On PS4"));
     assert(icfg_get_int(path, "poll_interval_s", &n) == 0 && n == 12);
     /* missing file: loads fail soft */
     assert(icfg_get_str("/nonexistent/x.json", "k", st, sizeof st) != 0);
     /* carry round-trip across a wholesale overwrite */
-    const char *keys[] = { "token", "presence_state", "poll_interval_s", "nope_missing", NULL };
-    icfg_carry_t vals[4];
-    assert(icfg_carry_capture(path, keys, vals, 4) == 3);
+    const char *keys[] = { "token", "qos_token", "presence_state", "poll_interval_s", "nope_missing", NULL };
+    icfg_carry_t vals[5];
+    assert(icfg_carry_capture(path, keys, vals, 5) == 4);
     snprintf(path2, sizeof path2, "%s/config2.json", dir);
     FILE *g = fopen(path2, "wb");
     assert(g);
     fputs("{\"schema_version\":1}", g);
     fclose(g);
-    assert(icfg_carry_apply(path2, vals, 4) == 3);
+    assert(icfg_carry_apply(path2, vals, 5) == 4);
+    struct stat st_mode;
+    assert(stat(path2, &st_mode) == 0);
+    assert((st_mode.st_mode & 0777) == 0600);
     assert(icfg_token_load(path2, tok, sizeof tok) == 0);
     assert(!strcmp(tok, "MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz"));
+    assert(icfg_get_str(path2, "qos_token", st, sizeof st) == 0);
+    assert(!strcmp(st, "server-signed-qos"));
     assert(icfg_get_int(path2, "poll_interval_s", &n) == 0 && n == 12);
+    FILE *dup = fopen(path2, "wb");
+    assert(dup);
+    fputs("{\"token\":\"first.token.value\",\"token\":\"second.token.value\"}", dup);
+    fclose(dup);
+    assert(icfg_token_load(path2, tok, sizeof tok) != 0);
+    FILE *num = fopen(path2, "wb");
+    assert(num);
+    fputs("{\"poll_interval_s\":1e999}", num);
+    fclose(num);
+    assert(icfg_get_int(path2, "poll_interval_s", &n) != 0);
+    num = fopen(path2, "wb");
+    assert(num);
+    fputs("{\"poll_interval_s\":999999999999999999999}", num);
+    fclose(num);
+    assert(icfg_get_int(path2, "poll_interval_s", &n) != 0);
+    num = fopen(path2, "wb");
+    assert(num);
+    fputs("{\"poll_interval_s\":1e20}", num);
+    fclose(num);
+    assert(icfg_get_int(path2, "poll_interval_s", &n) != 0);
+    num = fopen(path2, "wb");
+    assert(num);
+    fputs("{\"poll_interval_s\":12.5}", num);
+    fclose(num);
+    assert(icfg_get_int(path2, "poll_interval_s", &n) != 0);
+    num = fopen(path2, "wb");
+    assert(num);
+    fputs("[]", num);
+    fclose(num);
+    assert(icfg_get_int(path2, "poll_interval_s", &n) != 0);
+    dup = fopen(path2, "wb");
+    assert(dup);
+    fputs("{\"token\":\"single.token.value\",\"qos_token\":\"old-a\","
+          "\"qos_token\":\"old-b\"}", dup);
+    fclose(dup);
+    assert(icfg_token_load(path2, tok, sizeof tok) != 0);
     /* corrupt source: capture yields all-absent, never garbage */
     FILE *h = fopen(path, "wb");
     assert(h);
     fputs("{not json", h);
     fclose(h);
-    assert(icfg_carry_capture(path, keys, vals, 4) == 0);
+    assert(icfg_carry_capture(path, keys, vals, 5) == 0);
 }
 
 int main(void){

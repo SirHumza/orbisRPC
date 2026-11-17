@@ -19,6 +19,7 @@
 typedef struct {
     int schema_version;
     char token[512];           /* Discord user session token */
+    char qos_token[512];       /* server-signed session QoS token */
     char application_id[64];   /* optional: app id for uploaded asset images */
     char art_base_url[256];    /* optional: icon pack base URL, e.g.
                                 * https://raw.githubusercontent.com/.../icons/
@@ -62,7 +63,11 @@ typedef struct {
     char browser_art[256];   /* large image while the web browser is up */
 } cfg_t;
 extern cfg_t g_cfg;
+/* Failed loads leave c unchanged; initialize defaults before the first load. */
 int cfg_load(const char *path, cfg_t *c);
+/* Cross-process transaction lock for read/modify/save; release with cfg_unlock. */
+int cfg_lock(const char *path);
+void cfg_unlock(int fd);
 /* Atomic save (tmp + fsync + rename). 0 saved, -1 failed (caller must
  * surface, not assume). */
 int cfg_save(const char *path, const cfg_t *c);

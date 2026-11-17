@@ -19,7 +19,9 @@ int custom_resolve(const char *title_id, char *name, size_t name_cap,
                    char *url, size_t url_cap);
 
 /* Pull the entry for `pat` ("id":"XXXX") out of a body region. Pure, so the
- * host tests can drive it without a socket. Returns 1 when a usable name was
+ * host tests can drive it without a socket. The region need not be NUL
+ * terminated; complete objects support JSON whitespace and field reordering.
+ * Returns 1 when a usable name was
  * recovered, 0 otherwise. Both buffers are cleared first: on a miss the
  * caller must not be left holding the previous title's name. */
 int custom_extract(const char *p, size_t len, const char *pat,

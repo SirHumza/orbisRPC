@@ -6,19 +6,16 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <SDL2/SDL.h>
-
 namespace {
 
-bool g_started = false;
+const char *g_log_path = kLogPath;
 
-// Opens for append, truncating on the first call of the run.
-FILE *Open(bool truncate)
+FILE *Open(bool truncate, const char *path)
 {
 	if (truncate)
-		return fopen(kLogPath, "w");
+		return fopen(path, "w");
 
-	return fopen(kLogPath, "a");
+	return fopen(path, "a");
 }
 
 } // namespace
@@ -28,17 +25,19 @@ namespace dbglog
 
 void Begin()
 {
-	FILE *f = Open(true);
+	FILE *f = Open(true, kLogPath);
 
 	if (!f)
 	{
-		// Worth surfacing: if this fails, nothing below will be readable either.
-		SDL_Log("dbglog: cannot open %s for writing: %s", kLogPath,
-		        strerror(errno));
-		return;
+		f = Open(true, kFallbackLogPath);
+		if (!f)
+		{
+			fprintf(stderr, "dbglog: cannot open %s or %s: %s\n",
+			        kLogPath, kFallbackLogPath, strerror(errno));
+			return;
+		}
+		g_log_path = kFallbackLogPath;
 	}
-
-	g_started = true;
 
 	fprintf(f, "---- orbisRPC menu log, pid %d ----\n", (int)getpid());
 	fclose(f);
@@ -53,9 +52,7 @@ void Write(const char *fmt, ...)
 	vsnprintf(line, sizeof line, fmt, ap);
 	va_end(ap);
 
-	SDL_Log("%s", line);
-
-	FILE *f = Open(false);
+	FILE *f = Open(false, g_log_path);
 	if (!f)
 		return;
 

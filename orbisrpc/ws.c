@@ -5,6 +5,7 @@
  * All client->server frames are masked per RFC 6455 5.3, control frames too.
  */
 #include "ws.h"
+#include "ws_frame.h"
 #include "clock.h"
 #include "tls.h"
 #include "log.h"
@@ -93,6 +94,8 @@ static void next_mask(unsigned char mk[4]){
 
 int ws_connect(ws_t *w, const char *host, int port, const char *resource, const char *key){
     memset(w,0,sizeof(*w));
+    w->fd = -1;
+    w->sock = -1;
     w->rcap = WS_RBUF_MIN;
     w->rbuf = (unsigned char*)malloc(w->rcap);
     if(!w->rbuf){ log_msg("ws: rbuf alloc fail"); return -1; }
@@ -222,6 +225,10 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
         "Safari/537.36\r\n"
         "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n",
         resource?resource:"/", host, key);
+    if(n < 0 || (size_t)n >= sizeof req){
+        log_msg("ws: handshake request too long");
+        goto fail;
+    }
     if(ws_send_all(w, (const unsigned char*)req, (size_t)n) < 0){ log_msg("hs write fail"); goto fail; }
     log_msg("hs request sent (%dB)", n);
     /* Read response headers; bytes past "\r\n\r\n" are the first websocket
@@ -263,12 +270,17 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
 fail:
     tls_free((tls_ctx_t*)w->tls); w->tls=NULL;
 #ifdef ORBISRPC_SDK_PAYLOAD
-    if(w->fd > 0) close(w->fd);
+    if(w->fd >= 0) close(w->fd);
 #else
-    if(w->fd > 0)  sceNetSocketClose(w->fd);
+    if(w->fd >= 0)  sceNetSocketClose(w->fd);
 #endif
+    if(w->rbuf) memset(w->rbuf, 0, w->rcap);
     free(w->rbuf); w->rbuf=NULL; w->rcap=0;
-    w->connected=0; w->tls=NULL; w->fd=0; w->sock=0;
+    memset(w->rotated_token, 0, sizeof w->rotated_token);
+    memset(w->qos_token, 0, sizeof w->qos_token);
+    memset(&w->env, 0, sizeof w->env);
+    ws_frag_reset(&w->fragments);
+    w->connected=0; w->tls=NULL; w->fd=-1; w->sock=-1;
     return -9;
 }
 
@@ -297,16 +309,19 @@ int ws_send_text(ws_t *w, const char *msg, size_t len){
 }
 
 /* RFC 6455: client control frames (close/ping/pong) are masked too. */
-static int ws_send_control(ws_t *w, unsigned char op){
-    if(!w->connected) return -1;
+static int ws_send_control(ws_t *w, unsigned char op,
+                           const unsigned char *payload, size_t len){
+    if(!w || !w->connected || (!payload && len) || len > 125) return -1;
     unsigned char mk[4]; next_mask(mk);
-    unsigned char f[6] = { (unsigned char)(0x80|op), 0x80, mk[0], mk[1], mk[2], mk[3] };
-    return ws_send_all(w, f, 6);
+    unsigned char f[131];
+    size_t n = ws_control_frame_encode(op, payload, len, mk, f, sizeof f);
+    if(!n) return -1;
+    return ws_send_all(w, f, n);
 }
 
-/* Answer a server PING with an (empty) PONG so the gateway keeps us. */
-int ws_pong(ws_t *w){
-    return ws_send_control(w, 0xA);
+/* RFC 6455 requires the PONG Application data to echo the PING payload. */
+int ws_pong(ws_t *w, const unsigned char *payload, size_t len){
+    return ws_send_control(w, 0xA, payload, len);
 }
 
 /* Peek at the pending frame header without consuming. 1 = full header ready. */
@@ -327,22 +342,39 @@ static int peek_frame(ws_t *w, size_t *hdr_out, uint64_t *plen_out){
     return 1;
 }
 
-static int valid_frame_header(const unsigned char *b, uint64_t plen){
-    int fin = (b[0] & 0x80) != 0;
-    int rsv = b[0] & 0x70;
-    int op = b[0] & 0x0f;
-    int masked = (b[1] & 0x80) != 0;
-    if (rsv || masked) return 0;
-    if (op >= 3 && op <= 7) return 0; /* reserved opcodes */
-    if (op >= 8 && (!fin || plen > 125)) return 0; /* control: final, <=125 */
-    if ((b[1] & 0x7f) == 127 && (b[2] & 0x80)) return 0; /* absurd 64-bit length */
-    return 1;
-}
-
 /* ws_skip_plan() lives in ws_skip.c and the envelope scraper in ws_env.c, so
  * the host tests can compile both without the socket/TLS half of this file. */
 #include "ws_skip.c"
 #include "ws_env.c"
+#include "ws_frag.c"
+#include "ws_frame.c"
+
+static void ws_capture_token(ws_t *w){
+    if(!w) return;
+    /* A matching field name elsewhere in a dispatch is not a credential
+     * rotation. Wait for the envelope to identify READY before publishing
+     * either server-issued value; discard them once another event is known. */
+    if(!ws_env_is_ready(&w->env)){
+        if(w->env.have_op && w->env.have_t){
+            memset(w->env.auth_token, 0, sizeof w->env.auth_token);
+            memset(w->env.qos_token, 0, sizeof w->env.qos_token);
+            w->env.have_auth_token = w->env.have_qos_token = 0;
+        }
+        return;
+    }
+    if(!w->rotated_token[0])
+        ws_env_take_auth_token(&w->env, w->rotated_token, sizeof w->rotated_token);
+    else {
+        memset(w->env.auth_token, 0, sizeof w->env.auth_token);
+        w->env.have_auth_token = 0;
+    }
+    if(!w->qos_token[0])
+        ws_env_take_qos_token(&w->env, w->qos_token, sizeof w->qos_token);
+    else {
+        memset(w->env.qos_token, 0, sizeof w->env.qos_token);
+        w->env.have_qos_token = 0;
+    }
+}
 
 int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out){
     if(!w || !w->connected || !buf || cap==0) return -1;
@@ -357,8 +389,10 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
              * envelope scraper first, so op/s/t survive without buffering. */
             size_t have = w->rlen - w->rpos;
             size_t take = have < (size_t)w->skip_left ? have : (size_t)w->skip_left;
-            if(take && w->env_active)
+            if(take && w->env_active){
                 ws_env_feed(&w->env, w->rbuf + w->rpos, take);
+                ws_capture_token(w);
+            }
             w->skip_left -= take; w->rpos += take;
             if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
             /* Hand back the envelope as soon as op/s/t are known instead of
@@ -411,7 +445,7 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
             if(peek_frame(w,&hdr,&plen)){
                 const unsigned char *b = w->rbuf + w->rpos;
                 int fin=(b[0]&0x80)!=0, wire_op=b[0]&0x0f;
-                if(!valid_frame_header(b, plen)){
+                if(!ws_frame_header_valid(b, plen)){
                     log_msg("ws: protocol violation op=%d fin=%d plen=%llu b1=0x%02x b2=0x%02x",
                         b[0]&0x0f, (b[0]&0x80)!=0, (unsigned long long)plen, b[0], b[1]);
                     return -2;
@@ -423,13 +457,16 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
                  * Size checked BEFORE arithmetic: hdr+plen could overflow
                  * uint64 and smuggle a tiny "total" past the cap. */
                 if(plen > WS_BODY_MAX){
+                    if(wire_op == 0 || (wire_op == 1 && !fin)){
+                        log_msg("ws: oversized fragmented data frame; reconnecting");
+                        return -2;
+                    }
                     log_msg("ws: oversized frame op=%d fin=%d plen=%llu (streamed, body cap %u)",
                         b[0]&0x0f, (b[0]&0x80)!=0, (unsigned long long)plen, WS_BODY_MAX);
                     size_t avail = w->rlen - w->rpos;
                     size_t h = (hdr < avail) ? hdr : avail;
                     w->rpos += h;                       /* eat the header */
                     size_t payload_here = avail - h;
-                    if(payload_here) ws_env_feed(&w->env, w->rbuf + w->rpos, payload_here);
                     /* skip_left counts EVERY payload byte still to consume,
                      * including the ones already sitting in rbuf. Passing
                      * payload_here here was a double-count: ws_skip_plan()
@@ -441,8 +478,13 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
                     ws_skip_plan(plen, 0, &w->skip_left);
                     w->skip_op = wire_op;
                     w->skip_fin = fin;
+                    ws_env_init(&w->env);
                     w->env_active = 1;
                     w->env_reported = 0;
+                    if(payload_here){
+                        ws_env_feed(&w->env, w->rbuf + w->rpos, payload_here);
+                        ws_capture_token(w);
+                    }
                     if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
                     continue;
                 }
@@ -464,6 +506,50 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
                     }
                 }
                 if((uint64_t)(w->rlen-w->rpos) >= total){
+                    if(plen > WS_BODY_MAX &&
+                       (wire_op == 0 || (wire_op == 1 && !fin))){
+                        log_msg("ws: oversized fragmented data frame; reconnecting");
+                        return -2;
+                    }
+                    if(wire_op == 0 || wire_op == 1){
+                        const unsigned char *message = NULL;
+                        size_t message_len = 0;
+                        int fr = ws_frag_feed(&w->fragments, wire_op, fin,
+                                              b + hdr, (size_t)plen,
+                                              &message, &message_len);
+                        w->rpos += (size_t)total;
+                        if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
+                        if(fr < 0){
+                            if(fr == -2){
+                                log_msg("ws: oversized fragmented message skipped");
+                                return -3;
+                            }
+                            log_msg("ws: invalid text fragment sequence");
+                            return -2;
+                        }
+                        if(fr == 0) continue;
+                        if(message_len == 0){
+                            ws_frag_reset(&w->fragments);
+                            return -3;
+                        }
+                        if(message_len >= cap){
+                            ws_env_init(&w->env);
+                            ws_env_feed(&w->env, message, message_len);
+                            ws_capture_token(w);
+                            size_t n = ws_env_render(&w->env, buf, cap);
+                            ws_frag_reset(&w->fragments);
+                            if(opcode_out)*opcode_out=1;
+                            if(fin_out)*fin_out=1;
+                            if(n) return (int)n;
+                            return -3; /* never expose a truncated JSON envelope */
+                        }
+                        memcpy(buf, message, message_len);
+                        buf[message_len] = 0;
+                        ws_frag_reset(&w->fragments);
+                        if(opcode_out)*opcode_out=1;
+                        if(fin_out)*fin_out=1;
+                        return (int)message_len;
+                    }
                     size_t copy = (size_t)plen;
                     if(copy > cap-1) copy = cap-1;
                     memcpy(buf, b+hdr, copy);
@@ -488,8 +574,10 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
                 if(w->skip_left > 0){
                     size_t take = (size_t)w->skip_left;
                     if(take > w->rlen) take = w->rlen;
-                    if(take && w->env_active)
+                    if(take && w->env_active){
                         ws_env_feed(&w->env, w->rbuf + w->rpos, take);
+                        ws_capture_token(w);
+                    }
                     w->skip_left -= take;
                     w->rpos += take;
                     if(w->rpos >= w->rlen){ w->rpos=0; w->rlen=0; }
@@ -533,18 +621,28 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
 int ws_close(ws_t *w){
     if(!w) return -1;
     if(!w->connected){
+        if(w->rbuf) memset(w->rbuf, 0, w->rcap);
         free(w->rbuf); w->rbuf=NULL; w->rcap=0; w->rlen=0; w->rpos=0;
+        memset(w->rotated_token, 0, sizeof w->rotated_token);
+        memset(w->qos_token, 0, sizeof w->qos_token);
+        memset(&w->env, 0, sizeof w->env);
+        ws_frag_reset(&w->fragments);
         return 0;
     }
-    ws_send_control(w, 0x8); /* best-effort masked CLOSE */
+    ws_send_control(w, 0x8, NULL, 0); /* best-effort masked CLOSE */
     tls_free((tls_ctx_t*)w->tls);
 #ifdef ORBISRPC_SDK_PAYLOAD
     close(w->fd);
 #else
     sceNetSocketClose(w->fd);
 #endif
+    if(w->rbuf) memset(w->rbuf, 0, w->rcap);
     free(w->rbuf); w->rbuf=NULL; w->rcap=0;
-    w->connected=0; w->sock=0; w->tls=NULL; w->fd=0; w->rlen=0; w->rpos=0;
+    memset(w->rotated_token, 0, sizeof w->rotated_token);
+    memset(w->qos_token, 0, sizeof w->qos_token);
+    memset(&w->env, 0, sizeof w->env);
+    ws_frag_reset(&w->fragments);
+    w->connected=0; w->sock=-1; w->tls=NULL; w->fd=-1; w->rlen=0; w->rpos=0;
     w->skip_left=0;
     return 0;
 }

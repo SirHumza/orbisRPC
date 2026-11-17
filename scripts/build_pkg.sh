@@ -4,9 +4,9 @@
 # present. Interactive shells already get it from ~/.bashrc; this is for
 # non-interactive runs (CI, `wsl.exe -e bash`, fresh terminals).
 #
-#   ./scripts/build.sh          build the .pkg
-#   ./scripts/build.sh clean    clean instead
-#   ./scripts/build.sh <args>   forward args straight to make
+#   ./scripts/build_pkg.sh          build the package
+#   ./scripts/build_pkg.sh clean    clean instead
+#   ./scripts/build_pkg.sh <args>   forward args straight to make
 
 set -euo pipefail
 

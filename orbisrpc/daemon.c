@@ -6,6 +6,7 @@
  *
  * A `stop` flag is polled so a signal handler can shut the loop down cleanly. */
 #include "cfg.h"
+#include "auth_rotation.h"
 #include "daemon.h"
 #include "clock.h"
 #include "lock.h"
@@ -109,12 +110,14 @@ static int s_settings_posted = 0;
 /* Same for the web browser. */
 static int s_in_browser = -1;
 static int s_browser_posted = 0;
+/* If a rotated token is accepted in memory but storage is temporarily
+ * unavailable, keep it across reconnects. A later manual config edit wins. */
+static auth_rotation_t s_token_rotation;
+static char s_pending_qos[512];
+static char s_pending_qos_owner[512];
 
-/* Shown when the gateway closes with 4004 (token rejected). Same text at
- * connect time and mid-session, so one constant covers both. Throttled
- * there rather than once-per-boot because a rejected token persists and
- * the daemon keeps retrying on purpose -- it never exits on 4004. */
-#define TOKEN_REJECTED_MSG "Discord token rejected - make sure Token is valid"
+/* Shown when the gateway closes with 4004 (token rejected). */
+#define TOKEN_REJECTED_MSG "Discord rejected login - check account recovery prompts"
 
 /* "Firmware 13.52" for the Settings presence. Reads through the same helper the
  * rest of the daemon uses, so an unavailable firmware string degrades to
@@ -182,6 +185,116 @@ static int have_token(const cfg_t *c){
             return 1;
     }
     return 0;
+}
+
+static void remember_pending_token(const char *next, const char *old){
+    auth_rotation_remember(&s_token_rotation, next, old);
+}
+
+static void remember_pending_qos(const char *qos, const char *owner){
+    strncpy(s_pending_qos, qos, sizeof s_pending_qos - 1);
+    s_pending_qos[sizeof s_pending_qos - 1] = 0;
+    strncpy(s_pending_qos_owner, owner, sizeof s_pending_qos_owner - 1);
+    s_pending_qos_owner[sizeof s_pending_qos_owner - 1] = 0;
+}
+
+static void persist_qos_token(void){
+    char qos[512] = {0};
+    int got = discord_take_qos_token(&s_dc, qos, sizeof qos);
+    if(got == 0) return;
+    if(got < 0){
+        log_msg("WARN: gateway supplied an unusable QoS token; keeping current value");
+        return;
+    }
+    cfg_t disk = g_cfg;
+    int config_lock = cfg_lock(CFG_PATH);
+    if(config_lock < 0 || cfg_load(CFG_PATH, &disk) != 0){
+        remember_pending_qos(qos, s_dc.token);
+        strncpy(g_cfg.qos_token, qos, sizeof g_cfg.qos_token - 1);
+        g_cfg.qos_token[sizeof g_cfg.qos_token - 1] = 0;
+        log_msg("WARN: QoS token held in memory; config could not be read");
+    } else if(!auth_rotation_matches(&s_token_rotation, disk.token, s_dc.token)){
+        log_msg("config token changed during session; ignoring stale QoS token");
+    } else if(strcmp(disk.qos_token, qos) != 0 || strcmp(disk.token, s_dc.token) != 0){
+        /* The disk may still hold the original generation after a failed
+         * rotation save. Persist its replacement together with signed QoS;
+         * never restore the obsolete disk credential into live config. */
+        strncpy(disk.token, s_dc.token, sizeof disk.token - 1);
+        disk.token[sizeof disk.token - 1] = 0;
+        strncpy(disk.qos_token, qos, sizeof disk.qos_token - 1);
+        disk.qos_token[sizeof disk.qos_token - 1] = 0;
+        if(cfg_save(CFG_PATH, &disk) == 0){
+            g_cfg = disk;
+            memset(&s_token_rotation, 0, sizeof s_token_rotation);
+            s_pending_qos[0] = s_pending_qos_owner[0] = 0;
+            log_msg("Discord QoS token saved");
+        } else {
+            remember_pending_qos(qos, s_dc.token);
+            strncpy(g_cfg.qos_token, qos, sizeof g_cfg.qos_token - 1);
+            g_cfg.qos_token[sizeof g_cfg.qos_token - 1] = 0;
+            log_msg("WARN: QoS token active in memory; config save will retry");
+        }
+    }
+    cfg_unlock(config_lock);
+    memset(qos, 0, sizeof qos);
+}
+
+static void persist_rotated_token(void){
+    char rotated[512] = {0};
+    int got = discord_take_rotated_token(&s_dc, rotated, sizeof rotated);
+    if(got == 0) return;
+    if(got < 0){
+        log_msg("WARN: gateway supplied an unusable rotated token; keeping current config");
+        return;
+    }
+    if(strcmp(rotated, s_dc.token) == 0){
+        memset(rotated, 0, sizeof rotated);
+        return;
+    }
+
+    cfg_t disk = g_cfg;
+    int config_lock = cfg_lock(CFG_PATH);
+    if(config_lock < 0 || cfg_load(CFG_PATH, &disk) != 0){
+        remember_pending_token(rotated, s_dc.token);
+        strncpy(g_cfg.token, rotated, sizeof g_cfg.token - 1);
+        g_cfg.token[sizeof g_cfg.token - 1] = 0;
+        strncpy(s_dc.token, rotated, sizeof s_dc.token - 1);
+        s_dc.token[sizeof s_dc.token - 1] = 0;
+        g_cfg.qos_token[0] = 0;
+        s_pending_qos[0] = s_pending_qos_owner[0] = 0;
+        log_msg("WARN: token rotation held in memory; config could not be read");
+    } else if(!auth_rotation_matches(&s_token_rotation, disk.token, s_dc.token)){
+        /* Do not replace a token the user changed while this connection lived. */
+        log_msg("config token changed during session; keeping manual value");
+    } else {
+        char old[sizeof s_dc.token];
+        strncpy(old, s_dc.token, sizeof old - 1);
+        old[sizeof old - 1] = 0;
+        strncpy(disk.token, rotated, sizeof disk.token - 1);
+        disk.token[sizeof disk.token - 1] = 0;
+        disk.qos_token[0] = 0; /* the signed QoS state is bound to the old token */
+        if(cfg_save(CFG_PATH, &disk) == 0){
+            g_cfg = disk;
+            strncpy(s_dc.token, rotated, sizeof s_dc.token - 1);
+            s_dc.token[sizeof s_dc.token - 1] = 0;
+            memset(&s_token_rotation, 0, sizeof s_token_rotation);
+            s_pending_qos[0] = s_pending_qos_owner[0] = 0;
+            log_msg("Discord token rotation saved");
+        } else {
+            remember_pending_token(rotated, old);
+            g_cfg = disk;
+            strncpy(g_cfg.token, rotated, sizeof g_cfg.token - 1);
+            g_cfg.token[sizeof g_cfg.token - 1] = 0;
+            strncpy(s_dc.token, rotated, sizeof s_dc.token - 1);
+            s_dc.token[sizeof s_dc.token - 1] = 0;
+            g_cfg.qos_token[0] = 0;
+            s_pending_qos[0] = s_pending_qos_owner[0] = 0;
+            log_msg("WARN: token rotation active in memory; config save will retry");
+            notify_throttled("token-save", "Discord token update could not be saved", 300);
+        }
+    }
+    cfg_unlock(config_lock);
+    memset(rotated, 0, sizeof rotated);
 }
 
 /* Persist the live session (atomic tmp+rename). Called on every
@@ -273,6 +386,8 @@ int daemon_run(void){
      * s_stop is deliberately NOT cleared: a stop requested while the
      * supervisor was backing off must stick. */
     daemon_sess_reset(&s_sess);
+    s_in_settings = s_in_browser = -1;
+    s_settings_posted = s_browser_posted = 0;
     memset(&s_dc, 0, sizeof s_dc);
     s_dc_armed = 1;
 #ifdef SIGTERM
@@ -306,7 +421,9 @@ int daemon_run(void){
     int safe_mode = health_boot_note_crash();
     if(safe_mode)
         log_msg("WARN: repeated unclean boots; safe mode (updates off)");
-    if(cfg_load(CFG_PATH, &g_cfg) != 0){
+    cfg_defaults(&g_cfg);
+    int config_lock = cfg_lock(CFG_PATH);
+    if(config_lock >= 0 && cfg_load(CFG_PATH, &g_cfg) != 0){
         /* First boot: drop a template so FTP edit is the only step */
         FILE *probe = fopen(CFG_PATH, "rb");
         if(!probe){
@@ -318,7 +435,9 @@ int daemon_run(void){
         } else fclose(probe);
         log_msg("config load failed; running on defaults until valid config appears");
         notify_once_boot("cfgfail", "config.json unreadable - using defaults");
-    }
+    } else if(config_lock < 0)
+        log_msg("WARN: config lock unavailable; using defaults until reload");
+    cfg_unlock(config_lock);
     if(!g_cfg.enabled){ log_msg("disabled in config; exiting"); health_mark_clean(); log_close(); return 0; }
     log_set_debug(g_cfg.debug);
     if(g_cfg.debug) log_dbg("debug logging on (config)");
@@ -385,6 +504,7 @@ int daemon_run(void){
      * cadence (quiet persistence, never exit). Success resets. */
     int backoff = base_poll;
     int conn_fails = 0;
+    char rejected_token[sizeof g_cfg.token] = {0};
     unsigned jctr = 0;
     /* "Connected to Discord" policy: once on the first successful connect,
      * then only again if a connect attempt actually failed in between.
@@ -406,13 +526,53 @@ int daemon_run(void){
          * On parse failure keep s_sess.last-good config instead of stale defaults. */
         {
             cfg_t next = g_cfg;
-            if(cfg_load(CFG_PATH, &next) == 0){
+            int config_lock = cfg_lock(CFG_PATH);
+            if(config_lock >= 0 && cfg_load(CFG_PATH, &next) == 0){
+                auth_rotation_action_t rotation_action =
+                    auth_rotation_disk_action(&s_token_rotation, next.token);
+                if(rotation_action == AUTH_ROTATION_APPLY){
+                    strncpy(next.token, s_token_rotation.value, sizeof next.token - 1);
+                    next.token[sizeof next.token - 1] = 0;
+                    next.qos_token[0] = 0;
+                    if(cfg_save(CFG_PATH, &next) == 0){
+                        memset(&s_token_rotation, 0, sizeof s_token_rotation);
+                        log_msg("pending Discord token rotation saved");
+                    } else {
+                        log_msg("WARN: pending token rotation still cannot be saved");
+                    }
+                } else if(rotation_action == AUTH_ROTATION_DISCARD){
+                    memset(&s_token_rotation, 0, sizeof s_token_rotation);
+                    log_msg("pending Discord token rotation discarded after config token changed");
+                }
+                if(s_pending_qos[0]){
+                    if(strcmp(next.token, s_pending_qos_owner) == 0){
+                        strncpy(next.qos_token, s_pending_qos, sizeof next.qos_token - 1);
+                        next.qos_token[sizeof next.qos_token - 1] = 0;
+                        if(cfg_save(CFG_PATH, &next) == 0){
+                            s_pending_qos[0] = s_pending_qos_owner[0] = 0;
+                            log_msg("pending Discord QoS token saved");
+                        } else {
+                            log_msg("WARN: pending QoS token still cannot be saved");
+                        }
+                    } else {
+                        s_pending_qos[0] = s_pending_qos_owner[0] = 0;
+                    }
+                }
+                if(strcmp(next.token, g_cfg.token) != 0 && next.qos_token[0]){
+                    next.qos_token[0] = 0;
+                    s_pending_qos[0] = s_pending_qos_owner[0] = 0;
+                    if(cfg_save(CFG_PATH, &next) != 0)
+                        log_msg("WARN: stale QoS token cleared in memory but not on disk");
+                    else
+                        log_msg("cleared QoS token after account token changed");
+                }
                 if(next.debug != g_cfg.debug)
                     log_msg("debug logging %s", next.debug ? "on" : "off");
                 g_cfg = next;
                 log_set_debug(g_cfg.debug);
             }
             else log_msg("config reload failed; keeping last-good config");
+            cfg_unlock(config_lock);
         }
         if(!have_token(&g_cfg)){
             log_msg("no token in config; waiting %ds", backoff);
@@ -420,20 +580,29 @@ int daemon_run(void){
             if(sleep_stop(backoff)) break;
             continue;
         }
-        int rc = discord_connect(&s_dc, g_cfg.token);
+        if(auth_token_wait_for_change(rejected_token, g_cfg.token)){
+            /* 4004 is an explicit auth rejection, not a transient network
+             * error. Repeated IDENTIFY with the same credential cannot heal
+             * it and may make recovery noisier. Poll config on normal cadence. */
+            if(sleep_stop(base_poll)) break;
+            continue;
+        }
+        if(rejected_token[0]) memset(rejected_token, 0, sizeof rejected_token);
+        int rc = discord_connect(&s_dc, g_cfg.token, g_cfg.qos_token);
         if(rc == -2){
-            /* Rejected token: do NOT exit (that would strand the daemon
-             * until the next manual injection). The per-cycle config
-             * reload picks up a fixed token on its own. */
+            /* Keep the daemon alive, but do not identify repeatedly with a
+             * credential the gateway has explicitly rejected. */
+            snprintf(rejected_token, sizeof rejected_token, "%s", g_cfg.token);
+            discord_clear_credentials(&s_dc);
             log_msg("WARN: token rejected by gateway (close 4004). "
-                    "Fix \"token\" in %s; retrying", CFG_PATH);
+                    "Update \"token\" in %s to retry", CFG_PATH);
             notify_throttled("token4004", TOKEN_REJECTED_MSG, 300);
             connect_failed_since_ok = 1;
-            int wait = reconnect_delay(&conn_fails, base_poll, &jctr);
-            if(sleep_stop(wait)) break;
+            if(sleep_stop(base_poll)) break;
             continue;
         }
         if(rc != 0){
+            discord_clear_credentials(&s_dc);
             int wait = reconnect_delay(&conn_fails, base_poll, &jctr);
             /* Throttled: the backoff already grows, so an unthrottled
              * notification here fires every 13s and then every minute. */
@@ -444,6 +613,8 @@ int daemon_run(void){
             if(sleep_stop(wait)) break;
             continue;
         }
+        persist_rotated_token();
+        persist_qos_token();
         if(!announced_connected || connect_failed_since_ok){
             notify_show("Connected to Discord");
             announced_connected = 1;
@@ -468,6 +639,8 @@ int daemon_run(void){
          * current state (game via need_post below, home via s_sess.home_posted
          * reset) so a drop can never leave a stale/blank tile behind. */
         s_sess.home_posted = 0;
+        s_settings_posted = 0;
+        s_browser_posted = 0;
         /* Resume window: if the same title vanishes briefly (detection
          * flicker, quick menu hop) and returns within 10 minutes, the
          * timer resumes instead of resetting to 0:00.
@@ -496,10 +669,9 @@ int daemon_run(void){
                                     /* Validate before trusting: 9-char id,
                                      * sane epoch (2020-2100). A corrupt file
                                      * must never seed a bogus timer. */
-                                    int64_t st = (int64_t)s2->num;
-                                    if(strlen(t->str) == 9 &&
-                                       st >= 1577836800LL &&
-                                       st <= 4102444800LL){
+                                    if(daemon_session_restore_valid(t->str, t->strlen,
+                                                                    s2->num)){
+                                        int64_t st = (int64_t)s2->num;
                                         strncpy(s_sess.prev_tid, t->str, sizeof s_sess.prev_tid-1);
                                         s_sess.prev_started = st;
                                         /* Wall saved_at can't mix with the
@@ -778,23 +950,7 @@ int daemon_run(void){
                         s_sess.last[0]=0; s_sess.sess_tid[0]=0; s_sess.active=0; s_sess.started=0;
                         s_sess.home_posted = 0;
                     }
-                } else if(gate_idle && s_sess.active){
-                    /* Home with idle switched off. Clear rather than leave the
-                     * previous game up: nothing is running underneath on the
-                     * home screen, so holding would strand a closed game's
-                     * tile for good. This is the one place where "don't send"
-                     * would be wrong. */
-                    discord_clear_presence(&s_dc);
-                    log_msg("presence cleared (home, idle suppressed)");
-                    pres_set(&s_sess.pres, PS_NONE);
-                    ledger_append(s_sess.sess_tid, s_sess.last, s_sess.started, time_fixed());
-                    strncpy(s_sess.prev_tid, s_sess.sess_tid, sizeof s_sess.prev_tid-1);
-                    s_sess.prev_started = s_sess.started;
-                    s_sess.prev_end = now;
-                    remove("/data/orbisRPC/session.json");
-                    s_sess.last[0]=0; s_sess.sess_tid[0]=0; s_sess.active=0; s_sess.started=0;
-                    s_sess.home_posted = 0;
-                } else if(!s_sess.home_posted && !scan_unknown){
+                } else if(!gate_idle && !s_sess.home_posted && !scan_unknown){
                     /* Home screen support: no game running. Post a timerless
                      * home presence once (instead of bare online), clear it
                      * the moment a game commits. */
@@ -819,11 +975,12 @@ int daemon_run(void){
             /* service the gateway every pass (~1s): heartbeats must never be
              * more than a second or two late or the server drops us */
             int tr = discord_tick(&s_dc);
+            persist_rotated_token();
+            persist_qos_token();
             if(tr == -2){
-                /* Token rejected mid-session: same policy as connect-time
-                 * 4004 (never strand the daemon). Drop to the outer loop:
-                 * backoff + config reload picks up a fixed token alone. */
-                log_msg("WARN: token rejected (close 4004). Fix %s; retrying", CFG_PATH);
+                /* Token rejected mid-session: wait for a credential change. */
+                snprintf(rejected_token, sizeof rejected_token, "%s", g_cfg.token);
+                log_msg("WARN: token rejected (close 4004). Update %s to retry", CFG_PATH);
                 notify_throttled("token4004", TOKEN_REJECTED_MSG, 300);
                 ws_close(&s_dc.ws);
                 pres_set(&s_sess.pres, PS_NONE);
@@ -852,12 +1009,20 @@ int daemon_run(void){
             for(int i = 0; i < 10 && !s_stop; i++) usleep(100000);
         }
         if(s_stop && s_dc.connected) discord_clear_presence(&s_dc);
+        discord_clear_credentials(&s_dc);
         ws_close(&s_dc.ws);
     }
     /* Session file already reflects the live session (saved on every
      * transition), so shutdown is: clear presence (above), release the
      * lock so a successor starts immediately, close the log. */
     lock_release();
+    memset(g_cfg.token, 0, sizeof g_cfg.token);
+    memset(g_cfg.qos_token, 0, sizeof g_cfg.qos_token);
+    memset(rejected_token, 0, sizeof rejected_token);
+    memset(&s_token_rotation, 0, sizeof s_token_rotation);
+    memset(s_pending_qos, 0, sizeof s_pending_qos);
+    memset(s_pending_qos_owner, 0, sizeof s_pending_qos_owner);
+    discord_clear_credentials(&s_dc);
     log_close();
     return 0;
 }

@@ -4,12 +4,15 @@ Only `token` is required. Everything else ships with working defaults
 (see `cfg_defaults()` in `orbisrpc/cfg.c`). Junk values are clamped
 (`poll_interval_s` is forced into 5–300); a `SET_ME` token logs a
 reminder and the daemon waits instead of exiting.
+When the daemon or setup app writes the config, it uses owner-only file
+permissions (`0600`) because the token grants full account access.
 
 ## Auth
 
 | Key | Default | Meaning |
 |---|---|---|
-| `token` | `"SET_ME"` | Discord user session token (**required**). Full account access — never share it, never commit it. Dies on password change / logout-all (log shows close `4004`); just paste a fresh one, no reinstall needed. |
+| `token` | `"SET_ME"` | Discord user session token (**required**). Full account access — never share it, never commit it. A gateway `4004` means Discord rejected the login; check Discord's account recovery prompts, then enter a fresh token if the account is healthy. |
+| `qos_token` | `""` | Server-issued Gateway session data. Managed automatically, stored with the same owner-only permissions as the config, and cleared when the account token changes. |
 | `application_id` | `"1536977374795538532"` | Only needed for custom uploaded-asset images. |
 | `enabled` | `1` | Master switch. |
 

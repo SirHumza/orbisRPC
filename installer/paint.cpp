@@ -44,7 +44,11 @@ FT_Library g_ftLib = NULL;
 
 // Face cache. The app needs a handful of (path, size) pairs for its lifetime and
 // nothing is unloaded, so a flat array beats any container here.
-const int kMaxFaces = 12;
+// Current menu, settings, flow, and status screens use thirteen distinct
+// (path, size, weight) keys. A full cache previously loaded the overflow face
+// uncached; the progress screen asks for that face every frame and leaked one
+// FreeType face per frame while an operation ran.
+const int kMaxFaces = 16;
 
 struct CachedFace
 {
@@ -392,10 +396,11 @@ FT_Face Face(const char *path, int size, float weight)
 		}
 	}
 
-	// Cache full. Leak the face rather than fail a draw; this cannot happen with
-	// the current font set, but a silent NULL would be worse.
-	SDL_Log("paint: face cache full, loading '%s' uncached", path);
-	return face;
+	// Every returned face is shared and cache-owned. An uncached face would have
+	// no owner and leak because callers cannot release it individually.
+	SDL_Log("paint: face cache full, cannot cache '%s'", path);
+	FT_Done_Face(face);
+	return NULL;
 }
 
 // ---- shapes ---------------------------------------------------------------

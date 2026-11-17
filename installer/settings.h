@@ -49,7 +49,7 @@ public:
 
 	// Writes atomically: to "<path>.new", fsync, rename over the target.
 	// 0 on success.
-	int Save() const;
+	int Save();
 
 	bool ShowFirmware() const { return showFirmware_; }
 	bool ShowMediaApps() const { return showMediaApps_; }
@@ -63,7 +63,7 @@ public:
 	void SetHomeScreen(bool on) { showHomeScreen_ = on; }
 	void SetShowHomebrew(bool on) { showHomebrew_ = on; }
 	void SetCustomMessage(const std::string &text) { customMessage_ = text; }
-	void SetToken(const std::string &t) { token_ = t; }
+	void SetToken(const std::string &t) { token_ = t; tokenModified_ = true; }
 
 	// Flips one toggle and returns true if it changed. No-op for the message
 	// field, which is not a toggle.
@@ -87,6 +87,7 @@ public:
 
 private:
 	bool available_;   // was there a config to read?
+	bool tokenModified_; // only an explicit token edit may replace the current file value
 	bool showFirmware_;
 	bool showMediaApps_;
 	bool showHomeScreen_;

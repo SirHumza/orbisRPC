@@ -3,6 +3,8 @@
 ## Requirements
 
 - Linux or macOS with `clang-18`, `lld-18`, `llvm-18`.
+- Make sure `llvm-config` and `ld.lld` from that LLVM installation are on
+  `PATH`; if `llvm-config` has a versioned name, set `LLVM_CONFIG` to its path.
 - The [OpenOrbis PS4 toolchain](https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain)
   for the Setup app — `OO_PS4_TOOLCHAIN`.
 - The ps4-payload-sdk **built from git** — never the release ZIP. The
@@ -53,7 +55,7 @@ App internals: [INSTALLER.md](INSTALLER.md).
 | `gfx2bmp.py` | Artwork PNG → BMP, used by `make gfx`. |
 | `gen_icon_header.py` | Regenerates `orbisrpc/icon_embedded.h` from the notification icon. |
 | `add_custom_title.py` | Adds/removes entries in `config/custom.json`. |
-| `build.sh` | Legacy OpenOrbis flavor of the payload build. Not the shipping path. |
+| `build.sh` | Deprecated compatibility wrapper that runs `build_sdk.sh`. |
 | `make_ca_bundle.py` | Regenerates the curated CA bundle the daemon pins TLS against. |
 
 ## The one rule

@@ -4,7 +4,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <limits.h>
+#include <math.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #define ICFG_MAX (64u*1024u)
 
@@ -25,6 +28,41 @@ int token_valid(const char *t){
     return dots >= 2;
 }
 
+static int token_space(unsigned char c){
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n' ||
+           c == '\v' || c == '\f';
+}
+
+int token_normalize(char *out, size_t cap, const char *in){
+    const char *start, *end;
+    size_t n;
+    if(!out || cap == 0) return -1;
+    out[0] = 0;
+    if(!in) return -1;
+    start = in;
+    end = in + strlen(in);
+    if((size_t)(end - start) >= 3 &&
+       (unsigned char)start[0] == 0xef &&
+       (unsigned char)start[1] == 0xbb &&
+       (unsigned char)start[2] == 0xbf)
+        start += 3;
+    while(start < end && token_space((unsigned char)*start)) start++;
+    while(end > start && token_space((unsigned char)end[-1])) end--;
+    if(end - start >= 2 &&
+       ((*start == '"' && end[-1] == '"') ||
+        (*start == '\'' && end[-1] == '\''))){
+        start++;
+        end--;
+        while(start < end && token_space((unsigned char)*start)) start++;
+        while(end > start && token_space((unsigned char)end[-1])) end--;
+    }
+    n = (size_t)(end - start);
+    if(n >= cap) return -1;
+    memcpy(out, start, n);
+    out[n] = 0;
+    return 0;
+}
+
 static jl_val_t *icfg_read(const char *path){
     FILE *f = fopen(path, "rb");
     long sz;
@@ -42,9 +80,23 @@ static jl_val_t *icfg_read(const char *path){
     }
     fclose(f);
     buf[sz] = 0;
-    r = jl_parse(buf, (size_t)sz);
+    {
+        const char *json = buf;
+        size_t len = (size_t)sz;
+        if(len >= 3 && (unsigned char)json[0] == 0xef &&
+           (unsigned char)json[1] == 0xbb &&
+           (unsigned char)json[2] == 0xbf){
+            json += 3;
+            len -= 3;
+        }
+        r = jl_parse(json, len);
+    }
     free(buf);
     if(!r || r->type != JL_OBJECT){ if(r) jl_free(r); return NULL; }
+    if(jl_obj_count(r, "token") > 1 || jl_obj_count(r, "qos_token") > 1){
+        jl_free(r);
+        return NULL;
+    }
     return r;
 }
 
@@ -60,12 +112,16 @@ static int icfg_write(const char *path, jl_val_t *r){
     if(!s) return -1;
     f = fopen(tmp, "wb");
     if(!f){ free(s); return -1; }
-    if(fputs(s, f) < 0) ok = 0;
+    {
+        int fd = fileno(f);
+        if(fd < 0 || fchmod(fd, S_IRUSR | S_IWUSR) != 0) ok = 0;
+    }
+    if(ok && fputs(s, f) < 0) ok = 0;
     if(ok){
         int fd = fileno(f);
         if(fd >= 0 && fsync(fd) != 0) ok = 0;
     }
-    if(ok && fclose(f) != 0) ok = 0;
+    if(fclose(f) != 0) ok = 0;
     free(s);
     if(!ok){ remove(tmp); return -1; }
     if(rename(tmp, path) != 0){ remove(tmp); return -1; }
@@ -73,15 +129,20 @@ static int icfg_write(const char *path, jl_val_t *r){
 }
 
 int icfg_token_load(const char *path, char *out, size_t cap){
-    jl_val_t *r = icfg_read(path);
+    jl_val_t *r;
     const jl_val_t *v;
     if(!out || cap == 0) return -1;
     out[0] = 0;
+    r = icfg_read(path);
     if(!r) return -1;
     v = jl_obj_get(r, "token");
     if(v && v->type == JL_STRING && v->str){
-        strncpy(out, v->str, cap - 1);
-        out[cap - 1] = 0;
+        size_t n = strlen(v->str);
+        if(n >= cap){
+            jl_free(r);
+            return -1;
+        }
+        memcpy(out, v->str, n + 1);
     }
     jl_free(r);
     return 0;
@@ -109,7 +170,17 @@ int icfg_get_int(const char *path, const char *key, long *out){
     if(!r || !key){ if(r) jl_free(r); return -1; }
     v = jl_obj_get(r, key);
     if(v && v->type == JL_NUMBER){
-        *out = v->num_is_int ? (long)v->inum : (long)v->num;
+        if(v->num_is_int){
+            *out = (long)v->inum;
+        }else{
+            long double num = (long double)v->num;
+            if(!isfinite(v->num) || num < (long double)LONG_MIN ||
+               num > (long double)LONG_MAX || num != truncl(num)){
+                jl_free(r);
+                return -1;
+            }
+            *out = (long)v->num;
+        }
         jl_free(r);
         return 0;
     }

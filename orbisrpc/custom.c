@@ -26,6 +26,7 @@
  */
 #include "custom.h"
 #include "jsonstr.h"
+#include "jsonlite.h"
 #include "log.h"
 #include <errno.h>
 #ifdef ORBISRPC_SDK_PAYLOAD
@@ -62,17 +63,45 @@ int custom_extract(const char *p, size_t len, const char *pat,
     if(url && url_cap) url[0] = 0;
     if(!p || !pat) return 0;
     size_t plen = strlen(pat);
-    if(len < plen) return 0;
-    const char *hit = NULL;
-    for(const char *q = p; q + plen <= p + len; q++)
-        if(!memcmp(q, pat, plen)){ hit = q; break; }
-    if(!hit) return 0;
-    const char *end = p + len;
-    const char *nm = strstr(hit, "\"name\"");
-    const char *cv = strstr(hit, "\"cover\"");
-    if(nm && nm < end) json_grab_value(nm, end, name, name_cap);
-    if(cv && cv < end) json_grab_value(cv, end, url, url_cap);
-    return (name && name[0]) ? 1 : 0;
+    if(plen < 8 || strncmp(pat, "\"id\":\"", 6) || pat[plen - 1] != '"') return 0;
+    size_t id_len = plen - 7;
+    /* A streaming window need not end in NUL, or contain the surrounding
+     * array. Parse complete bounded objects, never borrow the next entry's
+     * name/cover when the requested entry omits one. */
+    for(size_t start = 0; start < len; start++){
+        if(p[start] != '{') continue;
+        size_t end = start;
+        unsigned depth = 0;
+        int quoted = 0, escaped = 0;
+        for(; end < len; end++){
+            char ch = p[end];
+            if(quoted){
+                if(escaped) escaped = 0;
+                else if(ch == '\\') escaped = 1;
+                else if(ch == '"') quoted = 0;
+            } else if(ch == '"') quoted = 1;
+            else if(ch == '{') depth++;
+            else if(ch == '}' && --depth == 0){ end++; break; }
+        }
+        if(depth || quoted) continue;
+        jl_val_t *entry = jl_parse(p + start, end - start);
+        if(!entry) continue;
+        const jl_val_t *id = jl_obj_get(entry, "id");
+        const jl_val_t *nm = jl_obj_get(entry, "name");
+        const jl_val_t *cv = jl_obj_get(entry, "cover");
+        int found = id && id->type == JL_STRING && strlen(id->str) == id_len &&
+                    !memcmp(id->str, pat + 6, id_len) && nm && nm->type == JL_STRING &&
+                    nm->str[0] && name && name_cap;
+        if(found){
+            snprintf(name, name_cap, "%s", nm->str);
+            if(cv && cv->type == JL_STRING && url && url_cap)
+                snprintf(url, url_cap, "%s", cv->str);
+        }
+        jl_free(entry);
+        if(found) return 1;
+        start = end - 1;
+    }
+    return 0;
 }
 
 #ifdef ORBISRPC_SDK_PAYLOAD
@@ -118,9 +147,13 @@ static int custom_fetch_scan(const char *pat,
         int r = tls_read(t, win + have, sizeof win - have);
         if(r <= 0) break;
         have += (size_t)r;
-        char *e = strstr(win, "\r\n\r\n");
+        char *e = NULL;
+        for(size_t i = 0; i + 4 <= have; i++){
+            if(!memcmp(win + i, "\r\n\r\n", 4)){ e = win + i; break; }
+        }
         if(e){
             size_t body = (size_t)(e - win) + 4;
+            if(body > CUSTOM_HDR_MAX || have < 12){ rc = -1; goto done; }
             if(strncmp(win, "HTTP/1.1 200", 12) != 0 &&
                strncmp(win, "HTTP/2 200", 11) != 0){
                 /* Not an error worth logging per poll: a missing list just

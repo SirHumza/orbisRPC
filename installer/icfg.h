@@ -21,6 +21,8 @@ extern "C" {
 /* 1 valid user token, 0 not. Tokens are dot-separated base64-ish,
  * 40..150 chars. Rejects placeholders and whitespace. */
 int token_valid(const char *t);
+/* Trim pasted boundary whitespace/quotes without changing token contents. */
+int token_normalize(char *out, size_t cap, const char *in);
 
 /* Load current token ("" when missing). 0 ok, -1 unreadable. */
 int icfg_token_load(const char *path, char *out, size_t cap);

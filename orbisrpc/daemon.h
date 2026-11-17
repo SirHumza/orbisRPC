@@ -1,6 +1,7 @@
 /* daemon.h - orbisRPC daemon loop (payload ELF only). */
 #ifndef DAEMON_H
 #define DAEMON_H
+#include <stddef.h>
 #include <stdint.h>
 /* Returns 0 on clean stop, 1 on missing/invalid configuration, or 2 when
  * Discord rejects the token with close code 4004. */
@@ -38,6 +39,8 @@ typedef struct {
  * (not daemon.c) so host tests can link and drive it without pulling in
  * the whole daemon. */
 void daemon_sess_reset(daemon_sess_t *s);
+int daemon_session_restore_valid(const char *title_id, size_t title_len,
+                                 double started);
 
 /* Crash-cleanup hook for the supervisor: releases the pid lock first,
  * then tears down the live connection through a one-shot gate.

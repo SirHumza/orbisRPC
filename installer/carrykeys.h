@@ -20,6 +20,7 @@
 
 #define CARRY_KEYS_LIST \
 	"token", \
+	"qos_token", \
 	"presence_state", \
 	"show_firmware", \
 	"show_idle", \

@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "ws_env.h"
+#include "ws_frag.h"
 
 #define WS_RBUF_MIN 65536          /* initial raw socket buffer (READY is big) */
 /* Grow limit. Now a backstop rather than the working size: any frame with a
@@ -39,6 +40,9 @@ typedef struct {
     /* Envelope scraped while draining an oversized frame. Bounded: only the
      * first WS_ENV_WINDOW bytes of payload are retained. */
     ws_env_t env;
+    ws_frag_t fragments;
+    char rotated_token[512]; /* captured only; never logged */
+    char qos_token[512];     /* server-signed QoS state; never logged */
     int env_active;             /* 1 while an oversized frame is being drained */
     int env_reported;          /* envelope already handed back for this frame */
     int grow_warned;            /* rbuf realloc already logged a failure */
@@ -49,7 +53,7 @@ int ws_send_text(ws_t *w, const char *msg, size_t len);
 /* Returns frame payload length (>0), 0 if no complete frame yet, <0 on error,
  * or -3 if an oversized frame was drained and skipped (payload lost). */
 int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out);
-int ws_pong(ws_t *w); /* answer a server PING (call when recv gives opcode 9) */
+int ws_pong(ws_t *w, const unsigned char *payload, size_t len);
 int ws_close(ws_t *w);
 /* How many payload bytes remain to discard after an oversized frame's header
  * has been consumed. Saturates at 0 rather than wrapping when payload_here

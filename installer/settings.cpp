@@ -11,15 +11,60 @@
 
 #include "jsonlite.h"
 #include "paths.h"
+#include "../orbisrpc/config_lock.h"
 
 // The daemon's own config, not a copy. This was deliberately a scratch path --
 // /data/orbispkg_test/settings.json -- while the page was a mockup, which is
 // exactly why nothing it did had any effect: the daemon never read that file.
+#ifndef SETTINGS_PATH
 #define SETTINGS_PATH ICFG_PATH
+#endif
+#ifndef SETTINGS_DIR
 #define SETTINGS_DIR  INST_DIR
+#endif
 #define SETTINGS_MAX  (16u * 1024u)
 
 namespace {
+
+class ConfigLock
+{
+public:
+	explicit ConfigLock(const char *path) : fd_(config_lock_acquire(path)) {}
+	~ConfigLock() { config_lock_release(fd_); }
+
+	bool locked() const { return fd_ >= 0; }
+
+private:
+	int fd_;
+	ConfigLock(const ConfigLock &);
+	ConfigLock &operator=(const ConfigLock &);
+};
+
+void RemoveDuplicateKey(jl_val_t *object, const char *key)
+{
+	bool kept = false;
+	jl_val_t **link = &object->child;
+	while (*link)
+	{
+		jl_val_t *p = *link;
+		if (p->key && strcmp(p->key, key) == 0)
+		{
+			if (!kept)
+			{
+				kept = true;
+				link = &p->next;
+			}
+			else
+			{
+				*link = p->next;
+				p->next = nullptr;
+				jl_free(p);
+			}
+		}
+		else
+			link = &p->next;
+	}
+}
 
 // Field labels, in display order.
 const char *const kLabels[kSettingCount] = {
@@ -91,7 +136,9 @@ int EnsureDir(const char *path)
 } // namespace
 
 Settings::Settings()
-	: showFirmware_(kDefaultShowFirmware)
+	: available_(false)
+	, tokenModified_(false)
+	, showFirmware_(kDefaultShowFirmware)
 	, showMediaApps_(kDefaultShowMediaApps)
 	, showHomeScreen_(kDefaultHomeScreen)
 	, showHomebrew_(kDefaultHomebrew)
@@ -216,6 +263,7 @@ void Settings::Load()
 	showHomebrew_ = kDefaultHomebrew;
 	customMessage_.clear();
 	token_.clear();
+	tokenModified_ = false;
 
 	char *buf = ReadWholeFile(SETTINGS_PATH);
 	if (!buf)
@@ -239,8 +287,8 @@ void Settings::Load()
 		return;
 	}
 
-	// Toggles are read as JSON booleans. A numeric 0/1 is accepted too, since
-	// that is an easy thing to write by hand.
+	// Toggles are JSON booleans in both the daemon and installer. Ignore values
+	// with another JSON type so the preview never disagrees with runtime behavior.
 	struct ToggleField { const char *key; bool *target; };
 	const ToggleField toggles[] = {
 		{ kShowFirmwareKey, &showFirmware_ },
@@ -255,8 +303,6 @@ void Settings::Load()
 
 		if (v && v->type == JL_BOOL)
 			*toggles[i].target = (v->boolean != 0);
-		else if (v && v->type == JL_NUMBER)
-			*toggles[i].target = (v->num_is_int ? v->inum != 0 : v->num != 0.0);
 	}
 
 	jl_val_t *msg = jl_obj_get(root, kCustomMsgKey);
@@ -269,15 +315,19 @@ void Settings::Load()
 	// shipped placeholder is deliberately not valid input, and refusing to load
 	// because of it would grey the whole page out on a fresh install.
 	jl_val_t *tok = jl_obj_get(root, kTokenKey);
-	if (tok && tok->type == JL_STRING && tok->str)
+	if (jl_obj_count(root, kTokenKey) == 1 &&
+	    tok && tok->type == JL_STRING && tok->str)
 		token_ = tok->str;
 
 	jl_free(root);
 }
 
-int Settings::Save() const
+int Settings::Save()
 {
 	if (EnsureDir(SETTINGS_DIR) != 0)
+		return -1;
+	ConfigLock lock(SETTINGS_PATH);
+	if (!lock.locked())
 		return -1;
 
 	// Read-modify-write, not write.
@@ -289,32 +339,37 @@ int Settings::Save() const
 	// them on the first toggle press. So the existing document is parsed, the five
 	// keys are set on *that*, and the whole thing is written back.
 	//
-	// A missing or unparseable file falls back to a fresh object rather than
-	// failing: losing a settings page is better than losing the config, and the
-	// installer can put the config back.
+	// The page is only available for an existing config. If it becomes unreadable
+	// or malformed between Load() and Save(), fail closed instead of replacing it
+	// with a settings-only object and discarding the daemon's other keys.
 	jl_val_t *root = nullptr;
 	{
 		char *buf = ReadWholeFile(SETTINGS_PATH);
-
-		if (buf)
-		{
-			root = jl_parse(buf, strlen(buf));
-			free(buf);
-		}
+		if (!buf)
+			return -1;
+		root = jl_parse(buf, strlen(buf));
+		free(buf);
 
 		if (root && root->type != JL_OBJECT)
 		{
 			jl_free(root);
-			root = nullptr;
+			return -1;
 		}
 	}
 
 	if (!root)
+		return -1;
+	const size_t tokenCount = jl_obj_count(root, kTokenKey);
+	const size_t qosCount = jl_obj_count(root, "qos_token");
+	if ((qosCount > 1 || tokenCount > 1) && !tokenModified_)
 	{
-		root = jl_new_object();
-		if (!root)
-			return -1;
+		jl_free(root);
+		return -1;
 	}
+	jl_val_t *oldToken = jl_obj_get(root, kTokenKey);
+	const bool tokenChanged = tokenModified_ &&
+		(tokenCount != 1 || !oldToken || oldToken->type != JL_STRING ||
+		 !oldToken->str || strcmp(oldToken->str, token_.c_str()) != 0);
 
 	// Real booleans, so the daemon can read them without parsing.
 	jl_obj_set(root, kShowFirmwareKey, jl_new_bool(showFirmware_));
@@ -329,10 +384,47 @@ int Settings::Save() const
 	           jl_new_string(customMessage_.empty() ? kDefaultCustomMsg
 	                                               : customMessage_.c_str()));
 
-	// Written back exactly as loaded. Validated when it is edited, not here --
-	// see Load(). Writing an empty token over a working one because the field
-	// happened to be left blank would lock the user out of their own presence.
-	jl_obj_set(root, kTokenKey, jl_new_string(token_.c_str()));
+	// Preserve the current file value during unrelated settings saves. Only an
+	// explicit edit replaces it, so stale in-memory state cannot undo a newer
+	// daemon-side token change.
+	if (tokenModified_)
+	{
+		jl_val_t *replacement = jl_new_string(token_.c_str());
+		if (!replacement)
+		{
+			jl_free(root);
+			return -1;
+		}
+		jl_obj_set(root, kTokenKey, replacement);
+		RemoveDuplicateKey(root, kTokenKey);
+		jl_val_t *storedToken = jl_obj_get(root, kTokenKey);
+		if (jl_obj_count(root, kTokenKey) != 1 || !storedToken ||
+		    storedToken->type != JL_STRING || !storedToken->str ||
+		    strcmp(storedToken->str, token_.c_str()) != 0)
+		{
+			jl_free(root);
+			return -1;
+		}
+		if (tokenChanged || qosCount > 1)
+		{
+			jl_val_t *emptyQos = jl_new_string("");
+			if (!emptyQos)
+			{
+				jl_free(root);
+				return -1;
+			}
+			jl_obj_set(root, "qos_token", emptyQos);
+			RemoveDuplicateKey(root, "qos_token");
+			jl_val_t *storedQos = jl_obj_get(root, "qos_token");
+			if (jl_obj_count(root, "qos_token") != 1 || !storedQos ||
+			    storedQos->type != JL_STRING || !storedQos->str ||
+			    storedQos->str[0] != 0)
+			{
+				jl_free(root);
+				return -1;
+			}
+		}
+	}
 
 	char *text = jl_stringify(root);
 	jl_free(root);
@@ -356,7 +448,12 @@ int Settings::Save() const
 	}
 
 	int ok = 1;
-	if (fputs(text, f) < 0)
+	{
+		const int fd = fileno(f);
+		if (fd < 0 || fchmod(fd, S_IRUSR | S_IWUSR) != 0)
+			ok = 0;
+	}
+	if (ok && fputs(text, f) < 0)
 		ok = 0;
 
 	if (ok)
@@ -366,7 +463,7 @@ int Settings::Save() const
 			ok = 0;
 	}
 
-	if (ok && fclose(f) != 0)
+	if (fclose(f) != 0)
 		ok = 0;
 
 	free(text);
@@ -382,6 +479,8 @@ int Settings::Save() const
 		remove(tmp);
 		return -1;
 	}
+
+	tokenModified_ = false;
 
 	return 0;
 }

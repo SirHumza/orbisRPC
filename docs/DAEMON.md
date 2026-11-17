@@ -1,11 +1,28 @@
-# Daemon design (v1.0.0)
+# Daemon design
 
 ## Loop
 
-Outer connect cycles (jittered exponential backoff, 60 s cap ×10, then
-10-minute cadence, never exits) wrap an inner 1 s session loop. Token-4004
-never kills the daemon at either level: it backs off and retries so a fixed
-token lands on its own.
+Outer connect cycles use jittered exponential backoff around an inner session
+loop. Network and gateway failures reconnect without exiting. An explicit 4004
+authentication rejection is treated differently: the daemon waits for the
+configured token to change before attempting another IDENTIFY. A fixed token
+must be entered through Setup or in the config; the daemon does not invent or
+refresh user credentials.
+
+## Gateway credentials
+
+IDENTIFY uses the configured user token and includes `qos_token` only when a
+server-issued QoS value is available. The daemon captures credential fields
+only from a READY dispatch, promotes them after validation, and saves a rotated
+token and its matching QoS value without overwriting a manual config edit. If
+storage is unavailable, the latest accepted rotation remains in memory for a
+later save attempt. Credential buffers are cleared when the connection ends.
+
+Reconnects use a fresh IDENTIFY. This implementation does not persist a
+Discord RESUME session. Offline tests cover extraction, IDENTIFY construction,
+and persistence lineage; they do not prove Discord will accept a user token or
+prevent account security challenges. No browser-client fingerprint fields or
+undocumented capability values are inferred from issue reports.
 
 ## States
 

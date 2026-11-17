@@ -10,6 +10,7 @@
 #include <signal.h>
 #include <setjmp.h>
 #include <string.h>
+#include <math.h>
 #include <unistd.h>
 
 static supervise_hook_t s_hook = NULL;
@@ -44,6 +45,18 @@ void daemon_sess_reset(daemon_sess_t *s){
     s->healthy_marked = 0;
     s->sess_restored = 0;
     s->last_reconcile = 0;
+}
+
+int daemon_session_restore_valid(const char *title_id, size_t title_len,
+                                 double started){
+    if(!title_id || title_len != 9 || strlen(title_id) != title_len ||
+       !isfinite(started) || started < 1577836800.0 || started > 4102444800.0 ||
+       started != trunc(started)) return 0;
+    for(size_t i = 0; i < title_len; i++){
+        char c = title_id[i];
+        if(!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))) return 0;
+    }
+    return 1;
 }
 
 /* Fault handler: async-signal-safe (siglongjmp only, no logging here —

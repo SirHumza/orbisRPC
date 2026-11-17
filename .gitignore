@@ -34,3 +34,4 @@ installer/assets/daemon.elf
 installer/assets/evict.elf
 installer/sce_sys/param.sfo
 tests/test_utils_asan
+graphify-out/

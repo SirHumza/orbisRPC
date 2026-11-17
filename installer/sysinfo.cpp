@@ -51,7 +51,8 @@ SystemInfo QuerySystem()
 
 	info.tscFrequency = sceKernelGetTscFrequency();
 	info.directMemSize = sceKernelGetDirectMemorySize();
-	info.pageSize = static_cast<uint32_t>(getpagesize());
+	const long pageSize = sysconf(_SC_PAGESIZE);
+	info.pageSize = pageSize > 0 ? static_cast<uint32_t>(pageSize) : 0;
 
 	int32_t userId = -1;
 	if (sceUserServiceGetInitialUser(&userId) == 0)
