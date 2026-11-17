@@ -14,7 +14,11 @@
 
 <p align="center"><a href="https://github.com/SirHumza/orbisRPC/releases/tag/v1.1">Release</a> · <a href="https://sirhumza.github.io/orbisRPC/guide.html">Setup guide</a> · <a href="https://discord.gg/BWEyfcT7ZQ">Discord</a></p>
 
+<p align="center"><b>Maintainer on Discord:</b> <code>sirhumza</code></p>
+
 <p align="center"><a href="https://www.youtube.com/watch?v=J3kjfGJ-HYk"><img src="docs/orbisrpc-demo-thumbnail.jpg" width="760" alt="Watch the orbisRPC demo on YouTube"></a></p>
+
+<p align="center"><img src="site/sirhumza-discord-profile.png" width="420" alt="SirHumza's Discord profile showing orbisRPC activity for Marvel's Spider-Man: Miles Morales on PS4 firmware 9.00"></p>
 
 ## What you see
 
