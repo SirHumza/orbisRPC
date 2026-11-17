@@ -18,7 +18,7 @@
 
 ## What you see
 
-<p align="center"><img src="docs/orbisrpc-activity-card.svg" width="760" alt="Illustration of a Discord profile showing a PS4 game, cover art and elapsed play time"></p>
+<p align="center"><img src="site/orbisrpc-activity-card.svg" width="760" alt="Illustration of a Discord profile showing a PS4 game, cover art and elapsed play time"></p>
 
 orbisRPC detects the foreground title and updates your Discord activity from the PS4 itself. It can resolve title information and artwork for supported retail, homebrew and retro games.
 
