@@ -50,6 +50,7 @@ jobs:
       - name: install OpenOrbis packaging toolchain
         run: |
           python3 -m pip install --user pillow
+          sudo ln -sf "$(command -v ld.lld-18)" /usr/local/bin/ld.lld
           mkdir -p "$HOME/OpenOrbis-PS4-Toolchain"
           curl -fsSL --retry 3 \
             https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/download/v0.5.4/toolchain-llvm-18.tar.gz \
