@@ -17,7 +17,7 @@ Runs on a jailbroken PS4 with GoldHEN. No PC or companion script needed.</p>
 
 <p align="center">
   <a href="https://www.youtube.com/watch?v=J3kjfGJ-HYk">
-    <img src="https://img.youtube.com/vi/J3kjfGJ-HYk/maxresdefault.jpg" width="720" alt="▶ Watch the orbisRPC demo on YouTube">
+    <img src="docs/orbisrpc-demo-thumbnail.jpg" width="720" alt="Watch the orbisRPC demo on YouTube">
   </a>
 </p>
 
