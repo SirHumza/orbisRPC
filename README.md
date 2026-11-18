@@ -20,7 +20,7 @@
 
 ## Your Discord profile
 
-<p align="center"><img src="docs/sirhumza-discord-preview.gif" width="760" alt="Animated Discord-style profile card for SirHumza showing Spider-Man Miles Morales on PS4, with the elapsed timer advancing"></p>
+<p align="center"><img src="docs/sirhumza-discord-preview.webp" width="760" alt="Animated Discord-style profile card for SirHumza showing Spider-Man Miles Morales on PS4, with the elapsed timer advancing"></p>
 
 <p align="center"><sub>Discord-style mockup based on your profile. The timer loops from 9:15 to 9:30 as a demo.</sub></p>
 
