@@ -16,6 +16,7 @@
 #include "../orbisrpc/fingerprint_gen.h"
 #include "../orbisrpc/appdb.h"
 #include "../orbisrpc/discord.h"
+#include "../orbisrpc/oauth.h"
 #include "../orbisrpc/detect.h"
 #include "../orbisrpc/procwalk.h"
 #include "../orbisrpc/bigapp.h"
@@ -254,6 +255,90 @@ static void test_identity_consistency(void) {
     g_cfg = saved;
 }
 
+static int oauth_step;
+static jl_val_t *oauth_fixture(const char *method, const char *path, int *status){
+    const char *body;
+    if(oauth_step == 0){
+        assert(!strcmp(method, "POST") && !strcmp(path, "/v1/pair"));
+        *status = 201;
+        body = "{\"session_token\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"verification_uri\":\"https://discord.com/activate\",\"user_code\":\"TEST-CODE\",\"interval\":5}";
+    } else if(oauth_step == 1){
+        assert(!strcmp(path, "/v1/token"));
+        *status = 202; body = "{\"interval\":5}";
+    } else if(oauth_step == 2){
+        *status = 200;
+        body = "{\"access_token\":\"TEST-ACCESS\",\"token_type\":\"Bearer\",\"expires_in\":3600}";
+    } else {
+        assert(!strcmp(method, "DELETE"));
+        *status = 204; body = "{}";
+    }
+    oauth_step++;
+    return jl_parse(body, strlen(body));
+}
+static void test_oauth_lifecycle(void){
+    cfg_t saved = g_cfg;
+    char dir[128], path[256];
+    assert(make_tmpdir(dir, sizeof dir) == 0);
+    snprintf(g_cfg.auth_mode, sizeof g_cfg.auth_mode, "oauth");
+    snprintf(g_cfg.broker_url, sizeof g_cfg.broker_url, "https://example.workers.dev");
+    oauth_test_setup(dir, oauth_fixture); oauth_step = 0;
+    assert(oauth_prepare() == 0 && oauth_step == 1);
+    assert(oauth_prepare() == 0 && oauth_step == 1); /* polling interval */
+    snprintf(path, sizeof path, "%s/oauth-session.json", dir);
+    struct stat st;
+    assert(!stat(path, &st) && (st.st_mode & 0777) == 0600);
+    oauth_test_retry();
+    assert(oauth_prepare() == 0 && oauth_step == 2);
+    oauth_test_retry();
+    assert(oauth_prepare() == 1 && oauth_step == 3);
+    assert(!strcmp(oauth_token(), "Bearer TEST-ACCESS"));
+    assert(!oauth_due());
+    oauth_test_setup(dir, oauth_fixture); oauth_step = 2;
+    assert(oauth_prepare() == 1 && oauth_step == 2);
+    printf("OAuth restart broker requests cached: %d\n", oauth_step - 2);
+    /* Old session-only state, expired cache, future issue time, excessive
+     * lifetime and malformed bearer data must each fetch exactly once. */
+    int64_t wall = (int64_t)time(NULL);
+    for(int i = 0; i < 5; i++){
+        snprintf(path, sizeof path, "%s/oauth-session.json", dir);
+        FILE *cache = fopen(path, "w"); assert(cache);
+        int64_t issued = wall - 120, until = wall + 3600;
+        const char *access_token = "CACHED-ACCESS";
+        if(i == 0){ issued = 0; until = 0; } /* legacy file */
+        if(i == 1) until = wall - 1;
+        if(i == 2) issued = wall + 1;
+        if(i == 3) until = wall + 31536001;
+        if(i == 4) access_token = "invalid bearer";
+        fprintf(cache, "{\"origin\":\"https://example.workers.dev\","
+            "\"session\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+            "\"access_token\":\"%s\",\"issued_at\":%lld,\"expires_at\":%lld}",
+            access_token, (long long)issued, (long long)until);
+        fclose(cache);
+        oauth_test_setup(dir, oauth_fixture); oauth_step = 2;
+        assert(oauth_prepare() == 1 && oauth_step == 3);
+        assert(!strcmp(oauth_token(), "Bearer TEST-ACCESS"));
+    }
+    oauth_step = 3;
+    oauth_rejected();
+    assert(!oauth_token()[0] && oauth_due());
+    oauth_test_setup(dir, oauth_fixture);
+    assert(oauth_prepare() == 0 && oauth_step == 3);
+    assert(!oauth_token()[0]);
+    assert(oauth_prepare() == 0 && oauth_step == 3); /* no refused-token loop */
+    snprintf(path, sizeof path, "%s/oauth.unlink", dir);
+    FILE *f = fopen(path, "w"); assert(f); fclose(f);
+    assert(oauth_due());
+    assert(oauth_prepare() == 0 && oauth_step == 4);
+    snprintf(path, sizeof path, "%s/oauth-session.json", dir);
+    assert(access(path, F_OK) != 0);
+    oauth_test_retry();
+    g_cfg = saved;
+    snprintf(path, sizeof path, "%s/oauth-session.json", dir); unlink(path);
+    snprintf(path, sizeof path, "%s/oauth.unlink", dir); unlink(path);
+    rmdir(dir);
+    oauth_test_setup(DATA_DIR, NULL);
+}
+
 static void test_identify_capabilities(void) {
     static const char *const frames[] = {
         "{\"op\":10,\"d\":{\"heartbeat_interval\":45000}}",
@@ -284,6 +369,24 @@ static void test_identify_capabilities(void) {
      * the copy the desktop client holds; orbisRPC cannot write it back. */
     assert(((unsigned)caps->num & DISCORD_GW_CAP_AUTH_TOKEN_REFRESH) == 0);
     jl_free(id);
+    cfg_t saved = g_cfg;
+    snprintf(g_cfg.auth_mode, sizeof g_cfg.auth_mode, "oauth");
+    replay_begin(f, 2);
+    assert(discord_connect(&d, "Bearer REPLAY-TOKEN") == 0);
+    replay_end();
+    id = jl_parse(s_sent_json[0], strlen(s_sent_json[0]));
+    dd = jl_obj_get(id, "d");
+    assert(jl_obj_get(dd, "capabilities")->num == 69680);
+    assert(jl_obj_get(dd, "intents")->num == 952897536);
+    assert(!strcmp(jl_obj_get(dd, "token")->str, "Bearer REPLAY-TOKEN"));
+    assert(!strcmp(jl_obj_get(jl_obj_get(dd, "properties"), "device")->str, "console"));
+    assert(jl_obj_get(dd, "client_state") == NULL);
+    jl_free(id);
+    g_cfg = saved;
+    assert(oauth_valid_origin("https://orbisrpc.example.workers.dev"));
+    assert(!oauth_valid_origin("http://example.com"));
+    assert(!oauth_valid_origin("https://example.com/path"));
+    assert(!oauth_valid_origin("https://example.com\r\nAuthorization: bad"));
 }
 
 /* READY -> RESUME round trip through the real gateway code. The replay
@@ -1233,7 +1336,7 @@ static void test_cfg_preserves_unknown(void) {
     assert(strstr(buf, "\"old-token\"") == NULL);
     /* exactly one token pair: a duplicate would let the stale one win */
     int hits = 0;
-    for(const char *p = buf; (p = strstr(p, "\"token\"")) != NULL; p += 7) hits++;
+    for(const char *p = buf; (p = strstr(p, "\"token\":")) != NULL; p += 8) hits++;
     assert(hits == 1);
 }
 
@@ -1536,6 +1639,9 @@ static void test_appdb(void) {
     fputs("{\"titleId\":\"CUSA00002\",\"titleName\":\"JSON Game\"}", f);
     fclose(f);
     assert(appdb_title_from(db, meta, "CUSA00002", name, sizeof name) == 0);
+    assert(!strcmp(name, "JSON Game"));
+    /* App metadata remains usable when the system DB is unavailable. */
+    assert(appdb_title_from("/nonexistent/app.db", meta, "CUSA00002", name, sizeof name) == 0);
     assert(!strcmp(name, "JSON Game"));
     /* invalid inputs fail soft */
     assert(appdb_title_from(db, meta, NULL, name, sizeof name) != 0);
@@ -2776,6 +2882,7 @@ int main(void) {
     test_gateway_op_spoof();
     test_identity_consistency();
     test_identify_capabilities();
+    test_oauth_lifecycle();
     test_resume_flow();
     test_presence_send();
     test_json_oom_safe();

@@ -113,6 +113,7 @@ void cfg_defaults(cfg_t *c) {
     c->reconnect_max_s = 600;
     c->timesync_interval_s = 3600;
     c->log_max_kb = 512;
+    strncpy(c->auth_mode, "token", sizeof(c->auth_mode)-1);
     strncpy(c->token, "SET_ME", sizeof(c->token)-1);
     strncpy(c->presence_state, "On PS4", sizeof(c->presence_state)-1);
     /* Presence shows three lines: name, details, state (+ timer). The details
@@ -286,6 +287,8 @@ int cfg_load(const char *path, cfg_t *c) {
             c->f[sizeof(c->f)-1]=0; \
         } \
     } while(0)
+    STR("auth_mode", auth_mode);
+    STR("broker_url", broker_url);
     STR("token", token);
     cfg_trim_token(c->token);
     STR("application_id", application_id);
@@ -566,6 +569,8 @@ int cfg_save(const char *path, const cfg_t *c) {
         }
     }
     cfg_set(r, "schema_version",  jl_new_number((double)CFG_SCHEMA_VERSION));
+    cfg_set(r, "auth_mode", jl_new_string(c->auth_mode));
+    cfg_set(r, "broker_url", jl_new_string(c->broker_url));
     cfg_set(r, "token",           jl_new_string(c->token));
     cfg_set(r, "application_id",  jl_new_string(c->application_id));
     cfg_set(r, "art_base_url",    jl_new_string(c->art_base_url));

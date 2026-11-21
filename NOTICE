@@ -54,3 +54,9 @@ These keep their own licenses and are not relicensed by the terms above:
   build/; it is not linked into the shipped payload.
 - orbisrpc/ca_bundle_pem.h - X.509 root certificates extracted from the
   public Mozilla/OpenSSL CA bundle. Certificate data, not code.
+
+OAuth integration research assistance
+Tevtongermany [ONET] and OrbisNet (https://github.com/OrbisNet) supplied
+architecture guidance and a private Discord presence reference.
+Kizzy (https://github.com/dead8309/Kizzy) provided an additional public
+protocol reference. The private OrbisNet source is excluded from this repo.

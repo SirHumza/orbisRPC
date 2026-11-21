@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
  * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
  */
-/* discord.h - gateway session + presence (user session token). */
+/* discord.h - gateway session + presence (legacy session token or OAuth bearer). */
 #ifndef DISCORD_H
 #define DISCORD_H
 #include "ws.h"
@@ -17,7 +17,7 @@
 
 typedef struct {
     ws_t ws;
-    char token[512];
+    char token[2048];
     int64_t last_heartbeat;   /* when we last sent op 1 */
     int64_t last_ack;         /* when the gateway last acked (op 11) */
     int64_t hb_interval_ms;

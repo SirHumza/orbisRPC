@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.2.0-beta] - Unreleased
+
+### Added
+
+- Cloudflare OAuth device authorization broker with serialized token refresh.
+- PS4 OAuth mode, browser approval, protected broker-session storage, and renewal.
+- Persistent expiring access-token cache avoids broker requests after restart.
+- Coalesced broker idle leases remove repeated cached-token database writes.
+- Credit to Tevtongermany [ONET], OrbisNet, and Kizzy for research assistance.
+
+### Fixed
+
+- Local app metadata name fallback when the system app database cannot open.
+
+Live Discord authorization and console stability qualification remain pending.
+
 ## [1.1.0-beta] - 2026-11-03
 
 `main` 1.0.0 → `beta`. Compare

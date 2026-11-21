@@ -180,7 +180,7 @@ _srcs = []
 for _root, _dirs, _files in os.walk(ROOT):
     _dirs[:] = [x for x in _dirs if x not in
                 ("third_party", "build", "build-sdk", ".git", "graphify-out",
-                 ".superpowers", "plugin")]
+                 ".superpowers", "plugin", "node_modules", ".wrangler")]
     for _f in _files:
         if (_f.endswith((".c", ".h", ".py", ".sh", ".md", ".yml", ".yaml"))
                 or _f in ("Makefile", ".gitignore", ".gitattributes")):

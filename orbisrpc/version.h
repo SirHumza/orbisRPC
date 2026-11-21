@@ -6,6 +6,6 @@
  * against the latest release tag. */
 #ifndef ORBISRPC_VERSION_H
 #define ORBISRPC_VERSION_H
-#define ORBISRPC_VERSION "1.1.0"
+#define ORBISRPC_VERSION "1.2.0-beta"
 #define ORBISRPC_REPO "SirHumza/orbisRPC"
 #endif

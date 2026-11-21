@@ -72,6 +72,39 @@ value is clamped; the daemon logs the clamp when it changes one.
 | `timesync_interval_s` | `3600` | NTP refresh cadence (clamped 300–86400). One host per tick; the boot sweep still tries all three. |
 | `log_max_kb` | `512` | Rotate `log.txt` at this size in KiB (clamped 64–8192). Raise it for long-run captures; the previous file is kept as `log.old.txt`. |
 
+## OAuth beta setup
+
+Deploy the [Cloudflare broker](../backend/README.md) with your own Discord
+application credentials, then set these keys in the console configuration.
+
+```json
+{
+  "auth_mode": "oauth",
+  "broker_url": "https://orbisrpc-auth.YOUR-SUBDOMAIN.workers.dev",
+  "application_id": "YOUR_DISCORD_CLIENT_ID"
+}
+```
+
+Set `application_id` to the same Discord application ID used by the broker.
+Use the HTTPS origin without a trailing slash, path, or port. Configuration
+without `auth_mode` uses the existing `token` mode for upgrades. OAuth mode
+obtains its runtime bearer token through the broker and does not put it into
+the configuration's `token` field. Browser approval is required when pairing.
+The public verification URL and code appear in the console notification and
+log. Approve the requested application on Discord's activation page.
+
+The console saves a broker session and expiring access-token cache in
+`/data/orbisRPC/oauth-session.json` at mode `0600`. Valid cached authorization
+survives restarts and avoids a broker request until renewal is due. Cached
+credentials with invalid dates or an origin mismatch are refused. Treat that
+file as a credential. Create
+`/data/orbisRPC/oauth.unlink` to revoke the broker session and request new
+pairing. If the broker cannot be reached, revocation waits for connectivity.
+You can also remove the application in Discord's authorized-app settings.
+The broker retains refresh credentials and supplies expiring access tokens.
+A valid session reconnects before token expiry. A rejected Gateway token waits
+for relinking to avoid retrying refused credentials repeatedly.
+
 ## Per-title rules
 
 `titles` maps title IDs to display names. `title_rules` can add custom details,

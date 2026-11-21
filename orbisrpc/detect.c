@@ -21,6 +21,7 @@
  * public SDK, so the NAME is heuristic. The core signal (a game is in the
  * foreground) is reliable via ShellCoreUtil.
  */
+#include "oauth.h"
 #include "detect.h"
 #include "cfg.h"
 #include "log.h"
@@ -606,7 +607,7 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
         if(s_last_art[0] && strncmp(s_last_art, "mp:", 3) != 0 &&
            art_retry_due(s_last_art)){
             char mpv[512];
-            if(art_resolve_mp(g_cfg.application_id, g_cfg.token, s_last_art,
+            if(art_resolve_mp(g_cfg.application_id, oauth_token(), s_last_art,
                               mpv, sizeof mpv)){
                 snprintf(s_last_art, sizeof s_last_art, "%s", mpv);
                 gamecache_set_mp(titleId, mpv);
@@ -622,7 +623,7 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
                 int n = snprintf(u, sizeof u, "%s%s.png",
                                  g_cfg.art_base_url, key);
                 if(n > 0 && (size_t)n < sizeof u && art_retry_due(u) &&
-                   art_resolve_mp(g_cfg.application_id, g_cfg.token, u,
+                   art_resolve_mp(g_cfg.application_id, oauth_token(), u,
                                   mpv, sizeof mpv)){
                     snprintf(s_last_art, sizeof s_last_art, "%s", mpv);
                     gamecache_set_mp(titleId, mpv);

@@ -9,6 +9,7 @@
  * which is gone: the cover URL a title resolves to now lives in
  * games_cache.json alongside its name, so there is one cache, one TTL, and no
  * chance of replaying an mp: path whose source URL has since changed. */
+#include "oauth.h"
 #include "art.h"
 #include "cfg.h"
 #include "discord.h"
@@ -248,7 +249,7 @@ void art_prefetch(const char *url){
     if(art_resolve_mp_cached(url, tmp, sizeof tmp)) return;
     /* An uploaded asset key is not a URL and needs no external-assets call. */
     if(strncmp(url, "http", 4) != 0) return;
-    (void)art_resolve_mp(g_cfg.application_id, g_cfg.token, url, tmp, sizeof tmp);
+    (void)art_resolve_mp(g_cfg.application_id, oauth_token(), url, tmp, sizeof tmp);
 }
 
 int art_resolve_mp(const char *app_id, const char *token, const char *url,

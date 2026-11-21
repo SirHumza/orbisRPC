@@ -18,6 +18,8 @@ public redistribution must ship corresponding source.
 
 ## For developers
 
+- [PLAN_1.2.md](PLAN_1.2.md) — OAuth broker implementation and release gates.
+
 - [VERIFICATION_MATRIX.md](VERIFICATION_MATRIX.md) — every D-01…D-20
   status with its evidence level (L0–L5) and what still needs a console.
 - [DAEMON.md](DAEMON.md) — loop, states, detection, names, art, sessions.

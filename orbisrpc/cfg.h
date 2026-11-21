@@ -38,6 +38,8 @@ typedef struct {
 } cfg_title_rule_t;
 typedef struct {
     int schema_version;
+    char auth_mode[16];        /* token (legacy) or oauth */
+    char broker_url[256];      /* HTTPS origin, no embedded secrets */
     char token[512];           /* Discord user session token */
     char application_id[64];   /* optional: app id for uploaded asset images */
     char art_base_url[256];    /* optional: icon pack base URL, e.g.

@@ -21,6 +21,13 @@ playing to Discord: name, cover art, timer. No PC at runtime.</p>
 
 ---
 
+## 1.2 OAuth beta
+
+The `beta` branch adds browser approval through a Cloudflare auth broker.
+The PS4 publishes activity directly and renews authorization through the broker.
+See [the implementation plan](docs/PLAN_1.2.md) and
+[broker setup](backend/README.md). Live Discord and console qualification is pending.
+
 ## Contents
 
 - [What you get](#what-you-get)

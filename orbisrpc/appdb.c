@@ -109,7 +109,7 @@ int appdb_title_from(const char *dbpath, const char *appmeta_base,
                               SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL);
     if(orc != SQLITE_OK){
         if(db) sqlite3_close(db);
-        return -1;
+        return paramjson_title(appmeta_base, titleId, out, cap);
     }
     sqlite3_busy_timeout(db, 2000);
 

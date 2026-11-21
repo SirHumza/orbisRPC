@@ -3,7 +3,7 @@
 CC ?= cc
 # Host tests target POSIX systems (glibc under -std=c11 hides fileno/strdup/etc;
 # _DEFAULT_SOURCE re-enables usleep and friends).
-CFLAGS += -std=c11 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -Wall -Wextra -Werror -DHEALTH_TESTABLE -DLOG_TESTABLE -DNOTIFY_TESTABLE -MMD -MP -I../orbisrpc -I../third_party/mbedtls/include -I$(SQLITE_DIR)
+CFLAGS += -std=c11 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -Wall -Wextra -Werror -DOAUTH_TESTABLE -DHEALTH_TESTABLE -DLOG_TESTABLE -DNOTIFY_TESTABLE -MMD -MP -I../orbisrpc -I../third_party/mbedtls/include -I$(SQLITE_DIR)
 
 TARGET := test_utils
 OBJDIR := .objs
@@ -12,7 +12,7 @@ MBEDTLS_DIR := ../third_party/mbedtls/library
 # Same exclusion set as scripts/build.sh (POSIX-only modules).
 MBEDTLS_SRCS := $(filter-out $(MBEDTLS_DIR)/net_sockets.c $(MBEDTLS_DIR)/timing.c $(MBEDTLS_DIR)/entropy_poll.c,$(wildcard $(MBEDTLS_DIR)/*.c))
 
-ORBIS_SRCS := ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c ../orbisrpc/tmdb_crypto.c ../orbisrpc/updater_util.c ../orbisrpc/updater_http.c ../orbisrpc/art.c ../orbisrpc/diag.c ../orbisrpc/log.c ../orbisrpc/health.c ../orbisrpc/manifest.c ../orbisrpc/compat.c ../orbisrpc/cfg.c ../orbisrpc/appdb.c ../orbisrpc/discord.c ../orbisrpc/procwalk.c ../orbisrpc/bigapp.c ../orbisrpc/pkgzone.c ../orbisrpc/gamecache.c ../orbisrpc/fw.c ../orbisrpc/notify.c ../orbisrpc/retro.c
+ORBIS_SRCS := ../orbisrpc/jsonlite.c ../orbisrpc/b64.c ../orbisrpc/sfo.c ../orbisrpc/tmdb_crypto.c ../orbisrpc/updater_util.c ../orbisrpc/updater_http.c ../orbisrpc/art.c ../orbisrpc/diag.c ../orbisrpc/log.c ../orbisrpc/health.c ../orbisrpc/manifest.c ../orbisrpc/compat.c ../orbisrpc/cfg.c ../orbisrpc/appdb.c ../orbisrpc/discord.c ../orbisrpc/oauth.c ../orbisrpc/procwalk.c ../orbisrpc/bigapp.c ../orbisrpc/pkgzone.c ../orbisrpc/gamecache.c ../orbisrpc/fw.c ../orbisrpc/notify.c ../orbisrpc/retro.c
 INST_SRCS := ../installer/icfg.c
 # SQLite amalgamation: -O0 for host iteration speed (payload uses -O2).
 SQLITE_DIR := ../third_party/sqlite/sqlite-amalgamation-3510100

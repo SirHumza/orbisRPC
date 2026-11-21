@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
  * Copyright (C) 2026 SirHumza and CyberMask367 - see NOTICE for attribution terms.
  */
-/* discord.c - Discord gateway client using a USER SESSION token.
+/* discord.c - Discord gateway client using a legacy session token or an OAuth bearer.
  *
  * Flow: TLS websocket -> HELLO(op10) -> IDENTIFY(op2) -> READY(dispatch) ->
  * presence updates (op3) + heartbeats (op1/op11).
@@ -14,6 +14,7 @@
  * of looping forever.
  */
 #include "discord.h"
+#include "oauth.h"
 #include "clock.h"
 #include "b64.h"
 #include "cfg.h"
@@ -387,7 +388,8 @@ static int send_identify(discord_t *d, const char *token){
     jl_val_t *dd=jl_new_object();
     if(!dd){ jl_free(root); return -1; }
     jl_obj_set(dd,"token",jl_new_string(token));
-    jl_val_t *pp=build_fingerprint();
+    jl_val_t *pp=oauth_enabled() ? jl_new_object() : build_fingerprint();
+    if(oauth_enabled() && pp) jl_obj_set(pp,"device",jl_new_string("console"));
     if(!pp){ jl_free(root); jl_free(dd); return -1; }
     jl_obj_set(dd,"properties",pp);
     /* Opt into the same gateway behaviours a real client does, minus
@@ -395,27 +397,30 @@ static int send_identify(discord_t *d, const char *token){
      * token in READY and expect the client to discard the old value; we
      * cannot write the replacement into the desktop client's store, so
      * requesting it logs the user out of Discord. */
-    jl_obj_set(dd,"capabilities",jl_new_int(DISCORD_GW_CAPABILITIES));
-    jl_obj_set(dd,"compress",jl_new_bool(0));
-    /* A real client always carries cache state, even on a cold start. */
-    jl_val_t *cs=jl_new_object();
-    if(cs){
-        jl_obj_set(cs,"guild_versions",jl_new_object());
-        jl_obj_set(cs,"highest_last_message_id",jl_new_string("0"));
-        jl_obj_set(cs,"read_state_version",jl_new_int(0));
-        jl_obj_set(cs,"user_guild_settings_version",jl_new_int(-1));
-        jl_obj_set(cs,"user_settings_version",jl_new_int(-1));
-        jl_obj_set(cs,"api_code_version",jl_new_int(0));
-        jl_obj_set(dd,"client_state",cs);
+    jl_obj_set(dd,"capabilities",jl_new_int(oauth_enabled() ? 69680 : DISCORD_GW_CAPABILITIES));
+    if(oauth_enabled()) jl_obj_set(dd,"intents",jl_new_int(952897536));
+    if(!oauth_enabled()){
+        jl_obj_set(dd,"compress",jl_new_bool(0));
+        /* A real client always carries cache state, even on a cold start. */
+        jl_val_t *cs=jl_new_object();
+        if(cs){
+            jl_obj_set(cs,"guild_versions",jl_new_object());
+            jl_obj_set(cs,"highest_last_message_id",jl_new_string("0"));
+            jl_obj_set(cs,"read_state_version",jl_new_int(0));
+            jl_obj_set(cs,"user_guild_settings_version",jl_new_int(-1));
+            jl_obj_set(cs,"user_settings_version",jl_new_int(-1));
+            jl_obj_set(cs,"api_code_version",jl_new_int(0));
+            jl_obj_set(dd,"client_state",cs);
+        }
+        jl_val_t *pr=jl_new_object();
+        if(!pr){ jl_free(root); jl_free(dd); return -1; }
+        jl_obj_set(pr,"status",jl_new_string(
+            g_cfg.status[0] ? g_cfg.status : "online"));
+        jl_obj_set(pr,"activities",jl_new_array());
+        jl_obj_set(pr,"afk",jl_new_bool(0));
+        jl_obj_set(pr,"since",jl_new_int(0));
+        jl_obj_set(dd,"presence",pr);
     }
-    jl_val_t *pr=jl_new_object();
-    if(!pr){ jl_free(root); jl_free(dd); return -1; }
-    jl_obj_set(pr,"status",jl_new_string(
-        g_cfg.status[0] ? g_cfg.status : "online"));
-    jl_obj_set(pr,"activities",jl_new_array());
-    jl_obj_set(pr,"afk",jl_new_bool(0));
-    jl_obj_set(pr,"since",jl_new_int(0));
-    jl_obj_set(dd,"presence",pr);
     jl_obj_set(root,"d",dd);
     char *s=jl_stringify(root); jl_free(root);
     if(!s) return -1;

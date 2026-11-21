@@ -3,11 +3,8 @@
  */
 /* daemon.c - orbisRPC core loop (payload ELF only).
  *
- * Auth model: a Discord USER SESSION token pasted into config.json ("token").
- * There is no OAuth flow anymore — OAuth2 access tokens are rejected by the
- * gateway (close 4004), which was why v1 never worked.
- *
- * A `stop` flag is polled so a signal handler can shut the loop down cleanly. */
+ * Auth model: legacy user token or broker-issued OAuth bearer token.
+ */
 #include "cfg.h"
 #include "clock.h"
 #include "lock.h"
@@ -27,6 +24,7 @@
 #include "sched.h"
 #include "diag.h"
 #include "token.h"
+#include "oauth.h"
 #include "goldhen.h"
 #include <sys/stat.h>
 #include <stdio.h>
@@ -179,6 +177,15 @@ static const char *browser_art_url(void){
  * reject a token silently: every failure path logs `why`. */
 static int usable_token(const cfg_t *c, char *why, size_t cap){
     if(!c){ if(why && cap) snprintf(why, cap, "config unavailable"); return 0; }
+    if(!strcmp(c->auth_mode, "oauth")){
+        if(oauth_valid_origin(c->broker_url)) return 1;
+        snprintf(why, cap, "oauth requires a valid HTTPS broker_url");
+        return 0;
+    }
+    if(strcmp(c->auth_mode, "token")){
+        snprintf(why, cap, "auth_mode must be token or oauth");
+        return 0;
+    }
     return token_reason(c->token, why, cap) == 0;
 }
 
@@ -521,6 +528,12 @@ int daemon_run(void){
             }
             last_token_why[0] = 0;
         }
+        if(!oauth_prepare()){
+            health_mark_healthy();
+            if(sleep_stop(5)) break;
+            continue;
+        }
+        if(strcmp(dc.token, oauth_token())) discord_forget_session(&dc);
         int rc;
         if(resume_fails >= 3 && discord_can_resume(&dc)){
             /* Three attempts that never reached RESUMED say this session is
@@ -535,20 +548,20 @@ int daemon_run(void){
              * sequence counter; resume instead of spending an IDENTIFY and
              * rebuilding state. A dead session falls back to a fresh one. */
             log_msg("resume: reconnecting to existing session");
-            rc = discord_resume(&dc, g_cfg.token);
+            rc = discord_resume(&dc, oauth_token());
             if(rc == 0){
                 resume_fails = 0;
             } else if(rc == -3){
                 resume_fails = 0;
                 log_msg("resume: session expired; fresh identify");
-                rc = discord_connect(&dc, g_cfg.token);
+                rc = discord_connect(&dc, oauth_token());
             } else if(rc == -2){
                 discord_forget_session(&dc);
             } else {
                 resume_fails++;
             }
         } else {
-            rc = discord_connect(&dc, g_cfg.token);
+            rc = discord_connect(&dc, oauth_token());
         }
         if(rc == -2){
             /* Rejected token: do NOT exit (that would strand the daemon
@@ -558,6 +571,7 @@ int daemon_run(void){
             char rejected[sizeof g_cfg.token];
             snprintf(rejected, sizeof rejected, "%s", g_cfg.token);
             log_msg("WARN: token rejected by gateway (close 4004)");
+            if(oauth_enabled()){ oauth_rejected(); discord_forget_session(&dc); continue; }
             if(park_until_token_change(rejected)) break;
             continue;
         }
@@ -1028,6 +1042,11 @@ int daemon_run(void){
 
             /* service the gateway every pass (~1s): heartbeats must never be
              * more than a second or two late or the server drops us */
+            if(oauth_due()){
+                ws_close(&dc.ws);
+                discord_forget_session(&dc);
+                break;
+            }
             int tr = discord_tick(&dc);
             if(tr == -2){
                 /* Token rejected mid-session: same parking policy as
@@ -1037,6 +1056,7 @@ int daemon_run(void){
                 log_msg("WARN: token rejected (close 4004)");
                 ws_close(&dc.ws);
                 pres_set(&pres, PS_NONE);
+                if(oauth_enabled()){ oauth_rejected(); discord_forget_session(&dc); break; }
                 if(park_until_token_change(rejected)) break;
                 break;
             }
